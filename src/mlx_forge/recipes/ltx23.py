@@ -208,6 +208,11 @@ def extract_config(checkpoint_path: str) -> dict:
         "timestep_scale_multiplier": 1000,
         "av_ca_timestep_scale_multiplier": 1000,
         "norm_eps": 1e-6,
+        # Connector defaults — CRITICAL: wrong defaults cause scrambled text embeddings.
+        # Embeddings1DConnector needs these exact values for correct RoPE frequencies.
+        # positional_embedding_max_pos=[1] or rope_type=INTERLEAVED → model ignores prompts.
+        "connector_positional_embedding_max_pos": [4096],
+        "connector_rope_type": "SPLIT",
     }
 
     if "config" in metadata:
@@ -533,6 +538,17 @@ def validate(args) -> None:
         result.check(config.get("num_attention_heads") == 32, "num_attention_heads == 32")
         result.check(config.get("attention_head_dim") == 128, "attention_head_dim == 128")
 
+        # Connector defaults — CRITICAL: wrong values cause scrambled text embeddings
+        result.check(
+            config.get("connector_positional_embedding_max_pos") == [4096],
+            f"connector_positional_embedding_max_pos == [4096] "
+            f"(got: {config.get('connector_positional_embedding_max_pos')})",
+        )
+        result.check(
+            config.get("connector_rope_type") == "SPLIT",
+            f"connector_rope_type == SPLIT (got: {config.get('connector_rope_type')})",
+        )
+
     # Transformer
     print("\n== Transformer Weights ==")
     tf_path = model_dir / "transformer.safetensors"
@@ -568,6 +584,15 @@ def validate(args) -> None:
         if sst_keys:
             shape = weights[sst_keys[0]].shape
             result.check(shape[0] == 9, f"scale_shift_table has 9 params (got shape {shape})")
+
+        # last_scale_shift_table is NOT in the original weights — initialized to zeros
+        # at model load time. Its absence is expected and correct.
+        lsst_keys = [k for k in keys if "last_scale_shift_table" in k]
+        result.check(
+            len(lsst_keys) == 0,
+            "last_scale_shift_table absent (expected — initialized to zeros at load time)",
+            warn_only=True,
+        )
 
         total_params = sum(v.size for v in weights.values())
         print(f"  Total transformer parameters: {total_params / 1e9:.2f}B")

@@ -151,6 +151,41 @@ PyTorch stores conv weights as `(O, I, ...)` while MLX expects channels-last `(O
 - Source checkpoints are loaded lazily via `mx.load()` (memory-mapped, ~0 GB initially)
 - Components are processed one at a time to stay within 32 GB RAM
 - Explicit `gc.collect()` + `mx.clear_cache()` between components
+- Each weight tensor is individually materialized before quantization to prevent OOM from accumulated lazy computation graphs
+
+## LTX-2.3 Known Gotchas
+
+Hard-won lessons from building and debugging the LTX-2.3 MLX pipeline:
+
+### Conversion Pitfalls
+
+| Pitfall | Symptom | Solution |
+|---------|---------|----------|
+| Lazy tensors saved without materialization | All-zero weights in output safetensors | Materialize tensors (via `_materialize()`) before every save call |
+| Conv weights not transposed | Garbled output, NaN activations | Transpose all conv weights to channels-last layout |
+| ConvTranspose1d != Conv1d layout | Vocoder produces noise | `(I,O,K) -> (O,K,I)` not `(O,I,K) -> (O,K,I)` — detect via "ups" in key |
+| `per_channel_statistics` shared | VAE decode fails with missing keys | Duplicate to both `vae_decoder.safetensors` and `vae_encoder.safetensors` |
+| `last_scale_shift_table` absent | Confusion during validation | Normal — initialized to zeros at load time, not in checkpoint |
+
+### Quantization Pitfalls
+
+| Pitfall | Symptom | Solution |
+|---------|---------|----------|
+| Quantizing adaln_single, proj_out, patchify_proj | Broken generation, visual artifacts | Only quantize `transformer_blocks` Linear weights |
+| Non-quantizable tensors not materialized first | Silently zeroed weights (data corruption) | Materialize ALL kept tensors before any `mx.quantize()` call |
+| Accumulated lazy graph during quantization loop | OOM during quantization | Materialize each weight individually before quantizing |
+| Seed 42 + int8 quantization | Grayscale-only output | Model/quantization artifact — use random seed or avoid seed 42 |
+
+### Runtime Pitfalls (for model loaders)
+
+| Pitfall | Symptom | Solution |
+|---------|---------|----------|
+| Connector `positional_embedding_max_pos` default `[1]` | Model ignores all prompts, produces B&W vintage footage | Must be `[4096]` for LTX-2.3 |
+| Connector `rope_type` default `INTERLEAVED` | Scrambled text embeddings | Must be `SPLIT` for LTX-2.3 |
+| LTX-2.0 LoRAs loaded on 2.3 | Broken output | Different latent spaces — LoRAs must be retrained for 2.3 |
+| Upsampler weights quantized | Quality loss / errors | Upsampler is Conv3d, not Linear — skip quantization |
+| VAE unpatchify H/W transposed | 4x4 block artifacts (looks like low resolution) | Transpose order `(0,1,4,5,3,6,2)` not `(0,1,4,5,2,6,3)` |
+| Audio latent reshape order | Garbled audio | `reshape(B,8,16,T).transpose(0,1,3,2)` NOT `reshape(B,8,T,16)` |
 
 ## License
 
