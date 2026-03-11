@@ -251,6 +251,12 @@ def _run_upload(args) -> None:
         print(f"ERROR: {model_dir} not found")
         sys.exit(1)
 
+    safetensor_files = list(model_dir.glob("*.safetensors"))
+    if not safetensor_files:
+        print(f"ERROR: No .safetensors files found in {model_dir}")
+        print("Run conversion and/or splitting before uploading.")
+        sys.exit(1)
+
     api = HfApi()
     split_info, config = load_model_metadata(model_dir)
 

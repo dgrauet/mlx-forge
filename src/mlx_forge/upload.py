@@ -7,9 +7,11 @@ uploads model files, and optionally adds to a collection.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from huggingface_hub import HfApi
+from huggingface_hub.errors import HfHubHTTPError
 
 from .quantize import format_bytes
 
@@ -190,29 +192,58 @@ def upload_model(
     Returns:
         The repo URL.
     """
+    # Create repo
     print(f"Creating repo: {repo_id}")
-    repo_url = api.create_repo(repo_id=repo_id, exist_ok=True, private=private)
+    try:
+        repo_url = api.create_repo(repo_id=repo_id, exist_ok=True, private=private)
+    except HfHubHTTPError as e:
+        status = getattr(e.response, "status_code", None)
+        if status == 403:
+            print(
+                "ERROR: Permission denied. Your HuggingFace token needs 'write' permission.\n"
+                "Generate a new token at https://huggingface.co/settings/tokens"
+            )
+        elif status == 401:
+            print("ERROR: Authentication failed. Run 'huggingface-cli login' or set HF_TOKEN.")
+        else:
+            print(f"ERROR: Failed to create repo '{repo_id}': {e}")
+        sys.exit(1)
+    except (OSError, ConnectionError) as e:
+        print(f"ERROR: Network error creating repo: {e}")
+        sys.exit(1)
 
+    # Upload files
     print(f"Uploading {model_dir} -> {repo_id}...")
-    api.upload_folder(
-        repo_id=repo_id,
-        folder_path=str(model_dir),
-        allow_patterns=["*.safetensors", "*.json", "README.md"],
-        commit_message=commit_message,
-    )
+    try:
+        api.upload_folder(
+            repo_id=repo_id,
+            folder_path=str(model_dir),
+            allow_patterns=["*.safetensors", "*.json", "README.md"],
+            commit_message=commit_message,
+        )
+    except HfHubHTTPError as e:
+        print(f"ERROR: Upload failed: {e}")
+        sys.exit(1)
+    except (OSError, ConnectionError) as e:
+        print(f"ERROR: Network error during upload: {e}")
+        sys.exit(1)
 
     url = str(repo_url)
     print(f"Uploaded: {url}")
 
+    # Collection operations (non-critical)
     if collection_title:
         print(f"Adding to collection: {collection_title}")
-        coll = api.create_collection(title=collection_title, exists_ok=True)
-        api.add_collection_item(
-            collection_slug=coll.slug,
-            item_id=repo_id,
-            item_type="model",
-            exists_ok=True,
-        )
-        print(f"Collection: https://huggingface.co/collections/{coll.slug}")
+        try:
+            coll = api.create_collection(title=collection_title, exists_ok=True)
+            api.add_collection_item(
+                collection_slug=coll.slug,
+                item_id=repo_id,
+                item_type="model",
+                exists_ok=True,
+            )
+            print(f"Collection: https://huggingface.co/collections/{coll.slug}")
+        except Exception as e:
+            print(f"WARNING: Could not add to collection '{collection_title}': {e}")
 
     return url

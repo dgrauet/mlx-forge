@@ -13,11 +13,17 @@ from __future__ import annotations
 
 import gc
 import json
+import sys
 import time
 from pathlib import Path
 
 import mlx.core as mx
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import (
+    HfHubHTTPError,
+    LocalEntryNotFoundError,
+    RepositoryNotFoundError,
+)
 
 from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
@@ -415,11 +421,48 @@ def convert(args) -> None:
         print("(This is ~46 GB, may take a while)")
         download_dir = Path("models")
         download_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_path = hf_hub_download(
-            repo_id="Lightricks/LTX-2.3",
-            filename=filename,
-            local_dir=download_dir,
-        )
+        try:
+            checkpoint_path = hf_hub_download(
+                repo_id="Lightricks/LTX-2.3",
+                filename=filename,
+                local_dir=download_dir,
+            )
+        except RepositoryNotFoundError:
+            print(
+                "ERROR: Repository 'Lightricks/LTX-2.3' not found or access denied.\n"
+                "If this is a gated repo, request access and run: huggingface-cli login"
+            )
+            sys.exit(1)
+        except LocalEntryNotFoundError:
+            print(
+                f"ERROR: File '{filename}' not found in local cache and network is unavailable.\n"
+                "Check your internet connection or download the file manually."
+            )
+            sys.exit(1)
+        except HfHubHTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status == 401:
+                print("ERROR: Authentication required. Run: huggingface-cli login")
+            elif status == 403:
+                print(
+                    "ERROR: Access denied to 'Lightricks/LTX-2.3'.\n"
+                    "Request access at https://huggingface.co/Lightricks/LTX-2.3 "
+                    "and ensure your token has read permissions."
+                )
+            elif status == 404:
+                print(
+                    f"ERROR: File '{filename}' not found in 'Lightricks/LTX-2.3'.\n"
+                    "Verify the variant name is correct."
+                )
+            else:
+                print(f"ERROR: HuggingFace Hub request failed: {e}")
+            sys.exit(1)
+        except (OSError, ConnectionError) as e:
+            print(
+                f"ERROR: Network error downloading model: {e}\n"
+                "Check your internet connection and try again."
+            )
+            sys.exit(1)
         print(f"Downloaded to: {checkpoint_path}")
 
     # Step 2: Extract config
@@ -579,7 +622,8 @@ def validate(args) -> None:
         cross_adaln = config.get("cross_attention_adaln")
         result.check(
             isinstance(cross_adaln, bool),
-            f"cross_attention_adaln is bool (got: {cross_adaln}) — True for dev, False for distilled",
+            f"cross_attention_adaln is bool (got: {cross_adaln})"
+            " — True for dev, False for distilled",
         )
         result.check(config.get("caption_channels") is None, "caption_channels is None (V2)")
         result.check(
@@ -645,7 +689,8 @@ def validate(args) -> None:
             valid_sizes = {5, 9}
             result.check(
                 shape[0] in valid_sizes,
-                f"scale_shift_table has valid param count (got {shape[0]}, expected one of {valid_sizes})",
+                f"scale_shift_table has valid param count"
+                f" (got {shape[0]}, expected one of {valid_sizes})",
             )
 
         # last_scale_shift_table is NOT in the original weights — initialized to zeros
