@@ -201,24 +201,41 @@ def _run_upload(args) -> None:
     """Upload a converted model directory to HuggingFace Hub."""
     from pathlib import Path
 
-    from .upload import derive_repo_id, generate_model_card, upload_model
+    from huggingface_hub import HfApi
+
+    from .upload import (
+        derive_repo_id,
+        generate_model_card,
+        load_model_metadata,
+        upload_model,
+    )
 
     model_dir = Path(args.model_dir)
     if not model_dir.exists():
         print(f"ERROR: {model_dir} not found")
         sys.exit(1)
 
+    api = HfApi()
+    split_info, config = load_model_metadata(model_dir)
+
     # Derive or use explicit repo ID
     if args.repo_id:
         repo_id = args.repo_id
     else:
-        repo_id = derive_repo_id(model_dir, namespace=args.namespace)
+        if not split_info:
+            print("ERROR: No split_model.json found — use --repo-id")
+            sys.exit(1)
+        repo_id = derive_repo_id(
+            split_info, model_dir, api=api, namespace=args.namespace,
+        )
 
     print(f"Repo ID: {repo_id}")
 
     # Generate and write model card
     card_content = generate_model_card(
         model_dir,
+        split_info=split_info,
+        config=config,
         repo_id=repo_id,
         base_model=args.base_model,
         license_id=args.license,
@@ -231,6 +248,7 @@ def _run_upload(args) -> None:
     # Upload
     url = upload_model(
         model_dir,
+        api=api,
         repo_id=repo_id,
         commit_message=args.commit_message,
         private=args.private,

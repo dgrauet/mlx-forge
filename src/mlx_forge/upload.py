@@ -11,29 +11,49 @@ from pathlib import Path
 
 from huggingface_hub import HfApi
 
+from .quantize import format_bytes
 
-def derive_repo_id(model_dir: Path, *, namespace: str | None = None) -> str:
-    """Derive a HuggingFace repo ID from model metadata.
 
-    Reads split_model.json to extract source and variant info.
-    Pattern: {namespace}/{model}-mlx-{variant}[-q{bits}]
+def load_model_metadata(model_dir: Path) -> tuple[dict, dict]:
+    """Load split_model.json and config.json from a model directory.
 
     Args:
         model_dir: Path to converted model directory.
+
+    Returns:
+        Tuple of (split_info, config) dicts. Missing files yield empty dicts.
+    """
+    split_info: dict = {}
+    split_path = model_dir / "split_model.json"
+    if split_path.exists():
+        with open(split_path) as f:
+            split_info = json.load(f)
+
+    config: dict = {}
+    config_path = model_dir / "config.json"
+    if config_path.exists():
+        with open(config_path) as f:
+            config = json.load(f)
+
+    return split_info, config
+
+
+def derive_repo_id(
+    split_info: dict, model_dir: Path, *, api: HfApi, namespace: str | None = None
+) -> str:
+    """Derive a HuggingFace repo ID from model metadata.
+
+    Pattern: {namespace}/{model}-mlx-{variant}[-q{bits}]
+
+    Args:
+        split_info: Parsed split_model.json contents.
+        model_dir: Path to converted model directory (fallback for model name).
+        api: HfApi instance (used for whoami if namespace is None).
         namespace: HF namespace/org (default: authenticated user).
 
     Returns:
         Repo ID string like "user/ltx-2.3-mlx-distilled-q8".
     """
-    split_info_path = model_dir / "split_model.json"
-    if not split_info_path.exists():
-        raise FileNotFoundError(
-            f"No split_model.json in {model_dir} — use --repo-id to specify manually"
-        )
-
-    with open(split_info_path) as f:
-        split_info = json.load(f)
-
     # Extract model name from source (e.g. "Lightricks/LTX-2.3" -> "ltx-2.3")
     source = split_info.get("source", "")
     if "/" in source:
@@ -46,8 +66,14 @@ def derive_repo_id(model_dir: Path, *, namespace: str | None = None) -> str:
     bits = split_info.get("quantization_bits")
 
     if namespace is None:
-        api = HfApi()
-        user_info = api.whoami()
+        try:
+            user_info = api.whoami()
+        except Exception as e:
+            raise SystemExit(
+                "Could not resolve HF namespace. "
+                "Run `huggingface-cli login` or set HF_TOKEN, "
+                "or pass --namespace explicitly."
+            ) from e
         namespace = user_info["name"]
 
     parts = [model_name, "mlx"]
@@ -63,6 +89,8 @@ def derive_repo_id(model_dir: Path, *, namespace: str | None = None) -> str:
 def generate_model_card(
     model_dir: Path,
     *,
+    split_info: dict,
+    config: dict,
     repo_id: str,
     base_model: str | None = None,
     license_id: str = "other",
@@ -71,25 +99,15 @@ def generate_model_card(
 
     Args:
         model_dir: Path to converted model directory.
+        split_info: Parsed split_model.json contents.
+        config: Parsed config.json contents.
         repo_id: Target HF repo ID (used in card title).
-        base_model: Base model HF ID (default: read from split_model.json).
+        base_model: Base model HF ID (default: read from split_info).
         license_id: SPDX license identifier.
 
     Returns:
         Model card content as a string.
     """
-    split_info: dict = {}
-    split_path = model_dir / "split_model.json"
-    if split_path.exists():
-        with open(split_path) as f:
-            split_info = json.load(f)
-
-    config: dict = {}
-    config_path = model_dir / "config.json"
-    if config_path.exists():
-        with open(config_path) as f:
-            config = json.load(f)
-
     source = split_info.get("source", "")
     variant = split_info.get("variant", "")
     quantized = split_info.get("quantized", False)
@@ -148,8 +166,7 @@ def generate_model_card(
         lines.append("## Files")
         lines.append("")
         for p in model_files:
-            size_mb = p.stat().st_size / (1024 * 1024)
-            lines.append(f"- `{p.name}` ({size_mb:.1f} MB)")
+            lines.append(f"- `{p.name}` ({format_bytes(p.stat().st_size)})")
         lines.append("")
 
     return "\n".join(lines)
@@ -158,6 +175,7 @@ def generate_model_card(
 def upload_model(
     model_dir: Path,
     *,
+    api: HfApi,
     repo_id: str,
     commit_message: str = "Upload MLX model via mlx-forge",
     private: bool = False,
@@ -167,6 +185,7 @@ def upload_model(
 
     Args:
         model_dir: Path to converted model directory.
+        api: HfApi instance.
         repo_id: HF repo ID (e.g. "user/ltx-2.3-mlx-distilled-q8").
         commit_message: Commit message for the upload.
         private: Whether to create a private repo.
@@ -175,8 +194,6 @@ def upload_model(
     Returns:
         The repo URL.
     """
-    api = HfApi()
-
     print(f"Creating repo: {repo_id}")
     repo_url = api.create_repo(repo_id=repo_id, exist_ok=True, private=private)
 
