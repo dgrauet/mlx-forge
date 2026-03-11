@@ -413,7 +413,13 @@ def convert(args) -> None:
         filename = f"ltx-2.3-22b-{args.variant}.safetensors"
         print(f"Downloading {filename} from Lightricks/LTX-2.3...")
         print("(This is ~46 GB, may take a while)")
-        checkpoint_path = hf_hub_download(repo_id="Lightricks/LTX-2.3", filename=filename)
+        download_dir = Path("models")
+        download_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = hf_hub_download(
+            repo_id="Lightricks/LTX-2.3",
+            filename=filename,
+            local_dir=download_dir,
+        )
         print(f"Downloaded to: {checkpoint_path}")
 
     # Step 2: Extract config
