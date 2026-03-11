@@ -18,40 +18,59 @@ mlx-forge split <recipe> <model_dir>
 
 The `model_dir` must contain a `model.safetensors` file.
 
-### Example
-
-```bash
-mlx-forge split ltx-2.3 /path/to/unified-model-dir
-```
-
 ## How It Works
 
-The generic `split_model()` function performs these steps:
+```
+  ┌─────────────────────────────────┐
+  │   model.safetensors (unified)   │
+  │   All components in one file    │
+  └───────────────┬─────────────────┘
+                  │
+                  ▼
+  ┌─────────────────────────────────┐
+  │  1. Lazy load via mx.load()     │  Memory-mapped, ~0 GB RAM
+  └───────────────┬─────────────────┘
+                  │
+                  ▼
+  ┌─────────────────────────────────┐
+  │  2. Group keys by prefix        │  First dot-separated segment
+  │                                 │  determines the component
+  │  "transformer.blocks.0.weight"  │  → transformer
+  │  "vae_decoder.conv.weight"      │  → vae_decoder
+  │  "vocoder.ups.0.weight"         │  → vocoder
+  └───────────────┬─────────────────┘
+                  │
+                  ▼
+  ┌─────────────────────────────────┐
+  │  3. Match against component map │  Recipe defines prefix → filename
+  └───────────────┬─────────────────┘
+                  │
+          ┌───────┼───────┐
+          ▼       ▼       ▼
+     ┌────────┐ ┌────┐ ┌────────┐
+     │comp_a  │ │ b  │ │comp_c  │   Each saved to its own
+     │.safe   │ │.sf │ │.safe   │   .safetensors file
+     └────────┘ └────┘ └────────┘
+                  │
+                  ▼
+  ┌─────────────────────────────────┐
+  │  4. Write split_model.json      │  Marker file with metadata
+  └─────────────────────────────────┘
+```
 
-1. **Load** the unified file via `mx.load()` (lazy, memory-mapped).
-2. **Group keys by prefix** — the first dot-separated segment of each key determines which component it belongs to.
-3. **Match prefixes** against the recipe's component map.
-4. **Route unmatched keys** to a fallback file (default: `transformer.safetensors`) or skip them.
-5. **Save** each group to its own `.safetensors` file.
-6. **Write** a `split_model.json` marker file.
+### Key Grouping
+
+The first dot-separated segment of each key determines its component.
+Multiple prefixes can map to the same output file (e.g., both `connector.*` and `text_embedding_projection.*` keys can go to `connector.safetensors`).
+
+### Fallback Routing
+
+Keys whose prefix doesn't match any entry in the component map are routed to a fallback file (default: `transformer.safetensors`) or skipped, depending on the recipe configuration.
 
 ## Component Map
 
 Each recipe defines a mapping from key prefix to output filename.
-
-### LTX-2.3
-
-| Key prefix | Output file |
-|-----------|-------------|
-| `transformer` | `transformer.safetensors` |
-| `connector` | `connector.safetensors` |
-| `text_embedding_projection` | `connector.safetensors` |
-| `vae_decoder` | `vae_decoder.safetensors` |
-| `vae_encoder` | `vae_encoder.safetensors` |
-| `vocoder` | `vocoder.safetensors` |
-| `audio_vae` | `audio_vae.safetensors` |
-
-Note that `text_embedding_projection` and `connector` keys both map to `connector.safetensors`.
+See model-specific guides for the exact mappings.
 
 ## The split_model.json Marker
 
@@ -61,12 +80,9 @@ Written after every successful split:
 {
   "split": true,
   "files": {
-    "transformer.safetensors": 1250,
-    "connector.safetensors": 45,
-    "vae_decoder.safetensors": 120,
-    "vae_encoder.safetensors": 118,
-    "audio_vae.safetensors": 30,
-    "vocoder.safetensors": 25
+    "component_a.safetensors": 1250,
+    "component_b.safetensors": 45,
+    "component_c.safetensors": 120
   }
 }
 ```
@@ -76,12 +92,11 @@ When produced by `convert` (rather than `split`), the marker includes additional
 ```json
 {
   "format": "split",
-  "model_version": "2.3.2",
-  "components": ["transformer", "connector", "vae_decoder", "vae_encoder", "audio_vae", "vocoder"],
-  "source": "Lightricks/LTX-2.3",
-  "variant": "distilled",
-  "quantized": true,
-  "quantization_bits": 8
+  "model_version": "...",
+  "components": ["component_a", "component_b", "component_c"],
+  "source": "org/model-name",
+  "variant": "default",
+  "quantized": false
 }
 ```
 
@@ -111,3 +126,7 @@ The tool prints a reminder after completion:
 Split complete. Original model.safetensors can be removed to save disk space.
 To remove: rm '/path/to/model.safetensors'
 ```
+
+## Model-Specific Guides
+
+- [LTX-2.3](models/ltx-2.3.md#split-component-map) — component map and output files
