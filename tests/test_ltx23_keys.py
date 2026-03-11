@@ -13,13 +13,16 @@ from mlx_forge.recipes.ltx23 import (
 
 class TestClassifyKey:
     def test_transformer(self):
-        assert classify_key("model.diffusion_model.transformer_blocks.0.attn1.to_q.weight") == "transformer"
+        key = "model.diffusion_model.transformer_blocks.0.attn1.to_q.weight"
+        assert classify_key(key) == "transformer"
 
     def test_connector_video(self):
-        assert classify_key("model.diffusion_model.video_embeddings_connector.weight") == "connector"
+        key = "model.diffusion_model.video_embeddings_connector.weight"
+        assert classify_key(key) == "connector"
 
     def test_connector_audio(self):
-        assert classify_key("model.diffusion_model.audio_embeddings_connector.weight") == "connector"
+        key = "model.diffusion_model.audio_embeddings_connector.weight"
+        assert classify_key(key) == "connector"
 
     def test_text_projection(self):
         assert classify_key("text_embedding_projection.aggregate_embed.weight") == "connector"
@@ -71,10 +74,12 @@ class TestSanitizeVaeDecoderKey:
         assert sanitize_vae_decoder_key("vae.decoder.conv_in.weight") == "conv_in.weight"
 
     def test_stats_mean(self):
-        assert sanitize_vae_decoder_key("vae.per_channel_statistics.mean-of-means") == "per_channel_statistics.mean"
+        result = sanitize_vae_decoder_key("vae.per_channel_statistics.mean-of-means")
+        assert result == "per_channel_statistics.mean"
 
     def test_stats_std(self):
-        assert sanitize_vae_decoder_key("vae.per_channel_statistics.std-of-means") == "per_channel_statistics.std"
+        result = sanitize_vae_decoder_key("vae.per_channel_statistics.std-of-means")
+        assert result == "per_channel_statistics.std"
 
     def test_unknown(self):
         assert sanitize_vae_decoder_key("other.key") is None

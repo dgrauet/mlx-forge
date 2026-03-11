@@ -1,7 +1,6 @@
 """Tests for conv weight transposition."""
 
 import mlx.core as mx
-import pytest
 
 from mlx_forge.transpose import needs_transpose, transpose_conv
 

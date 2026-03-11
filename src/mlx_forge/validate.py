@@ -6,7 +6,6 @@ Model-specific validation logic lives in recipes.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -131,14 +130,15 @@ def validate_conv_layout(
 
 
 def validate_quantization(
-    weights: dict[str, mx.array], result: ValidationResult, *, block_key: str = "transformer_blocks"
+    weights: dict[str, mx.array], result: ValidationResult, *, block_key: str
 ) -> None:
     """Check quantized weights have matching .scales/.biases pairs.
 
     Args:
         weights: Dict of weight keys -> tensors.
         result: ValidationResult to record into.
-        block_key: Key substring that should contain all quantized weights.
+        block_key: Key substring that identifies the quantized layer group
+            (e.g. "transformer_blocks" for LTX-2.3).
     """
     scale_keys = [k for k in weights if k.endswith(".scales")]
     bias_keys = [k for k in weights if k.endswith(".biases")]

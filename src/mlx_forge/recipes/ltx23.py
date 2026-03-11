@@ -231,18 +231,18 @@ def extract_config(checkpoint_path: str) -> dict:
 
 
 def process_component(
-    all_weights: dict,
-    component: str,
+    checkpoint_weights: dict,
+    component_name: str,
     keys: list[str],
     output_dir: Path,
-    prefix: str,
+    component_prefix: str,
 ) -> int:
     """Process one component: extract keys, sanitize, transpose, save.
 
     Returns number of weights saved.
     """
-    sanitizer = SANITIZERS[component]
-    comp_weights = {}
+    sanitizer = SANITIZERS[component_name]
+    component_weights = {}
 
     print(f"  Processing {len(keys)} tensors...")
     for key in keys:
@@ -250,71 +250,71 @@ def process_component(
         if new_key is None:
             continue
 
-        tensor = all_weights[key]
-        tensor = maybe_transpose(new_key, tensor, component)
+        weight = checkpoint_weights[key]
+        weight = maybe_transpose(new_key, weight, component_name)
 
         # Force-materialize — mx.save_safetensors may not handle lazy cross-file refs
-        _materialize(tensor)
-        comp_weights[f"{prefix}.{new_key}"] = tensor
+        _materialize(weight)
+        component_weights[f"{component_prefix}.{new_key}"] = weight
 
-    if not comp_weights:
-        print(f"  No weights for {component}, skipping")
+    if not component_weights:
+        print(f"  No weights for {component_name}, skipping")
         return 0
 
-    count = len(comp_weights)
-    output_file = output_dir / f"{component}.safetensors"
+    count = len(component_weights)
+    output_file = output_dir / f"{component_name}.safetensors"
     print(f"  Saving {count} weights to {output_file.name}...")
-    mx.save_safetensors(str(output_file), comp_weights)
+    mx.save_safetensors(str(output_file), component_weights)
 
-    del comp_weights
+    del component_weights
     gc.collect()
     mx.clear_cache()
     return count
 
 
 def process_shared_stats(
-    all_weights: dict,
+    checkpoint_weights: dict,
     keys: list[str],
     output_dir: Path,
 ) -> None:
     """Load shared VAE per_channel_statistics and append to decoder/encoder files."""
     for key in keys:
-        tensor = all_weights[key]
-        _materialize(tensor)
+        stat_tensor = checkpoint_weights[key]
+        _materialize(stat_tensor)
 
         # Append to decoder
-        dec_file = output_dir / "vae_decoder.safetensors"
-        if dec_file.exists():
-            dec_weights = mx.load(str(dec_file))
-            for k in dec_weights:
-                _materialize(dec_weights[k])
+        decoder_path = output_dir / "vae_decoder.safetensors"
+        if decoder_path.exists():
+            decoder_weights = mx.load(str(decoder_path))
+            for k in decoder_weights:
+                _materialize(decoder_weights[k])
         else:
-            dec_weights = {}
+            decoder_weights = {}
 
         if "mean-of-means" in key:
-            dec_weights["vae_decoder.per_channel_statistics.mean"] = tensor
+            decoder_weights["vae_decoder.per_channel_statistics.mean"] = stat_tensor
         elif "std-of-means" in key:
-            dec_weights["vae_decoder.per_channel_statistics.std"] = tensor
-        mx.save_safetensors(str(dec_file), dec_weights)
-        del dec_weights
+            decoder_weights["vae_decoder.per_channel_statistics.std"] = stat_tensor
+        mx.save_safetensors(str(decoder_path), decoder_weights)
+        del decoder_weights
 
         # Append to encoder
-        enc_file = output_dir / "vae_encoder.safetensors"
-        if enc_file.exists():
-            enc_weights = mx.load(str(enc_file))
-            for k in enc_weights:
-                _materialize(enc_weights[k])
+        encoder_path = output_dir / "vae_encoder.safetensors"
+        if encoder_path.exists():
+            encoder_weights = mx.load(str(encoder_path))
+            for k in encoder_weights:
+                _materialize(encoder_weights[k])
         else:
-            enc_weights = {}
+            encoder_weights = {}
 
         if "mean-of-means" in key:
-            enc_weights["vae_encoder.per_channel_statistics._mean_of_means"] = tensor
+            encoder_weights["vae_encoder.per_channel_statistics._mean_of_means"] = stat_tensor
         elif "std-of-means" in key:
-            enc_weights["vae_encoder.per_channel_statistics._std_of_means"] = tensor
-        mx.save_safetensors(str(enc_file), enc_weights)
-        del enc_weights
+            encoder_weights["vae_encoder.per_channel_statistics._std_of_means"] = stat_tensor
+        mx.save_safetensors(str(encoder_path), encoder_weights)
+        del encoder_weights
 
-        del tensor
+        del stat_tensor
         gc.collect()
         mx.clear_cache()
 
@@ -376,7 +376,10 @@ def quantize_transformer(output_dir: Path, *, bits: int = 8, group_size: int = 6
 
 def convert(args) -> None:
     """Convert LTX-2.3 PyTorch checkpoint to MLX split format."""
-    output_dir = Path(args.output)
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        output_dir = Path.home() / ".cache/huggingface/hub" / f"ltx23-mlx-{args.variant}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Get checkpoint
@@ -407,44 +410,46 @@ def convert(args) -> None:
     # Step 3: Load weights lazily
     print("\nLoading weights lazily via mx.load...")
     t0 = time.monotonic()
-    all_weights = mx.load(checkpoint_path)
-    print(f"  {len(all_weights)} keys loaded (lazy)")
+    checkpoint_weights = mx.load(checkpoint_path)
+    print(f"  {len(checkpoint_weights)} keys loaded (lazy)")
 
     # Classify keys
     print("\nClassifying weight keys...")
-    component_keys: dict[str, list[str]] = {}
-    for key in all_weights:
+    keys_by_component: dict[str, list[str]] = {}
+    for key in checkpoint_weights:
         comp = classify_key(key)
         if comp:
-            component_keys.setdefault(comp, []).append(key)
+            keys_by_component.setdefault(comp, []).append(key)
 
-    for comp, keys in sorted(component_keys.items()):
+    for comp, keys in sorted(keys_by_component.items()):
         print(f"  {comp}: {len(keys)} keys")
     print(f"  Loaded + classified in {time.monotonic() - t0:.1f}s")
 
     # Step 4: Process each component
     total_weights = 0
-    for component in COMPONENTS:
-        keys = component_keys.get(component, [])
+    for component_name in COMPONENTS:
+        keys = keys_by_component.get(component_name, [])
         if not keys:
-            print(f"\n[{component}] No keys found, skipping")
+            print(f"\n[{component_name}] No keys found, skipping")
             continue
 
-        prefix = COMPONENT_PREFIX[component]
-        print(f"\n[{component}] Processing {len(keys)} keys...")
+        component_prefix = COMPONENT_PREFIX[component_name]
+        print(f"\n[{component_name}] Processing {len(keys)} keys...")
         t0 = time.monotonic()
-        count = process_component(all_weights, component, keys, output_dir, prefix)
+        count = process_component(
+            checkpoint_weights, component_name, keys, output_dir, component_prefix,
+        )
         elapsed = time.monotonic() - t0
         total_weights += count
         print(f"  Done: {count} weights saved in {elapsed:.1f}s")
 
     # Handle shared stats
-    shared_keys = component_keys.get("vae_shared_stats", [])
+    shared_keys = keys_by_component.get("vae_shared_stats", [])
     if shared_keys:
         print(f"\n[shared stats] Processing {len(shared_keys)} per_channel_statistics keys...")
-        process_shared_stats(all_weights, shared_keys, output_dir)
+        process_shared_stats(checkpoint_weights, shared_keys, output_dir)
 
-    del all_weights
+    del checkpoint_weights
     gc.collect()
     mx.clear_cache()
 
@@ -476,7 +481,7 @@ def convert(args) -> None:
         with open(output_dir / "split_model.json", "w") as f:
             json.dump(split_info, f, indent=2)
 
-        print(f"\nFinal files after quantization:")
+        print("\nFinal files after quantization:")
         for p in sorted(output_dir.iterdir()):
             if p.is_file():
                 size_mb = p.stat().st_size / (1024 * 1024)
@@ -564,7 +569,10 @@ def validate(args) -> None:
         result.check(len(gate_keys) > 0, f"Gated attention keys present ({len(gate_keys)})")
 
         prompt_adaln = [k for k in keys if "prompt_adaln_single" in k]
-        result.check(len(prompt_adaln) > 0, f"prompt_adaln_single keys present ({len(prompt_adaln)})")
+        result.check(
+            len(prompt_adaln) > 0,
+            f"prompt_adaln_single keys present ({len(prompt_adaln)})",
+        )
 
         block_indices = set()
         for k in keys:
@@ -577,7 +585,7 @@ def validate(args) -> None:
         result.check(len(block_indices) == 48, f"48 transformer blocks (got {len(block_indices)})")
 
         if is_quantized:
-            validate_quantization(weights, result)
+            validate_quantization(weights, result, block_key="transformer_blocks")
 
         sst_keys = [k for k in keys if "scale_shift_table" in k
                     and "prompt" not in k and "audio_prompt" not in k]
@@ -605,9 +613,9 @@ def validate(args) -> None:
         weights = mx.load(str(conn_path))
         keys = set(weights.keys())
         result.check(any("video_embeddings_connector" in k for k in keys),
-                     f"Video connector keys present")
+                     "Video connector keys present")
         result.check(any("audio_embeddings_connector" in k for k in keys),
-                     f"Audio connector keys present")
+                     "Audio connector keys present")
         result.check(any("text_embedding_projection" in k for k in keys),
                      "Text projection keys present", warn_only=True)
         del weights
@@ -620,7 +628,10 @@ def validate(args) -> None:
             weights = mx.load(str(vae_path))
             validate_no_pytorch_prefix(weights, "vae.", result)
             stats_keys = [k for k in weights if "per_channel_statistics" in k]
-            result.check(len(stats_keys) >= 2, f"Per-channel statistics present ({len(stats_keys)})")
+            result.check(
+                len(stats_keys) >= 2,
+                f"Per-channel statistics present ({len(stats_keys)})",
+            )
             validate_conv_layout(weights, result, ndim=5)
             del weights
 
@@ -698,8 +709,8 @@ def _cross_reference(model_dir: Path, source_path: str, result: ValidationResult
             src_tensor = src_tensor.astype(mlx_tensor.dtype)
 
         max_diff = mx.max(mx.abs(src_tensor - mlx_tensor)).item()
-        result.check(max_diff < 1e-5,
-                     f"{src_key.split('.')[-2]}.{src_key.split('.')[-1]} — max diff: {max_diff:.2e}")
+        key_name = f"{src_key.split('.')[-2]}.{src_key.split('.')[-1]}"
+        result.check(max_diff < 1e-5, f"{key_name} — max diff: {max_diff:.2e}")
 
     del tf_weights, source_weights
 
@@ -733,16 +744,15 @@ def split(args) -> None:
 
 def add_convert_args(parser) -> None:
     """Add LTX-2.3 convert arguments to a parser."""
-    parser.add_argument(
-        "--output", type=str,
-        default=str(Path.home() / ".cache/huggingface/hub/ltx23-mlx"),
-        help="Output directory for converted model",
-    )
     parser.add_argument("--checkpoint", type=str, default=None,
-                        help="Path to local checkpoint file (skips download)")
+                        help="Path to local .safetensors checkpoint (skips download)")
     parser.add_argument("--variant", type=str, default="distilled",
                         choices=["distilled", "dev"],
                         help="Model variant (default: distilled)")
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output directory (default: ~/.cache/huggingface/hub/ltx23-mlx-<variant>)",
+    )
     parser.add_argument("--quantize", action="store_true",
                         help="Quantize transformer after conversion")
     parser.add_argument("--bits", type=int, default=8, choices=[4, 8],

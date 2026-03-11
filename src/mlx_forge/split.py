@@ -20,16 +20,16 @@ def split_model(
     component_map: dict[str, str],
     *,
     source_filename: str = "model.safetensors",
-    fallback_component: str | None = "transformer.safetensors",
+    fallback_filename: str | None = "transformer.safetensors",
 ) -> dict[str, int]:
     """Split a unified safetensors file into per-component files.
 
     Args:
         model_dir: Directory containing the model file.
         component_map: Maps weight key prefix -> output filename.
-            Example: {"transformer": "transformer.safetensors", "vae_decoder": "vae_decoder.safetensors"}
+            Example: {"transformer": "transformer.safetensors"}
         source_filename: Name of the unified file to split.
-        fallback_component: Output file for unmatched keys (None to skip).
+        fallback_filename: Output filename for unmatched keys (None to skip).
 
     Returns:
         Dict of output filename -> number of tensors saved.
@@ -55,11 +55,11 @@ def split_model(
             unmatched[key] = value
 
     if unmatched:
-        if fallback_component:
-            print(f"WARNING: {len(unmatched)} unmatched keys -> {fallback_component}")
+        if fallback_filename:
+            print(f"WARNING: {len(unmatched)} unmatched keys -> {fallback_filename}")
             for k in sorted(unmatched)[:5]:
                 print(f"  {k}")
-            file_weights[fallback_component].update(unmatched)
+            file_weights[fallback_filename].update(unmatched)
         else:
             print(f"WARNING: {len(unmatched)} unmatched keys skipped")
 

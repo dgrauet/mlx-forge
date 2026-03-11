@@ -51,11 +51,17 @@ def main() -> None:
     # --- quantize (generic) ---
     quantize_parser = subparsers.add_parser("quantize", help="Quantize a safetensors file")
     quantize_parser.add_argument("input", type=str, help="Input .safetensors file")
-    quantize_parser.add_argument("--output", type=str, default=None, help="Output file (default: overwrite)")
-    quantize_parser.add_argument("--bits", type=int, default=8, choices=[4, 8], help="Bits (default: 8)")
-    quantize_parser.add_argument("--group-size", type=int, default=64, help="Group size (default: 64)")
-    quantize_parser.add_argument("--prefix", type=str, default=None,
-                                 help="Only quantize keys starting with this prefix")
+    quantize_parser.add_argument(
+        "--output", type=str, default=None, help="Output file (default: overwrite)",
+    )
+    quantize_parser.add_argument(
+        "--bits", type=int, default=8, choices=[4, 8], help="Bits (default: 8)",
+    )
+    quantize_parser.add_argument(
+        "--group-size", type=int, default=64, help="Group size (default: 64)",
+    )
+    quantize_parser.add_argument("--key-prefix", type=str, default=None,
+                                 help="Only quantize weight keys starting with this prefix")
 
     # Two-pass parsing: first get the command and recipe, then add recipe-specific args
     args, remaining = parser.parse_known_args()
@@ -94,7 +100,8 @@ def main() -> None:
 def _run_generic_quantize(args) -> None:
     """Run generic quantization on a safetensors file."""
     from pathlib import Path
-    from .quantize import quantize_file, default_should_quantize
+
+    from .quantize import default_should_quantize, quantize_file
 
     input_path = Path(args.input)
     if not input_path.exists():
@@ -103,11 +110,11 @@ def _run_generic_quantize(args) -> None:
 
     output_path = Path(args.output) if args.output else None
 
-    if args.prefix:
-        prefix = args.prefix
+    if args.key_prefix:
+        key_prefix = args.key_prefix
 
         def should_quantize(key: str, weight):
-            return key.startswith(prefix) and default_should_quantize(key, weight)
+            return key.startswith(key_prefix) and default_should_quantize(key, weight)
     else:
         should_quantize = default_should_quantize
 
