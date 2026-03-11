@@ -75,10 +75,14 @@ def split_model(
     # Write marker file
     marker = model_dir / "split_model.json"
     with open(marker, "w") as f:
-        json.dump({
-            "split": True,
-            "files": {name: count for name, count in result.items()},
-        }, f, indent=2)
+        json.dump(
+            {
+                "split": True,
+                "files": {name: count for name, count in result.items()},
+            },
+            f,
+            indent=2,
+        )
 
     print(f"\nSplit complete. Original {source_filename} can be removed to save disk space.")
     print(f"To remove: rm '{unified_path}'")

@@ -30,100 +30,134 @@ def _get_recipe(name: str):
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mlx-forge",
-        description=(
-            "Convert, quantize, split, validate, and upload"
-            " ML models for Apple MLX"
-        ),
+        description=("Convert, quantize, split, validate, and upload ML models for Apple MLX"),
     )
     parser.add_argument(
-        "--version", action="version", version=f"mlx-forge {__version__}",
+        "--version",
+        action="version",
+        version=f"mlx-forge {__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # --- convert ---
     convert_parser = subparsers.add_parser(
-        "convert", help="Convert a model to MLX format",
+        "convert",
+        help="Convert a model to MLX format",
     )
     convert_parser.add_argument(
-        "recipe", choices=list(AVAILABLE_RECIPES), help="Model recipe",
+        "recipe",
+        choices=list(AVAILABLE_RECIPES),
+        help="Model recipe",
     )
 
     # --- validate ---
     validate_parser = subparsers.add_parser(
-        "validate", help="Validate a converted model",
+        "validate",
+        help="Validate a converted model",
     )
     validate_parser.add_argument(
-        "recipe", choices=list(AVAILABLE_RECIPES), help="Model recipe",
+        "recipe",
+        choices=list(AVAILABLE_RECIPES),
+        help="Model recipe",
     )
 
     # --- split ---
     split_parser = subparsers.add_parser(
-        "split", help="Split a unified model into components",
+        "split",
+        help="Split a unified model into components",
     )
     split_parser.add_argument(
-        "recipe", choices=list(AVAILABLE_RECIPES), help="Model recipe",
+        "recipe",
+        choices=list(AVAILABLE_RECIPES),
+        help="Model recipe",
     )
 
     # --- quantize (generic) ---
     quantize_parser = subparsers.add_parser(
-        "quantize", help="Quantize a safetensors file",
+        "quantize",
+        help="Quantize a safetensors file",
     )
     quantize_parser.add_argument(
-        "input", type=str, help="Input .safetensors file",
+        "input",
+        type=str,
+        help="Input .safetensors file",
     )
     quantize_parser.add_argument(
-        "--output", type=str, default=None,
+        "--output",
+        type=str,
+        default=None,
         help="Output file (default: overwrite)",
     )
     quantize_parser.add_argument(
-        "--bits", type=int, default=8, choices=[4, 8],
+        "--bits",
+        type=int,
+        default=8,
+        choices=[4, 8],
         help="Bits (default: 8)",
     )
     quantize_parser.add_argument(
-        "--group-size", type=int, default=64,
+        "--group-size",
+        type=int,
+        default=64,
         help="Group size (default: 64)",
     )
     quantize_parser.add_argument(
-        "--key-prefix", type=str, default=None,
+        "--key-prefix",
+        type=str,
+        default=None,
         help="Only quantize weight keys starting with this prefix",
     )
 
     # --- upload (generic) ---
     upload_parser = subparsers.add_parser(
-        "upload", help="Upload a converted model to HuggingFace Hub",
+        "upload",
+        help="Upload a converted model to HuggingFace Hub",
     )
     upload_parser.add_argument(
-        "model_dir", type=str,
+        "model_dir",
+        type=str,
         help="Path to converted model directory",
     )
     upload_parser.add_argument(
-        "--repo-id", type=str, default=None,
+        "--repo-id",
+        type=str,
+        default=None,
         help="HF repo ID (default: auto-derived from metadata)",
     )
     upload_parser.add_argument(
-        "--namespace", type=str, default=None,
+        "--namespace",
+        type=str,
+        default=None,
         help="HF namespace/org (default: authenticated user)",
     )
     upload_parser.add_argument(
-        "--collection", type=str, default=None,
+        "--collection",
+        type=str,
+        default=None,
         help="Collection title to add the model to",
     )
     upload_parser.add_argument(
-        "--commit-message", type=str,
+        "--commit-message",
+        type=str,
         default="Upload MLX model via mlx-forge",
         help="Commit message for the upload",
     )
     upload_parser.add_argument(
-        "--license", type=str, default="other",
+        "--license",
+        type=str,
+        default="other",
         help="License for model card (default: other)",
     )
     upload_parser.add_argument(
-        "--base-model", type=str, default=None,
+        "--base-model",
+        type=str,
+        default=None,
         help="Base model HF ID for model card",
     )
     upload_parser.add_argument(
-        "--private", action="store_true",
+        "--private",
+        action="store_true",
         help="Create a private repo",
     )
 
@@ -190,8 +224,10 @@ def _run_generic_quantize(args) -> None:
 
     config_path = (output_path or input_path).parent / "quantize_config.json"
     quantize_file(
-        input_path, output_path,
-        bits=args.bits, group_size=args.group_size,
+        input_path,
+        output_path,
+        bits=args.bits,
+        group_size=args.group_size,
         should_quantize=should_quantize,
         config_path=config_path,
     )
@@ -226,7 +262,10 @@ def _run_upload(args) -> None:
             print("ERROR: No split_model.json found — use --repo-id")
             sys.exit(1)
         repo_id = derive_repo_id(
-            split_info, model_dir, api=api, namespace=args.namespace,
+            split_info,
+            model_dir,
+            api=api,
+            namespace=args.namespace,
         )
 
     print(f"Repo ID: {repo_id}")

@@ -134,15 +134,12 @@ def generate_model_card(
     lines.append("")
     if base_model:
         lines.append(
-            f"MLX format conversion of"
-            f" [{base_model}](https://huggingface.co/{base_model})."
+            f"MLX format conversion of [{base_model}](https://huggingface.co/{base_model})."
         )
     else:
         lines.append("MLX format model.")
     lines.append("")
-    lines.append(
-        "Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge)."
-    )
+    lines.append("Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge).")
     lines.append("")
 
     # Details
@@ -159,8 +156,7 @@ def generate_model_card(
 
     # File listing
     model_files = sorted(
-        p for p in model_dir.iterdir()
-        if p.is_file() and p.suffix in (".safetensors", ".json")
+        p for p in model_dir.iterdir() if p.is_file() and p.suffix in (".safetensors", ".json")
     )
     if model_files:
         lines.append("## Files")

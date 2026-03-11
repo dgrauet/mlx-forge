@@ -59,9 +59,7 @@ class ValidationResult:
             print(f"{FAIL} {self.errors} checks failed, {self.warnings} warnings")
 
 
-def validate_file_exists(
-    model_dir: Path, filename: str, result: ValidationResult
-) -> bool:
+def validate_file_exists(model_dir: Path, filename: str, result: ValidationResult) -> bool:
     """Check that a file exists and report its size.
 
     Args:
@@ -113,12 +111,13 @@ def validate_conv_layout(
         ndim: Expected number of dimensions for conv weights.
     """
     conv_weights = [
-        (k, v) for k, v in weights.items()
+        (k, v)
+        for k, v in weights.items()
         if "conv" in k.lower() and "weight" in k and v.ndim == ndim
     ]
     mlx_layout = True
     for k, v in conv_weights:
-        spatial = v.shape[1:ndim - 1]
+        spatial = v.shape[1 : ndim - 1]
         if any(s > 16 for s in spatial):
             mlx_layout = False
             print(f"    Suspect layout: {k} shape={v.shape}")
@@ -145,9 +144,7 @@ def validate_quantization(
 
     result.check(len(scale_keys) > 0, f"Quantized: {len(scale_keys)} .scales keys")
     result.check(len(bias_keys) > 0, f"Quantized: {len(bias_keys)} .biases keys")
-    result.check(
-        len(scale_keys) == len(bias_keys), "Equal .scales and .biases count"
-    )
+    result.check(len(scale_keys) == len(bias_keys), "Equal .scales and .biases count")
 
     non_block = [k for k in scale_keys if block_key not in k]
     result.check(

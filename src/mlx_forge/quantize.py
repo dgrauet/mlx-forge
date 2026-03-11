@@ -135,7 +135,10 @@ def quantize_file(
 
     weights = mx.load(str(input_path))
     result = quantize_weights(
-        weights, bits=bits, group_size=group_size, should_quantize=should_quantize,
+        weights,
+        bits=bits,
+        group_size=group_size,
+        should_quantize=should_quantize,
     )
 
     print(f"  Saving {len(result)} keys to {output_path.name}...")

@@ -52,7 +52,7 @@ def classify_key(key: str) -> str | None:
     audio_vae, vocoder, vae_shared_stats, or None (skip).
     """
     if key.startswith("model.diffusion_model."):
-        suffix = key[len("model.diffusion_model."):]
+        suffix = key[len("model.diffusion_model.") :]
         if suffix.startswith("video_embeddings_connector.") or suffix.startswith(
             "audio_embeddings_connector."
         ):
@@ -347,7 +347,10 @@ def quantize_transformer(output_dir: Path, *, bits: int = 8, group_size: int = 6
     weights = mx.load(str(tf_file))
 
     result = quantize_weights(
-        weights, bits=bits, group_size=group_size, should_quantize=ltx23_should_quantize,
+        weights,
+        bits=bits,
+        group_size=group_size,
+        should_quantize=ltx23_should_quantize,
     )
 
     print(f"  Saving quantized transformer ({len(result)} keys)...")
@@ -437,7 +440,11 @@ def convert(args) -> None:
         print(f"\n[{component_name}] Processing {len(keys)} keys...")
         t0 = time.monotonic()
         count = process_component(
-            checkpoint_weights, component_name, keys, output_dir, component_prefix,
+            checkpoint_weights,
+            component_name,
+            keys,
+            output_dir,
+            component_prefix,
         )
         elapsed = time.monotonic() - t0
         total_weights += count
@@ -516,9 +523,14 @@ def validate(args) -> None:
     # File structure
     print("\n== File Structure ==")
     expected = [
-        "config.json", "split_model.json", "transformer.safetensors",
-        "connector.safetensors", "vae_decoder.safetensors", "vae_encoder.safetensors",
-        "audio_vae.safetensors", "vocoder.safetensors",
+        "config.json",
+        "split_model.json",
+        "transformer.safetensors",
+        "connector.safetensors",
+        "vae_decoder.safetensors",
+        "vae_encoder.safetensors",
+        "audio_vae.safetensors",
+        "vocoder.safetensors",
     ]
     for fname in expected:
         validate_file_exists(model_dir, fname, result)
@@ -532,14 +544,17 @@ def validate(args) -> None:
     if config_path.exists():
         with open(config_path) as f:
             config = json.load(f)
-        result.check(config.get("model_version", "").startswith("2.3"),
-                     f"Model version is 2.3.x (got: {config.get('model_version')})")
+        result.check(
+            config.get("model_version", "").startswith("2.3"),
+            f"Model version is 2.3.x (got: {config.get('model_version')})",
+        )
         result.check(config.get("is_v2") is True, "is_v2 flag is True")
         result.check(config.get("apply_gated_attention") is True, "apply_gated_attention is True")
         result.check(config.get("cross_attention_adaln") is True, "cross_attention_adaln is True")
         result.check(config.get("caption_channels") is None, "caption_channels is None (V2)")
-        result.check(config.get("num_layers") == 48,
-                     f"num_layers == 48 (got: {config.get('num_layers')})")
+        result.check(
+            config.get("num_layers") == 48, f"num_layers == 48 (got: {config.get('num_layers')})"
+        )
         result.check(config.get("num_attention_heads") == 32, "num_attention_heads == 32")
         result.check(config.get("attention_head_dim") == 128, "attention_head_dim == 128")
 
@@ -587,8 +602,11 @@ def validate(args) -> None:
         if is_quantized:
             validate_quantization(weights, result, block_key="transformer_blocks")
 
-        sst_keys = [k for k in keys if "scale_shift_table" in k
-                    and "prompt" not in k and "audio_prompt" not in k]
+        sst_keys = [
+            k
+            for k in keys
+            if "scale_shift_table" in k and "prompt" not in k and "audio_prompt" not in k
+        ]
         if sst_keys:
             shape = weights[sst_keys[0]].shape
             result.check(shape[0] == 9, f"scale_shift_table has 9 params (got shape {shape})")
@@ -612,12 +630,17 @@ def validate(args) -> None:
     if conn_path.exists():
         weights = mx.load(str(conn_path))
         keys = set(weights.keys())
-        result.check(any("video_embeddings_connector" in k for k in keys),
-                     "Video connector keys present")
-        result.check(any("audio_embeddings_connector" in k for k in keys),
-                     "Audio connector keys present")
-        result.check(any("text_embedding_projection" in k for k in keys),
-                     "Text projection keys present", warn_only=True)
+        result.check(
+            any("video_embeddings_connector" in k for k in keys), "Video connector keys present"
+        )
+        result.check(
+            any("audio_embeddings_connector" in k for k in keys), "Audio connector keys present"
+        )
+        result.check(
+            any("text_embedding_projection" in k for k in keys),
+            "Text projection keys present",
+            warn_only=True,
+        )
         del weights
 
     # VAE decoder/encoder
@@ -641,8 +664,7 @@ def validate(args) -> None:
     if avae_path.exists():
         weights = mx.load(str(avae_path))
         bad = [k for k in weights if "audio_vae.decoder." in k]
-        result.check(len(bad) == 0,
-                     f"No PyTorch 'audio_vae.decoder.' prefix (found {len(bad)})")
+        result.check(len(bad) == 0, f"No PyTorch 'audio_vae.decoder.' prefix (found {len(bad)})")
         del weights
 
     # Vocoder
@@ -733,6 +755,7 @@ LTX23_SPLIT_MAP = {
 def split(args) -> None:
     """Split a unified LTX model into per-component files."""
     from ..split import split_model
+
     model_dir = Path(args.model_dir)
     split_model(model_dir, LTX23_SPLIT_MAP)
 
@@ -744,31 +767,44 @@ def split(args) -> None:
 
 def add_convert_args(parser) -> None:
     """Add LTX-2.3 convert arguments to a parser."""
-    parser.add_argument("--checkpoint", type=str, default=None,
-                        help="Path to local .safetensors checkpoint (skips download)")
-    parser.add_argument("--variant", type=str, default="distilled",
-                        choices=["distilled", "dev"],
-                        help="Model variant (default: distilled)")
     parser.add_argument(
-        "--output", type=str, default=None,
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to local .safetensors checkpoint (skips download)",
+    )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default="distilled",
+        choices=["distilled", "dev"],
+        help="Model variant (default: distilled)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
         help="Output directory (default: ~/.cache/huggingface/hub/ltx-2.3-mlx-<variant>)",
     )
-    parser.add_argument("--quantize", action="store_true",
-                        help="Quantize transformer after conversion")
-    parser.add_argument("--bits", type=int, default=8, choices=[4, 8],
-                        help="Quantization bits (default: 8)")
-    parser.add_argument("--group-size", type=int, default=64,
-                        help="Quantization group size (default: 64)")
+    parser.add_argument(
+        "--quantize", action="store_true", help="Quantize transformer after conversion"
+    )
+    parser.add_argument(
+        "--bits", type=int, default=8, choices=[4, 8], help="Quantization bits (default: 8)"
+    )
+    parser.add_argument(
+        "--group-size", type=int, default=64, help="Quantization group size (default: 64)"
+    )
 
 
 def add_validate_args(parser) -> None:
     """Add LTX-2.3 validate arguments to a parser."""
     parser.add_argument("model_dir", type=str, help="Path to converted model directory")
-    parser.add_argument("--source", type=str, default=None,
-                        help="Path to source checkpoint for cross-reference")
+    parser.add_argument(
+        "--source", type=str, default=None, help="Path to source checkpoint for cross-reference"
+    )
 
 
 def add_split_args(parser) -> None:
     """Add LTX-2.3 split arguments to a parser."""
-    parser.add_argument("model_dir", type=str,
-                        help="Model directory containing model.safetensors")
+    parser.add_argument("model_dir", type=str, help="Model directory containing model.safetensors")
