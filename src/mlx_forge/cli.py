@@ -1,9 +1,9 @@
 """MLX Forge CLI — Convert, quantize, split, and validate ML models for Apple MLX.
 
 Usage:
-    mlx-forge convert ltx23 [--quantize --bits 8]
-    mlx-forge validate ltx23 <model_dir> [--source <checkpoint>]
-    mlx-forge split ltx23 <model_dir>
+    mlx-forge convert ltx-2.3 [--quantize --bits 8]
+    mlx-forge validate ltx-2.3 <model_dir> [--source <checkpoint>]
+    mlx-forge split ltx-2.3 <model_dir>
     mlx-forge quantize <input.safetensors> [--bits 8 --group-size 64]
 """
 

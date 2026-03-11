@@ -9,5 +9,5 @@ Each recipe defines:
 """
 
 AVAILABLE_RECIPES = {
-    "ltx23": "mlx_forge.recipes.ltx23",
+    "ltx-2.3": "mlx_forge.recipes.ltx23",
 }
