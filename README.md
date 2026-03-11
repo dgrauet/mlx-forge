@@ -13,7 +13,7 @@ Convert, quantize, split, and validate ML models for [Apple MLX](https://github.
 
 | Model | Recipe | Status |
 |-------|--------|--------|
-| [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx23` | Stable |
+| [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx-2.3` | Stable |
 
 ## Installation
 
@@ -35,32 +35,35 @@ Requires macOS with Apple Silicon and Python 3.11+.
 
 ```bash
 # Convert distilled variant (downloads ~46 GB from HuggingFace)
-mlx-forge convert ltx23
+mlx-forge convert ltx-2.3
+
+# Convert dev variant
+mlx-forge convert ltx-2.3 --variant dev
 
 # Convert with int8 quantization
-mlx-forge convert ltx23 --quantize --bits 8
+mlx-forge convert ltx-2.3 --quantize --bits 8
 
 # Convert from local checkpoint
-mlx-forge convert ltx23 --checkpoint /path/to/ltx-2.3-22b-distilled.safetensors --quantize --bits 8
+mlx-forge convert ltx-2.3 --checkpoint /path/to/ltx-2.3-22b-distilled.safetensors --quantize --bits 8
 
 # Custom output directory
-mlx-forge convert ltx23 --output ~/models/ltx23-mlx --quantize --bits 4
+mlx-forge convert ltx-2.3 --output ~/models/ltx-2.3-mlx --quantize --bits 4
 ```
 
 ### Validate
 
 ```bash
 # Validate converted model
-mlx-forge validate ltx23 ~/.cache/huggingface/hub/ltx23-mlx
+mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled
 
 # Validate with cross-reference against source checkpoint
-mlx-forge validate ltx23 ~/.cache/huggingface/hub/ltx23-mlx --source /path/to/original.safetensors
+mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --source /path/to/original.safetensors
 ```
 
 ### Split (legacy unified models)
 
 ```bash
-mlx-forge split ltx23 ~/.cache/huggingface/hub/ltx2-mlx-av-int4
+mlx-forge split ltx-2.3 /path/to/unified-model-dir
 ```
 
 ### Generic quantization
@@ -70,7 +73,7 @@ mlx-forge split ltx23 ~/.cache/huggingface/hub/ltx2-mlx-av-int4
 mlx-forge quantize model.safetensors --bits 8
 
 # Only quantize keys with a specific prefix
-mlx-forge quantize model.safetensors --prefix transformer. --bits 4
+mlx-forge quantize model.safetensors --key-prefix transformer. --bits 4
 ```
 
 ## Architecture
@@ -122,8 +125,8 @@ Then register it in `recipes/__init__.py`:
 
 ```python
 AVAILABLE_RECIPES = {
-    "ltx23": "mlx_forge.recipes.ltx23",
-    "my_model": "mlx_forge.recipes.my_model",
+    "ltx-2.3": "mlx_forge.recipes.ltx23",
+    "my-model": "mlx_forge.recipes.my_model",
 }
 ```
 
