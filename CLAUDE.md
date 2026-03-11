@@ -17,11 +17,12 @@ Generic framework with model-specific "recipes". First recipe: LTX-2.3 (22B vide
 
 ```
 src/mlx_forge/
-├── cli.py           # CLI dispatcher (convert/validate/split/quantize)
+├── cli.py           # CLI dispatcher (convert/validate/split/quantize/upload)
 ├── transpose.py     # Conv weight layout transposition (PyTorch -> MLX)
 ├── quantize.py      # Generic quantization engine
 ├── split.py         # Split unified safetensors into components
 ├── validate.py      # Validation framework (pass/fail/warn)
+├── upload.py        # HuggingFace Hub upload + model card generation
 └── recipes/         # Model-specific conversion logic
     ├── __init__.py   # Recipe registry
     └── ltx23.py      # LTX-2.3 recipe

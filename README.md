@@ -1,6 +1,6 @@
 # MLX Forge
 
-Convert, quantize, split, and validate ML models for [Apple MLX](https://github.com/ml-explore/mlx) on Apple Silicon.
+Convert, quantize, split, validate, and upload ML models for [Apple MLX](https://github.com/ml-explore/mlx) on Apple Silicon.
 
 ## Features
 
@@ -8,6 +8,7 @@ Convert, quantize, split, and validate ML models for [Apple MLX](https://github.
 - **Quantize** model weights to int4/int8 with selective layer targeting
 - **Split** large unified model files into per-component files for memory-constrained machines
 - **Validate** converted models: file structure, key naming, weight shapes, quantization integrity
+- **Upload** converted models to HuggingFace Hub with auto-derived repo naming, model cards, and collections
 
 ## Supported Models
 
@@ -66,6 +67,28 @@ mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --sour
 mlx-forge split ltx-2.3 /path/to/unified-model-dir
 ```
 
+### Upload to HuggingFace Hub
+
+```bash
+# Upload with auto-derived repo name (reads split_model.json metadata)
+# Creates: user/ltx-2.3-mlx-distilled-q8
+mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled
+
+# Upload to a specific repo
+mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --repo-id myuser/my-ltx-model
+
+# Upload to an organization
+mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --namespace my-org
+
+# Upload and add to a collection
+mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --collection "MLX Forge Models"
+
+# Private repo with custom license
+mlx-forge upload ./my-model --private --license apache-2.0
+```
+
+Requires authentication: run `huggingface-cli login` or set the `HF_TOKEN` environment variable.
+
 ### Generic quantization
 
 ```bash
@@ -85,6 +108,7 @@ mlx_forge/
 ├── quantize.py      # Quantization engine (generic)
 ├── split.py         # Model splitting (generic)
 ├── validate.py      # Validation framework (generic)
+├── upload.py        # HuggingFace Hub upload + model card (generic)
 └── recipes/
     └── ltx23.py     # LTX-2.3: key mapping, config, validation
 ```
