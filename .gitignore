@@ -8,3 +8,5 @@ build/
 .ruff_cache/
 .pytest_cache/
 .DS_Store
+models/*
+!models/.gitkeep

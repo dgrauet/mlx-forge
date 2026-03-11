@@ -19,7 +19,7 @@ mlx-forge convert ltx-2.3 --quantize --bits 8
 mlx-forge convert ltx-2.3 --checkpoint ./ltx-2.3-22b-distilled.safetensors
 
 # Validate a converted model
-mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled
+mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
 
 # Split a legacy unified model
 mlx-forge split ltx-2.3 /path/to/unified-model-dir
@@ -33,7 +33,7 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 |------|---------|-------------|
 | `--checkpoint` | *(download)* | Path to a local `.safetensors` checkpoint |
 | `--variant` | `distilled` | Model variant (`distilled` or `dev`) |
-| `--output` | `~/.cache/huggingface/hub/ltx-2.3-mlx-<variant>` | Output directory |
+| `--output` | `models/ltx-2.3-mlx-<variant>` | Output directory |
 | `--quantize` | off | Quantize transformer after conversion |
 | `--bits` | `8` | Quantization bits (`4` or `8`) |
 | `--group-size` | `64` | Quantization group size |

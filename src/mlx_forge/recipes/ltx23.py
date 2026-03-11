@@ -6,7 +6,7 @@ Handles: transformer, connector, VAE decoder/encoder, audio VAE, vocoder.
 Usage:
     mlx-forge convert ltx-2.3
     mlx-forge convert ltx-2.3 --quantize --bits 8
-    mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled
+    mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
 """
 
 from __future__ import annotations
@@ -382,7 +382,7 @@ def convert(args) -> None:
     if args.output:
         output_dir = Path(args.output)
     else:
-        output_dir = Path.home() / ".cache/huggingface/hub" / f"ltx-2.3-mlx-{args.variant}"
+        output_dir = Path("models") / f"ltx-2.3-mlx-{args.variant}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Get checkpoint
@@ -784,7 +784,7 @@ def add_convert_args(parser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ~/.cache/huggingface/hub/ltx-2.3-mlx-<variant>)",
+        help="Output directory (default: ./models/ltx-2.3-mlx-<variant>)",
     )
     parser.add_argument(
         "--quantize", action="store_true", help="Quantize transformer after conversion"

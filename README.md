@@ -55,10 +55,10 @@ mlx-forge convert ltx-2.3 --output ~/models/ltx-2.3-mlx --quantize --bits 4
 
 ```bash
 # Validate converted model
-mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled
+mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
 
 # Validate with cross-reference against source checkpoint
-mlx-forge validate ltx-2.3 ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --source /path/to/original.safetensors
+mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled --source /path/to/original.safetensors
 ```
 
 ### Split (legacy unified models)
@@ -72,16 +72,16 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 ```bash
 # Upload with auto-derived repo name (reads split_model.json metadata)
 # Creates: user/ltx-2.3-mlx-distilled-q8
-mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled
+mlx-forge upload models/ltx-2.3-mlx-distilled
 
 # Upload to a specific repo
-mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --repo-id myuser/my-ltx-model
+mlx-forge upload models/ltx-2.3-mlx-distilled --repo-id myuser/my-ltx-model
 
 # Upload to an organization
-mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --namespace my-org
+mlx-forge upload models/ltx-2.3-mlx-distilled --namespace my-org
 
 # Upload and add to a collection
-mlx-forge upload ~/.cache/huggingface/hub/ltx-2.3-mlx-distilled --collection "MLX Forge Models"
+mlx-forge upload models/ltx-2.3-mlx-distilled --collection "MLX Forge Models"
 
 # Private repo with custom license
 mlx-forge upload ./my-model --private --license apache-2.0
