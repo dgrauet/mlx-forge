@@ -177,12 +177,31 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
 # ---------------------------------------------------------------------------
 
 
+def _detect_cross_attention_adaln(checkpoint_path: str) -> bool:
+    """Detect if the model uses cross-attention AdaLN by inspecting weight shapes.
+
+    Dev (full) models have scale_shift_table with 9 params (6 base + 3 cross-attn).
+    Distilled models have 5 params (no cross-attention AdaLN).
+    """
+    weights = mx.load(checkpoint_path)
+    for key in weights:
+        if "scale_shift_table" in key and "prompt" not in key and "audio_prompt" not in key:
+            shape = weights[key].shape
+            del weights
+            return shape[0] == 9
+    del weights
+    return False
+
+
 def extract_config(checkpoint_path: str) -> dict:
     """Read model config from safetensors file metadata."""
     _, metadata = mx.load(checkpoint_path, return_metadata=True)
 
     model_version = metadata.get("model_version", "unknown")
     is_v2 = model_version.startswith("2.3")
+
+    # Detect cross_attention_adaln from actual weights — distilled has 5 params, dev has 9
+    has_cross_attn_adaln = _detect_cross_attention_adaln(checkpoint_path) if is_v2 else False
 
     config = {
         "model_version": model_version,
@@ -196,7 +215,7 @@ def extract_config(checkpoint_path: str) -> dict:
         "cross_attention_dim": 4096,
         "caption_channels": None if is_v2 else 3840,
         "apply_gated_attention": is_v2,
-        "cross_attention_adaln": is_v2,
+        "cross_attention_adaln": has_cross_attn_adaln,
         "audio_num_attention_heads": 32,
         "audio_attention_head_dim": 64,
         "audio_in_channels": 128,
@@ -382,7 +401,8 @@ def convert(args) -> None:
     if args.output:
         output_dir = Path(args.output)
     else:
-        output_dir = Path("models") / f"ltx-2.3-mlx-{args.variant}"
+        suffix = f"-q{args.bits}" if args.quantize else ""
+        output_dir = Path("models") / f"ltx-2.3-mlx-{args.variant}{suffix}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Get checkpoint
@@ -550,7 +570,11 @@ def validate(args) -> None:
         )
         result.check(config.get("is_v2") is True, "is_v2 flag is True")
         result.check(config.get("apply_gated_attention") is True, "apply_gated_attention is True")
-        result.check(config.get("cross_attention_adaln") is True, "cross_attention_adaln is True")
+        cross_adaln = config.get("cross_attention_adaln")
+        result.check(
+            isinstance(cross_adaln, bool),
+            f"cross_attention_adaln is bool (got: {cross_adaln}) — True for dev, False for distilled",
+        )
         result.check(config.get("caption_channels") is None, "caption_channels is None (V2)")
         result.check(
             config.get("num_layers") == 48, f"num_layers == 48 (got: {config.get('num_layers')})"
@@ -609,7 +633,14 @@ def validate(args) -> None:
         ]
         if sst_keys:
             shape = weights[sst_keys[0]].shape
-            result.check(shape[0] == 9, f"scale_shift_table has 9 params (got shape {shape})")
+            # AdaLN params vary by variant:
+            #   dev (full, cross_attention_adaln=True): 9 params (6 base + 3 cross-attn)
+            #   distilled (cross_attention_adaln=False): 5 params
+            valid_sizes = {5, 9}
+            result.check(
+                shape[0] in valid_sizes,
+                f"scale_shift_table has valid param count (got {shape[0]}, expected one of {valid_sizes})",
+            )
 
         # last_scale_shift_table is NOT in the original weights — initialized to zeros
         # at model load time. Its absence is expected and correct.
@@ -784,7 +815,7 @@ def add_convert_args(parser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ./models/ltx-2.3-mlx-<variant>)",
+        help="Output directory (default: ./models/ltx-2.3-mlx-<variant>[-q<bits>])",
     )
     parser.add_argument(
         "--quantize", action="store_true", help="Quantize transformer after conversion"
