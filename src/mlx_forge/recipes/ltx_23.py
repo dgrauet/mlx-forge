@@ -439,7 +439,7 @@ def convert(args) -> None:
         filename = f"ltx-2.3-22b-{args.variant}.safetensors"
         print(f"Downloading {filename} from Lightricks/LTX-2.3...")
         print("(This is ~46 GB, may take a while)")
-        download_dir = Path("models")
+        download_dir = Path("models") / "ltx-2.3-src"
         download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
         checkpoint_path = str(download_dir / filename)
         print(f"Downloaded to: {checkpoint_path}")

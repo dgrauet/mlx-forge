@@ -207,7 +207,7 @@ def _dry_run(args, output_dir: Path) -> None:
     print(f"\nSource:     {REPO_ID}")
     if not args.checkpoint:
         print(f"Download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)} (2 shards + codec.pth + config)")
-        print("            → ./models/")
+        print("            → ./models/fish-s2-pro-src/")
 
     print(f"Output dir: {output_dir}")
 
@@ -263,7 +263,7 @@ def convert(args) -> None:
         checkpoint_dir = Path(args.checkpoint)
         print(f"Using local checkpoint: {checkpoint_dir}")
     else:
-        checkpoint_dir = Path("models")
+        checkpoint_dir = Path("models") / "fish-s2-pro-src"
         print(f"Downloading {REPO_ID} checkpoint files...")
         download_hf_files(REPO_ID, CHECKPOINT_FILES, checkpoint_dir)
         print("Downloading codec checkpoint...")
