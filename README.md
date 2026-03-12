@@ -15,6 +15,7 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | Model | Recipe | Status |
 |-------|--------|--------|
 | [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx-2.3` | Stable |
+| [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Phase 1 (transformers only) |
 
 ## Installation
 
@@ -113,7 +114,8 @@ mlx_forge/
 ├── validate.py      # Validation framework (generic)
 ├── upload.py        # HuggingFace Hub upload + model card (generic)
 └── recipes/
-    └── ltx23.py     # LTX-2.3: key mapping, config, validation
+    ├── ltx23.py     # LTX-2.3: key mapping, config, validation
+    └── fish_s2.py   # Fish S2 Pro: Dual-AR TTS (Phase 1)
 ```
 
 Generic tools live at the top level. Model-specific logic lives in **recipes**. Adding support for a new model means creating a new recipe file.
