@@ -86,8 +86,10 @@ def quantize_weights(
     result = dict(to_keep)
     del to_keep
 
+    skipped = []
     for key, weight in tqdm(to_quantize.items(), desc=f"  Quantizing to int{bits}", leave=False):
         if weight.shape[-1] % group_size != 0:
+            skipped.append((key, weight.shape))
             result[key] = weight
             continue
 
@@ -101,6 +103,17 @@ def quantize_weights(
         result[f"{base}.biases"] = biases
 
         del weight, q_weight, scales, biases
+
+    if skipped:
+        print(
+            f"\n  WARNING: {len(skipped)} weight(s) skipped"
+            f" (last dim not divisible by {group_size}):"
+        )
+        for key, shape in skipped:
+            print(f"    {key}: shape={shape}")
+
+    quantized_count = len(to_quantize) - len(skipped)
+    print(f"  Quantized {quantized_count}/{len(to_quantize)} eligible weights")
 
     return result
 
