@@ -286,16 +286,25 @@ def convert(args) -> None:
     codec_path = checkpoint_dir / CODEC_FILE
     if codec_path.exists():
         print(f"  Loading codec weights from {CODEC_FILE}...")
-        codec_raw = mx.load(str(codec_path))
-        # The checkpoint may wrap weights under a "state_dict" key; if so, unwrap.
-        # After loading, keys are either "generator.xxx" or bare "xxx".
-        # We normalise to "generator." prefix so classify_key works uniformly.
+        try:
+            import torch
+        except ImportError:
+            print(
+                "ERROR: torch is required to load codec.pth\n"
+                "Install it with: uv pip install 'mlx-forge[torch]'"
+            )
+            raise SystemExit(1)
+
+        codec_raw = torch.load(str(codec_path), map_location="cpu", weights_only=True)
+        # Unwrap if wrapped in a "state_dict" key
+        if isinstance(codec_raw, dict) and "state_dict" in codec_raw:
+            codec_raw = codec_raw["state_dict"]
         codec_count = 0
         for k, v in codec_raw.items():
             canon = k if k.startswith("generator.") else f"generator.{k}"
-            checkpoint_weights[canon] = v
+            checkpoint_weights[canon] = mx.array(v.float().numpy())
             codec_count += 1
-        print(f"  {codec_count} codec keys loaded (lazy)")
+        print(f"  {codec_count} codec keys loaded")
         del codec_raw
     else:
         print(f"  WARNING: {CODEC_FILE} not found, codec will be skipped")
@@ -492,7 +501,9 @@ def validate(args) -> None:
         weights = mx.load(str(ad_path))
         keys = set(weights.keys())
 
-        validate_no_pytorch_prefix(weights, "audio_decoder.", result)
+        # Keys are prefixed "audio_decoder." by design (component_prefix)
+        # Verify no raw PyTorch double-prefix leaked through
+        validate_no_pytorch_prefix(weights, "audio_decoder.audio_decoder.", result)
 
         cb_keys = [k for k in keys if "codebook_embeddings" in k]
         result.check(len(cb_keys) > 0, f"Codebook embeddings present ({len(cb_keys)})")

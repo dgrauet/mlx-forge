@@ -36,6 +36,9 @@ Issues = "https://github.com/dgrauet/mlx-forge/issues"
 Documentation = "https://github.com/dgrauet/mlx-forge/tree/main/docs"
 
 [project.optional-dependencies]
+torch = [
+    "torch>=2.0.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.7.0",
