@@ -24,3 +24,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv run --extra dev --python ${{ matrix.python-version }} pytest tests/ -v
+
+  smoke-test:
+    runs-on: macos-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install package
+        run: uv sync --extra dev
+
+      - name: Verify CLI entry point
+        run: |
+          uv run mlx-forge --help
+          uv run mlx-forge --version
+
+      - name: Verify subcommand help
+        run: |
+          uv run mlx-forge convert --help
+          uv run mlx-forge validate --help
+          uv run mlx-forge split --help
+          uv run mlx-forge quantize --help
+          uv run mlx-forge upload --help
+
+      - name: Verify recipe dry-run (no network, no GPU)
+        run: |
+          uv run mlx-forge convert ltx-2.3 --dry-run
+          uv run mlx-forge convert fish-s2-pro --dry-run

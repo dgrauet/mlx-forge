@@ -1,7 +1,12 @@
 """Fish Audio S2 Pro conversion recipe.
 
 Converts the fishaudio/s2-pro TTS checkpoint (Dual-AR Qwen3-based) to MLX split format.
-Phase 1: transformer components only (text_model + audio_decoder). Codec not included.
+Includes all three components: text_model, audio_decoder, and codec (DAC vocoder).
+
+The codec is a Descript Audio Codec (DAC) stored as a separate ``codec.pth`` file
+with keys prefixed by ``generator.``.  It contains Conv1d / ConvTranspose1d layers
+that need transposition (PyTorch channels-second -> MLX channels-last) and must NOT
+be quantized.
 
 Usage:
     mlx-forge convert fish-s2-pro
@@ -21,6 +26,7 @@ import mlx.core as mx
 
 from ..convert import classify_keys, download_hf_files, fmt_size, load_weights, process_component
 from ..quantize import quantize_weights
+from ..transpose import transpose_conv
 from ..validate import (
     ValidationResult,
     validate_file_exists,
@@ -34,26 +40,30 @@ from ..validate import (
 
 REPO_ID = "fishaudio/s2-pro"
 
-COMPONENTS = ["text_model", "audio_decoder"]
+COMPONENTS = ["text_model", "audio_decoder", "codec"]
 
 COMPONENT_PREFIX = {
     "text_model": "text_model",
     "audio_decoder": "audio_decoder",
+    "codec": "codec",
 }
 
 # Approximate sizes in MB for dry-run estimation (bf16)
 _COMPONENT_SIZE_MB = {
     "text_model": 8500,
     "audio_decoder": 600,
+    "codec": 1870,
 }
 
-_CHECKPOINT_SIZE_MB = 9200  # ~9.2 GB download (2 shards)
+_CHECKPOINT_SIZE_MB = 11070  # ~9.2 GB (2 shards) + ~1.87 GB (codec.pth)
 
 CHECKPOINT_FILES = [
     "model-00001-of-00002.safetensors",
     "model-00002-of-00002.safetensors",
     "model.safetensors.index.json",
 ]
+
+CODEC_FILE = "codec.pth"
 
 CONFIG_FILES = [
     "config.json",
@@ -70,12 +80,19 @@ CONFIG_FILES = [
 def classify_key(key: str) -> str | None:
     """Classify a weight key into a component name.
 
-    Returns one of: text_model, audio_decoder, or None (skip).
+    Returns one of: text_model, audio_decoder, codec, or None (skip).
+
+    Codec keys originate from ``codec.pth`` and are prefixed with
+    ``generator.`` after loading.  The prefix ``generator.`` is used
+    as the classifier trigger — keys like ``encoder.*``, ``decoder.*``,
+    and ``quantizer.*`` all live under ``generator.`` in the checkpoint.
     """
     if key.startswith("text_model."):
         return "text_model"
     if key.startswith("audio_decoder."):
         return "audio_decoder"
+    if key.startswith("generator."):
+        return "codec"
     return None
 
 
@@ -94,19 +111,46 @@ def sanitize_audio_decoder_key(key: str) -> str:
     return key.replace("audio_decoder.", "")
 
 
+def sanitize_codec_key(key: str) -> str:
+    """Strip the generator. prefix from codec keys."""
+    return key.replace("generator.", "", 1)
+
+
 SANITIZERS = {
     "text_model": sanitize_text_model_key,
     "audio_decoder": sanitize_audio_decoder_key,
+    "codec": sanitize_codec_key,
 }
+
+
+# ---------------------------------------------------------------------------
+# Conv transposition (codec)
+# ---------------------------------------------------------------------------
+
+
+def codec_transform(key: str, weight: mx.array, component_name: str) -> mx.array:
+    """Transpose Conv1d / ConvTranspose1d weights in the codec from PyTorch to MLX layout.
+
+    PyTorch Conv1d:          (O, I, K) -> MLX: (O, K, I)
+    PyTorch ConvTranspose1d: (I, O, K) -> MLX: (O, K, I)
+    """
+    if weight.ndim != 3:
+        return weight
+    # ConvTranspose1d layers live inside decoder upsampling blocks
+    is_transpose = "upsample" in key and "conv." in key
+    return transpose_conv(weight, is_conv_transpose=is_transpose)
 
 
 # ---------------------------------------------------------------------------
 # Quantization
 # ---------------------------------------------------------------------------
 
+# Components that should NOT be quantized (conv-heavy, no benefit)
+_SKIP_QUANTIZE_COMPONENTS = {"codec"}
+
 
 def fish_s2_should_quantize(key: str, weight: mx.array) -> bool:
-    """Only quantize transformer Linear weights (not embeddings or norms)."""
+    """Only quantize transformer Linear weights (not embeddings, norms, or conv)."""
     return (
         key.endswith(".weight")
         and weight.ndim == 2
@@ -162,7 +206,7 @@ def _dry_run(args, output_dir: Path) -> None:
 
     print(f"\nSource:     {REPO_ID}")
     if not args.checkpoint:
-        print(f"Download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)} (2 shards + config)")
+        print(f"Download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)} (2 shards + codec.pth + config)")
         print("            → ./models/")
 
     print(f"Output dir: {output_dir}")
@@ -171,12 +215,14 @@ def _dry_run(args, output_dir: Path) -> None:
     total_mb = 0.0
     for comp in COMPONENTS:
         size_mb = _COMPONENT_SIZE_MB[comp]
-        if args.quantize:
+        if args.quantize and comp not in _SKIP_QUANTIZE_COMPONENTS:
             ratio = 16 / args.bits
             size_mb = size_mb / ratio
             label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})"
         else:
             label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (bf16)"
+            if args.quantize and comp in _SKIP_QUANTIZE_COMPONENTS:
+                label += " (conv-heavy, not quantized)"
         print(label)
         total_mb += size_mb
 
@@ -184,14 +230,13 @@ def _dry_run(args, output_dir: Path) -> None:
 
     if args.quantize:
         print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
-        print("  Target: Linear weights only (not embeddings, norms)")
+        print("  Target: Linear weights only (not embeddings, norms, conv)")
+        print("  Skipped: codec (conv-heavy DAC vocoder)")
 
     print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
     if not args.checkpoint:
         print(f"Estimated download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)}")
         print(f"Estimated total disk: ~{fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
-
-    print("\nNote: codec (DAC vocoder) not included — Phase 1 converts transformers only.")
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +266,8 @@ def convert(args) -> None:
         checkpoint_dir = Path("models")
         print(f"Downloading {REPO_ID} checkpoint files...")
         download_hf_files(REPO_ID, CHECKPOINT_FILES, checkpoint_dir)
+        print("Downloading codec checkpoint...")
+        download_hf_files(REPO_ID, [CODEC_FILE], checkpoint_dir)
         print("Downloading config and tokenizer files...")
         download_hf_files(REPO_ID, CONFIG_FILES, checkpoint_dir)
 
@@ -230,10 +277,28 @@ def convert(args) -> None:
         if src.exists():
             shutil.copy2(src, output_dir / fname)
 
-    # Step 3: Load weights lazily (sharded via index)
+    # Step 3: Load weights lazily (sharded via index + codec.pth)
     t0 = time.monotonic()
     checkpoint_weights = load_weights(checkpoint_dir)
-    print(f"  {len(checkpoint_weights)} keys loaded (lazy)")
+    print(f"  {len(checkpoint_weights)} transformer keys loaded (lazy)")
+
+    # Load codec weights from codec.pth (PyTorch format, keys under "generator.")
+    codec_path = checkpoint_dir / CODEC_FILE
+    if codec_path.exists():
+        print(f"  Loading codec weights from {CODEC_FILE}...")
+        codec_raw = mx.load(str(codec_path))
+        # The checkpoint may wrap weights under a "state_dict" key; if so, unwrap.
+        # After loading, keys are either "generator.xxx" or bare "xxx".
+        # We normalise to "generator." prefix so classify_key works uniformly.
+        codec_count = 0
+        for k, v in codec_raw.items():
+            canon = k if k.startswith("generator.") else f"generator.{k}"
+            checkpoint_weights[canon] = v
+            codec_count += 1
+        print(f"  {codec_count} codec keys loaded (lazy)")
+        del codec_raw
+    else:
+        print(f"  WARNING: {CODEC_FILE} not found, codec will be skipped")
 
     # Classify keys
     print("\nClassifying weight keys...")
@@ -252,6 +317,7 @@ def convert(args) -> None:
             continue
 
         component_prefix = COMPONENT_PREFIX[component_name]
+        transform = codec_transform if component_name == "codec" else None
         print(f"\n[{component_name}] Processing {len(keys)} keys...")
         t0 = time.monotonic()
         count = process_component(
@@ -261,6 +327,7 @@ def convert(args) -> None:
             output_dir,
             component_prefix,
             sanitizer=SANITIZERS[component_name],
+            transform=transform,
         )
         elapsed = time.monotonic() - t0
         total_weights += count
@@ -287,9 +354,12 @@ def convert(args) -> None:
             size_mb = p.stat().st_size / (1024 * 1024)
             print(f"  {p.name}: {size_mb:.1f} MB")
 
-    # Step 6: Optional quantization
+    # Step 6: Optional quantization (skip conv-heavy components)
     if args.quantize:
         for component_name in COMPONENTS:
+            if component_name in _SKIP_QUANTIZE_COMPONENTS:
+                print(f"\n  Skipping quantization for {component_name} (conv-heavy)")
+                continue
             quantize_component(
                 output_dir, component_name, bits=args.bits, group_size=args.group_size
             )
@@ -315,7 +385,6 @@ def convert(args) -> None:
                 size_mb = p.stat().st_size / (1024 * 1024)
                 print(f"  {p.name}: {size_mb:.1f} MB")
 
-    print("\nNote: codec (DAC vocoder) not included — Phase 1.")
     print("Done!")
 
 
@@ -348,6 +417,7 @@ def validate(args) -> None:
         "split_model.json",
         "text_model.safetensors",
         "audio_decoder.safetensors",
+        "codec.safetensors",
     ]
     for fname in expected:
         validate_file_exists(model_dir, fname, result)
@@ -447,6 +517,49 @@ def validate(args) -> None:
         print(f"  Total audio_decoder parameters: {total_params / 1e9:.2f}B")
         del weights
 
+    # Codec (DAC vocoder)
+    print("\n== Codec (DAC) Weights ==")
+    codec_path = model_dir / "codec.safetensors"
+    if codec_path.exists():
+        weights = mx.load(str(codec_path))
+        keys = set(weights.keys())
+
+        validate_no_pytorch_prefix(weights, "generator.", result)
+
+        # Encoder and decoder sub-networks
+        enc_keys = [k for k in keys if k.startswith("codec.encoder.")]
+        result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
+
+        dec_keys = [k for k in keys if k.startswith("codec.decoder.")]
+        result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
+
+        # Quantizer keys
+        quant_keys = [k for k in keys if "quantizer" in k]
+        result.check(len(quant_keys) > 0, f"Quantizer keys present ({len(quant_keys)})")
+
+        # Conv weights should be transposed (channels-last for MLX)
+        conv_weights = [(k, v) for k, v in weights.items() if "conv" in k and v.ndim == 3]
+        if conv_weights:
+            # In MLX channels-last layout for Conv1d: (O, K, I)
+            # The last dim should be the input channels (smaller or equal to first)
+            sample_key, sample_w = conv_weights[0]
+            result.check(
+                sample_w.ndim == 3,
+                f"Conv weight is 3D after transpose ({sample_key}: {sample_w.shape})",
+            )
+
+        # Codec should NOT be quantized (all weights stay bf16/float)
+        if is_quantized:
+            q_keys = [k for k in keys if ".scales" in k or ".biases" in k]
+            result.check(
+                len(q_keys) == 0,
+                f"Codec not quantized ({len(q_keys)} quantization keys found)",
+            )
+
+        total_params = sum(v.size for v in weights.values())
+        print(f"  Total codec parameters: {total_params / 1e6:.1f}M")
+        del weights
+
     result.summary()
     if not result.passed:
         raise SystemExit(1)
@@ -459,6 +572,7 @@ def validate(args) -> None:
 FISH_S2_SPLIT_MAP = {
     "text_model": "text_model.safetensors",
     "audio_decoder": "audio_decoder.safetensors",
+    "codec": "codec.safetensors",
 }
 
 
