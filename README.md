@@ -127,7 +127,7 @@ mlx_forge/
 ├── validate.py      # Validation framework (generic)
 ├── upload.py        # HuggingFace Hub upload + model card (generic)
 └── recipes/
-    ├── ltx23.py     # LTX-2.3: key mapping, config, validation
+    ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
     └── fish_s2.py   # Fish S2 Pro: Dual-AR TTS (Phase 1)
 ```
 
@@ -167,7 +167,7 @@ Then register it in `recipes/__init__.py`:
 
 ```python
 AVAILABLE_RECIPES = {
-    "ltx-2.3": "mlx_forge.recipes.ltx23",
+    "ltx-2.3": "mlx_forge.recipes.ltx_23",
     "my-model": "mlx_forge.recipes.my_model",
 }
 ```

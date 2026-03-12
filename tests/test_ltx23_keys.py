@@ -1,6 +1,6 @@
 """Tests for LTX-2.3 key classification and sanitization."""
 
-from mlx_forge.recipes.ltx23 import (
+from mlx_forge.recipes.ltx_23 import (
     classify_key,
     sanitize_audio_vae_key,
     sanitize_connector_key,

@@ -9,6 +9,6 @@ Each recipe defines:
 """
 
 AVAILABLE_RECIPES = {
-    "ltx-2.3": "mlx_forge.recipes.ltx23",
+    "ltx-2.3": "mlx_forge.recipes.ltx_23",
     "fish-s2-pro": "mlx_forge.recipes.fish_s2",
 }
