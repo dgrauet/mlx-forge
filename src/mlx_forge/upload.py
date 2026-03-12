@@ -7,7 +7,6 @@ uploads model files, and optionally adds to a collection.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 from huggingface_hub import HfApi
@@ -207,10 +206,10 @@ def upload_model(
             print("ERROR: Authentication failed. Run 'huggingface-cli login' or set HF_TOKEN.")
         else:
             print(f"ERROR: Failed to create repo '{repo_id}': {e}")
-        sys.exit(1)
+        raise SystemExit(1)
     except (OSError, ConnectionError) as e:
         print(f"ERROR: Network error creating repo: {e}")
-        sys.exit(1)
+        raise SystemExit(1)
 
     # Upload files
     print(f"Uploading {model_dir} -> {repo_id}...")
@@ -223,10 +222,10 @@ def upload_model(
         )
     except HfHubHTTPError as e:
         print(f"ERROR: Upload failed: {e}")
-        sys.exit(1)
+        raise SystemExit(1)
     except (OSError, ConnectionError) as e:
         print(f"ERROR: Network error during upload: {e}")
-        sys.exit(1)
+        raise SystemExit(1)
 
     url = str(repo_url)
     print(f"Uploaded: {url}")

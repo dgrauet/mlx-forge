@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import gc
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from huggingface_hub.errors import (
     LocalEntryNotFoundError,
     RepositoryNotFoundError,
 )
+from tqdm import tqdm
 
 from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
@@ -269,8 +269,7 @@ def process_component(
     sanitizer = SANITIZERS[component_name]
     component_weights = {}
 
-    print(f"  Processing {len(keys)} tensors...")
-    for key in keys:
+    for key in tqdm(keys, desc=f"  {component_name}", leave=False):
         new_key = sanitizer(key)
         if new_key is None:
             continue
@@ -432,13 +431,13 @@ def convert(args) -> None:
                 "ERROR: Repository 'Lightricks/LTX-2.3' not found or access denied.\n"
                 "If this is a gated repo, request access and run: huggingface-cli login"
             )
-            sys.exit(1)
+            raise SystemExit(1)
         except LocalEntryNotFoundError:
             print(
                 f"ERROR: File '{filename}' not found in local cache and network is unavailable.\n"
                 "Check your internet connection or download the file manually."
             )
-            sys.exit(1)
+            raise SystemExit(1)
         except HfHubHTTPError as e:
             status = getattr(e.response, "status_code", None)
             if status == 401:
@@ -456,13 +455,13 @@ def convert(args) -> None:
                 )
             else:
                 print(f"ERROR: HuggingFace Hub request failed: {e}")
-            sys.exit(1)
+            raise SystemExit(1)
         except (OSError, ConnectionError) as e:
             print(
                 f"ERROR: Network error downloading model: {e}\n"
                 "Check your internet connection and try again."
             )
-            sys.exit(1)
+            raise SystemExit(1)
         print(f"Downloaded to: {checkpoint_path}")
 
     # Step 2: Extract config

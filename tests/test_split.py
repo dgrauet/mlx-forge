@@ -74,7 +74,7 @@ class TestSplitModel:
         assert "transformer.safetensors" in data["files"]
 
     def test_missing_source_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="not found"):
+        with pytest.raises(SystemExit):
             split_model(tmp_path, {"a": "a.safetensors"})
 
     def test_custom_source_filename(self, tmp_path):

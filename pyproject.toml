@@ -5,6 +5,9 @@ description = "Convert, quantize, split, and validate ML models for Apple MLX"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 readme = "README.md"
+authors = [
+    { name = "Damien Grauet", email = "damien.grauet@gmail.com" },
+]
 keywords = ["mlx", "apple-silicon", "quantization", "model-conversion", "safetensors"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -12,8 +15,13 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
 dependencies = [
     "mlx>=0.31.0",
     "safetensors>=0.4.0",
@@ -21,6 +29,11 @@ dependencies = [
     "numpy>=1.26.0",
     "tqdm>=4.66.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/dgrauet/mlx-forge"
+Issues = "https://github.com/dgrauet/mlx-forge/issues"
+Documentation = "https://github.com/dgrauet/mlx-forge/tree/main/docs"
 
 [project.optional-dependencies]
 dev = [

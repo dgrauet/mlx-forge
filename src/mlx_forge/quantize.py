@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import mlx.core as mx
+from tqdm import tqdm
 
 
 def _materialize(*tensors: mx.array) -> None:
@@ -82,11 +83,10 @@ def quantize_weights(
         print(f"  Materializing {len(to_keep)} non-quantizable weights...")
         _materialize(*to_keep.values())
 
-    print(f"  Quantizing {len(to_quantize)} weight matrices to int{bits}...")
     result = dict(to_keep)
     del to_keep
 
-    for key, weight in to_quantize.items():
+    for key, weight in tqdm(to_quantize.items(), desc=f"  Quantizing to int{bits}", leave=False):
         if weight.shape[-1] % group_size != 0:
             result[key] = weight
             continue

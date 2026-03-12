@@ -11,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import mlx.core as mx
+from tqdm import tqdm
 
 from .quantize import format_bytes
 
@@ -36,7 +37,8 @@ def split_model(
     """
     unified_path = model_dir / source_filename
     if not unified_path.exists():
-        raise FileNotFoundError(f"{unified_path} not found")
+        print(f"ERROR: {unified_path} not found")
+        raise SystemExit(1)
 
     print(f"Loading: {unified_path}")
     all_weights = mx.load(str(unified_path))
@@ -65,10 +67,11 @@ def split_model(
 
     # Save each component
     result = {}
-    for filename, weights in sorted(file_weights.items()):
+    sorted_items = sorted(file_weights.items())
+    for filename, weights in tqdm(sorted_items, desc="Saving components", leave=False):
         output_path = model_dir / filename
         total_bytes = sum(v.nbytes for v in weights.values())
-        print(f"Saving: {filename} ({len(weights)} tensors, {format_bytes(total_bytes)})")
+        tqdm.write(f"Saving: {filename} ({len(weights)} tensors, {format_bytes(total_bytes)})")
         mx.save_safetensors(str(output_path), weights)
         result[filename] = len(weights)
 
