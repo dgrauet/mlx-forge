@@ -17,14 +17,13 @@ import time
 from pathlib import Path
 
 import mlx.core as mx
-from huggingface_hub import hf_hub_download
-from huggingface_hub.errors import (
-    HfHubHTTPError,
-    LocalEntryNotFoundError,
-    RepositoryNotFoundError,
-)
-from tqdm import tqdm
 
+from ..convert import (
+    classify_keys,
+    download_hf_files,
+    fmt_size,
+    process_component,
+)
 from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
 from ..validate import (
@@ -267,47 +266,6 @@ def extract_config(checkpoint_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def process_component(
-    checkpoint_weights: dict,
-    component_name: str,
-    keys: list[str],
-    output_dir: Path,
-    component_prefix: str,
-) -> int:
-    """Process one component: extract keys, sanitize, transpose, save.
-
-    Returns number of weights saved.
-    """
-    sanitizer = SANITIZERS[component_name]
-    component_weights = {}
-
-    for key in tqdm(keys, desc=f"  {component_name}", leave=False):
-        new_key = sanitizer(key)
-        if new_key is None:
-            continue
-
-        weight = checkpoint_weights[key]
-        weight = maybe_transpose(new_key, weight, component_name)
-
-        # Force-materialize — mx.save_safetensors may not handle lazy cross-file refs
-        _materialize(weight)
-        component_weights[f"{component_prefix}.{new_key}"] = weight
-
-    if not component_weights:
-        print(f"  No weights for {component_name}, skipping")
-        return 0
-
-    count = len(component_weights)
-    output_file = output_dir / f"{component_name}.safetensors"
-    print(f"  Saving {count} weights to {output_file.name}...")
-    mx.save_safetensors(str(output_file), component_weights)
-
-    del component_weights
-    gc.collect()
-    mx.clear_cache()
-    return count
-
-
 def process_shared_stats(
     checkpoint_weights: dict,
     keys: list[str],
@@ -439,9 +397,9 @@ def _dry_run(args, output_dir: Path) -> None:
         if comp == "transformer" and args.quantize:
             ratio = 16 / args.bits
             size_mb = size_mb / ratio
-            label = f"  {comp}.safetensors: ~{_fmt_size(size_mb)} (int{args.bits})"
+            label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})"
         else:
-            label = f"  {comp}.safetensors: ~{_fmt_size(size_mb)} (fp16)"
+            label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (fp16)"
         print(label)
         total_mb += size_mb
 
@@ -453,17 +411,10 @@ def _dry_run(args, output_dir: Path) -> None:
         print("  Target: transformer_blocks Linear weights only")
 
     # Totals
-    print(f"\nEstimated output size: ~{_fmt_size(total_mb)}")
+    print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
     if not args.checkpoint:
-        print(f"Estimated download:   ~{_fmt_size(_CHECKPOINT_SIZE_MB)}")
-        print(f"Estimated total disk: ~{_fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
-
-
-def _fmt_size(mb: float) -> str:
-    """Format a size in MB to a human-readable string."""
-    if mb >= 1000:
-        return f"{mb / 1000:.1f} GB"
-    return f"{mb:.0f} MB"
+        print(f"Estimated download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)}")
+        print(f"Estimated total disk: ~{fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
 
 
 def convert(args) -> None:
@@ -489,49 +440,8 @@ def convert(args) -> None:
         print(f"Downloading {filename} from Lightricks/LTX-2.3...")
         print("(This is ~46 GB, may take a while)")
         download_dir = Path("models")
-        download_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            checkpoint_path = hf_hub_download(
-                repo_id="Lightricks/LTX-2.3",
-                filename=filename,
-                local_dir=download_dir,
-            )
-        except RepositoryNotFoundError:
-            print(
-                "ERROR: Repository 'Lightricks/LTX-2.3' not found or access denied.\n"
-                "If this is a gated repo, request access and run: huggingface-cli login"
-            )
-            raise SystemExit(1)
-        except LocalEntryNotFoundError:
-            print(
-                f"ERROR: File '{filename}' not found in local cache and network is unavailable.\n"
-                "Check your internet connection or download the file manually."
-            )
-            raise SystemExit(1)
-        except HfHubHTTPError as e:
-            status = getattr(e.response, "status_code", None)
-            if status == 401:
-                print("ERROR: Authentication required. Run: huggingface-cli login")
-            elif status == 403:
-                print(
-                    "ERROR: Access denied to 'Lightricks/LTX-2.3'.\n"
-                    "Request access at https://huggingface.co/Lightricks/LTX-2.3 "
-                    "and ensure your token has read permissions."
-                )
-            elif status == 404:
-                print(
-                    f"ERROR: File '{filename}' not found in 'Lightricks/LTX-2.3'.\n"
-                    "Verify the variant name is correct."
-                )
-            else:
-                print(f"ERROR: HuggingFace Hub request failed: {e}")
-            raise SystemExit(1)
-        except (OSError, ConnectionError) as e:
-            print(
-                f"ERROR: Network error downloading model: {e}\n"
-                "Check your internet connection and try again."
-            )
-            raise SystemExit(1)
+        download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
+        checkpoint_path = str(download_dir / filename)
         print(f"Downloaded to: {checkpoint_path}")
 
     # Step 2: Extract config
@@ -556,11 +466,7 @@ def convert(args) -> None:
 
     # Classify keys
     print("\nClassifying weight keys...")
-    keys_by_component: dict[str, list[str]] = {}
-    for key in checkpoint_weights:
-        comp = classify_key(key)
-        if comp:
-            keys_by_component.setdefault(comp, []).append(key)
+    keys_by_component = classify_keys(checkpoint_weights, classify_key)
 
     for comp, keys in sorted(keys_by_component.items()):
         print(f"  {comp}: {len(keys)} keys")
@@ -583,6 +489,8 @@ def convert(args) -> None:
             keys,
             output_dir,
             component_prefix,
+            sanitizer=SANITIZERS[component_name],
+            transform=maybe_transpose,
         )
         elapsed = time.monotonic() - t0
         total_weights += count

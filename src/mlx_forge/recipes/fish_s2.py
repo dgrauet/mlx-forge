@@ -18,15 +18,9 @@ import time
 from pathlib import Path
 
 import mlx.core as mx
-from huggingface_hub import hf_hub_download
-from huggingface_hub.errors import (
-    HfHubHTTPError,
-    LocalEntryNotFoundError,
-    RepositoryNotFoundError,
-)
-from tqdm import tqdm
 
-from ..quantize import _materialize, quantize_weights
+from ..convert import classify_keys, download_hf_files, fmt_size, load_weights, process_component
+from ..quantize import quantize_weights
 from ..validate import (
     ValidationResult,
     validate_file_exists,
@@ -107,47 +101,6 @@ SANITIZERS = {
 
 
 # ---------------------------------------------------------------------------
-# Component processing
-# ---------------------------------------------------------------------------
-
-
-def process_component(
-    checkpoint_weights: dict,
-    component_name: str,
-    keys: list[str],
-    output_dir: Path,
-    component_prefix: str,
-) -> int:
-    """Process one component: extract keys, sanitize, save.
-
-    No conv transposition needed — all layers are Linear/RMSNorm/Embedding.
-    Returns number of weights saved.
-    """
-    sanitizer = SANITIZERS[component_name]
-    component_weights = {}
-
-    for key in tqdm(keys, desc=f"  {component_name}", leave=False):
-        new_key = sanitizer(key)
-        weight = checkpoint_weights[key]
-        _materialize(weight)
-        component_weights[f"{component_prefix}.{new_key}"] = weight
-
-    if not component_weights:
-        print(f"  No weights for {component_name}, skipping")
-        return 0
-
-    count = len(component_weights)
-    output_file = output_dir / f"{component_name}.safetensors"
-    print(f"  Saving {count} weights to {output_file.name}...")
-    mx.save_safetensors(str(output_file), component_weights)
-
-    del component_weights
-    gc.collect()
-    mx.clear_cache()
-    return count
-
-
-# ---------------------------------------------------------------------------
 # Quantization
 # ---------------------------------------------------------------------------
 
@@ -209,7 +162,7 @@ def _dry_run(args, output_dir: Path) -> None:
 
     print(f"\nSource:     {REPO_ID}")
     if not args.checkpoint:
-        print(f"Download:   ~{_fmt_size(_CHECKPOINT_SIZE_MB)} (2 shards + config)")
+        print(f"Download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)} (2 shards + config)")
         print("            → ./models/")
 
     print(f"Output dir: {output_dir}")
@@ -221,9 +174,9 @@ def _dry_run(args, output_dir: Path) -> None:
         if args.quantize:
             ratio = 16 / args.bits
             size_mb = size_mb / ratio
-            label = f"  {comp}.safetensors: ~{_fmt_size(size_mb)} (int{args.bits})"
+            label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})"
         else:
-            label = f"  {comp}.safetensors: ~{_fmt_size(size_mb)} (bf16)"
+            label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (bf16)"
         print(label)
         total_mb += size_mb
 
@@ -233,59 +186,12 @@ def _dry_run(args, output_dir: Path) -> None:
         print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
         print("  Target: Linear weights only (not embeddings, norms)")
 
-    print(f"\nEstimated output size: ~{_fmt_size(total_mb)}")
+    print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
     if not args.checkpoint:
-        print(f"Estimated download:   ~{_fmt_size(_CHECKPOINT_SIZE_MB)}")
-        print(f"Estimated total disk: ~{_fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
+        print(f"Estimated download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)}")
+        print(f"Estimated total disk: ~{fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
 
     print("\nNote: codec (DAC vocoder) not included — Phase 1 converts transformers only.")
-
-
-def _fmt_size(mb: float) -> str:
-    """Format a size in MB to a human-readable string."""
-    if mb >= 1000:
-        return f"{mb / 1000:.1f} GB"
-    return f"{mb:.0f} MB"
-
-
-# ---------------------------------------------------------------------------
-# Download helpers
-# ---------------------------------------------------------------------------
-
-
-def _download_files(download_dir: Path, filenames: list[str]) -> None:
-    """Download files from HF Hub with error handling."""
-    download_dir.mkdir(parents=True, exist_ok=True)
-    for filename in filenames:
-        target = download_dir / filename
-        if target.exists():
-            print(f"  Already downloaded: {filename}")
-            continue
-        try:
-            print(f"  Downloading {filename}...")
-            hf_hub_download(
-                repo_id=REPO_ID,
-                filename=filename,
-                local_dir=download_dir,
-            )
-        except RepositoryNotFoundError:
-            print(f"ERROR: Repository '{REPO_ID}' not found or access denied.")
-            raise SystemExit(1)
-        except LocalEntryNotFoundError:
-            print(f"ERROR: '{filename}' not in cache and network unavailable.")
-            raise SystemExit(1)
-        except HfHubHTTPError as e:
-            status = getattr(e.response, "status_code", None)
-            if status == 401:
-                print("ERROR: Authentication required. Run: huggingface-cli login")
-            elif status == 403:
-                print(f"ERROR: Access denied to '{REPO_ID}'.")
-            else:
-                print(f"ERROR: HuggingFace Hub request failed: {e}")
-            raise SystemExit(1)
-        except (OSError, ConnectionError) as e:
-            print(f"ERROR: Network error: {e}")
-            raise SystemExit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -314,9 +220,9 @@ def convert(args) -> None:
     else:
         checkpoint_dir = Path("models")
         print(f"Downloading {REPO_ID} checkpoint files...")
-        _download_files(checkpoint_dir, CHECKPOINT_FILES)
+        download_hf_files(REPO_ID, CHECKPOINT_FILES, checkpoint_dir)
         print("Downloading config and tokenizer files...")
-        _download_files(checkpoint_dir, CONFIG_FILES)
+        download_hf_files(REPO_ID, CONFIG_FILES, checkpoint_dir)
 
     # Step 2: Copy config and tokenizer files to output dir
     for fname in CONFIG_FILES:
@@ -325,36 +231,13 @@ def convert(args) -> None:
             shutil.copy2(src, output_dir / fname)
 
     # Step 3: Load weights lazily (sharded via index)
-    index_path = checkpoint_dir / "model.safetensors.index.json"
-    if index_path.exists():
-        # Load sharded model
-        print("\nLoading sharded weights lazily...")
-        t0 = time.monotonic()
-        checkpoint_weights: dict[str, mx.array] = {}
-        with open(index_path) as f:
-            index = json.load(f)
-        shard_files = sorted(set(index["weight_map"].values()))
-        for shard in shard_files:
-            shard_path = checkpoint_dir / shard
-            print(f"  Loading {shard}...")
-            shard_weights = mx.load(str(shard_path))
-            checkpoint_weights.update(shard_weights)
-    else:
-        # Single file fallback
-        single = checkpoint_dir / "model.safetensors"
-        print(f"\nLoading weights lazily from {single}...")
-        t0 = time.monotonic()
-        checkpoint_weights = mx.load(str(single))
-
+    t0 = time.monotonic()
+    checkpoint_weights = load_weights(checkpoint_dir)
     print(f"  {len(checkpoint_weights)} keys loaded (lazy)")
 
     # Classify keys
     print("\nClassifying weight keys...")
-    keys_by_component: dict[str, list[str]] = {}
-    for key in checkpoint_weights:
-        comp = classify_key(key)
-        if comp:
-            keys_by_component.setdefault(comp, []).append(key)
+    keys_by_component = classify_keys(checkpoint_weights, classify_key)
 
     for comp, keys in sorted(keys_by_component.items()):
         print(f"  {comp}: {len(keys)} keys")
@@ -377,6 +260,7 @@ def convert(args) -> None:
             keys,
             output_dir,
             component_prefix,
+            sanitizer=SANITIZERS[component_name],
         )
         elapsed = time.monotonic() - t0
         total_weights += count
