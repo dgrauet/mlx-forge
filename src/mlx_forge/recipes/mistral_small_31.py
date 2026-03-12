@@ -90,7 +90,7 @@ def classify_key(key: str) -> str | None:
         return "language_model"
     if key.startswith("vision_tower."):
         return "vision_tower"
-    if key.startswith("multimodal_projector."):
+    if key.startswith("multi_modal_projector."):
         return "multimodal_projector"
     return None
 
@@ -113,8 +113,8 @@ def sanitize_vision_tower_key(key: str) -> str:
 
 
 def sanitize_multimodal_projector_key(key: str) -> str:
-    """Strip the multimodal_projector. prefix."""
-    return key.replace("multimodal_projector.", "", 1)
+    """Strip the multi_modal_projector. prefix."""
+    return key.replace("multi_modal_projector.", "", 1)
 
 
 SANITIZERS = {
@@ -429,7 +429,8 @@ def validate(args) -> None:
         emb_keys = [k for k in keys if "embed_tokens" in k]
         result.check(len(emb_keys) > 0, f"Embedding keys present ({len(emb_keys)})")
 
-        lm_head_keys = [k for k in keys if k == "lm_head.weight"]
+        # lm_head is re-prefixed by process_component as language_model.lm_head.weight
+        lm_head_keys = [k for k in keys if "lm_head.weight" in k]
         result.check(len(lm_head_keys) > 0, "lm_head.weight present")
 
         layer_indices = set()
@@ -456,7 +457,9 @@ def validate(args) -> None:
         weights = mx.load(str(vt_path))
         keys = set(weights.keys())
 
-        validate_no_pytorch_prefix(weights, "vision_tower.", result)
+        # Keys are prefixed "vision_tower." by design (component_prefix)
+        # Verify no raw PyTorch double-prefix leaked through
+        validate_no_pytorch_prefix(weights, "vision_tower.vision_tower.", result)
 
         layer_indices = set()
         for k in keys:
@@ -489,7 +492,8 @@ def validate(args) -> None:
         weights = mx.load(str(mp_path))
         keys = set(weights.keys())
 
-        validate_no_pytorch_prefix(weights, "multimodal_projector.", result)
+        # Verify no raw PyTorch prefix leaked through
+        validate_no_pytorch_prefix(weights, "multi_modal_projector.", result)
 
         # Multimodal projector should NOT be quantized
         if is_quantized:

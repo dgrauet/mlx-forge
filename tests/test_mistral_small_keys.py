@@ -39,10 +39,10 @@ class TestClassifyKey:
         )
 
     def test_multimodal_projector(self):
-        assert classify_key("multimodal_projector.linear_1.weight") == "multimodal_projector"
+        assert classify_key("multi_modal_projector.linear_1.weight") == "multimodal_projector"
 
     def test_multimodal_projector_bias(self):
-        assert classify_key("multimodal_projector.linear_1.bias") == "multimodal_projector"
+        assert classify_key("multi_modal_projector.linear_1.bias") == "multimodal_projector"
 
     def test_unknown(self):
         assert classify_key("some_other_module.weight") is None
@@ -89,15 +89,15 @@ class TestSanitizeVisionTowerKey:
 
 class TestSanitizeMultimodalProjectorKey:
     def test_strips_prefix(self):
-        key = "multimodal_projector.linear_1.weight"
+        key = "multi_modal_projector.linear_1.weight"
         assert sanitize_multimodal_projector_key(key) == "linear_1.weight"
 
     def test_strips_bias(self):
-        key = "multimodal_projector.linear_1.bias"
+        key = "multi_modal_projector.linear_1.bias"
         assert sanitize_multimodal_projector_key(key) == "linear_1.bias"
 
     def test_strips_linear_2(self):
-        key = "multimodal_projector.linear_2.weight"
+        key = "multi_modal_projector.linear_2.weight"
         assert sanitize_multimodal_projector_key(key) == "linear_2.weight"
 
 
