@@ -41,6 +41,18 @@ from ..validate import (
 
 COMPONENTS = ["transformer", "connector", "vae_decoder", "vae_encoder", "audio_vae", "vocoder"]
 
+# Approximate sizes in MB for dry-run estimation (fp16)
+_COMPONENT_SIZE_MB = {
+    "transformer": 44_000,
+    "connector": 200,
+    "vae_decoder": 300,
+    "vae_encoder": 300,
+    "audio_vae": 50,
+    "vocoder": 50,
+}
+
+_CHECKPOINT_SIZE_MB = 46_000  # ~46 GB download
+
 COMPONENT_PREFIX = {
     "transformer": "transformer",
     "connector": "connector",
@@ -401,6 +413,59 @@ def quantize_transformer(output_dir: Path, *, bits: int = 8, group_size: int = 6
 # ---------------------------------------------------------------------------
 
 
+def _dry_run(args, output_dir: Path) -> None:
+    """Print conversion plan without executing anything."""
+    print("=" * 60)
+    print("DRY RUN — no files will be downloaded or written")
+    print("=" * 60)
+
+    # Source
+    if args.checkpoint:
+        print(f"\nSource:     {args.checkpoint} (local)")
+    else:
+        filename = f"ltx-2.3-22b-{args.variant}.safetensors"
+        print(f"\nSource:     Lightricks/LTX-2.3 / {filename}")
+        print(f"Download:   ~{_CHECKPOINT_SIZE_MB / 1000:.0f} GB → ./models/{filename}")
+
+    # Output
+    print(f"Output dir: {output_dir}")
+    print(f"Variant:    {args.variant}")
+
+    # Components
+    print("\nOutput files:")
+    total_mb = 0.0
+    for comp in COMPONENTS:
+        size_mb = _COMPONENT_SIZE_MB[comp]
+        if comp == "transformer" and args.quantize:
+            ratio = 16 / args.bits
+            size_mb = size_mb / ratio
+            label = f"  {comp}.safetensors: ~{_fmt_size(size_mb)} (int{args.bits})"
+        else:
+            label = f"  {comp}.safetensors: ~{_fmt_size(size_mb)} (fp16)"
+        print(label)
+        total_mb += size_mb
+
+    print("  config.json, split_model.json, ...")
+
+    # Quantization
+    if args.quantize:
+        print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
+        print("  Target: transformer_blocks Linear weights only")
+
+    # Totals
+    print(f"\nEstimated output size: ~{_fmt_size(total_mb)}")
+    if not args.checkpoint:
+        print(f"Estimated download:   ~{_fmt_size(_CHECKPOINT_SIZE_MB)}")
+        print(f"Estimated total disk: ~{_fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
+
+
+def _fmt_size(mb: float) -> str:
+    """Format a size in MB to a human-readable string."""
+    if mb >= 1000:
+        return f"{mb / 1000:.1f} GB"
+    return f"{mb:.0f} MB"
+
+
 def convert(args) -> None:
     """Convert LTX-2.3 PyTorch checkpoint to MLX split format."""
     if args.output:
@@ -408,6 +473,11 @@ def convert(args) -> None:
     else:
         suffix = f"-q{args.bits}" if args.quantize else ""
         output_dir = Path("models") / f"ltx-2.3-mlx-{args.variant}{suffix}"
+
+    if args.dry_run:
+        _dry_run(args, output_dir)
+        return
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Get checkpoint
@@ -875,6 +945,11 @@ def add_convert_args(parser) -> None:
     )
     parser.add_argument(
         "--group-size", type=int, default=64, help="Quantization group size (default: 64)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview conversion plan without downloading or writing anything",
     )
 
 
