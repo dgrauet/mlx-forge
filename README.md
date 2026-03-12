@@ -55,6 +55,19 @@ mlx-forge convert ltx-2.3 --output ~/models/ltx-2.3-mlx --quantize --bits 4
 mlx-forge convert ltx-2.3 --quantize --bits 8 --dry-run
 ```
 
+### Convert Fish S2 Pro (TTS)
+
+```bash
+# Convert (downloads ~9.2 GB from HuggingFace)
+mlx-forge convert fish-s2-pro
+
+# Convert with int8 quantization
+mlx-forge convert fish-s2-pro --quantize --bits 8
+
+# Preview conversion plan
+mlx-forge convert fish-s2-pro --quantize --bits 4 --dry-run
+```
+
 ### Validate
 
 ```bash

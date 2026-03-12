@@ -190,3 +190,4 @@ Recipes may add extra fields to indicate which layers were targeted.
 ## Model-Specific Guides
 
 - [LTX-2.3](models/ltx-2.3.md#quantization-strategy) — quantization strategy and exclusion list
+- [Fish S2 Pro](models/fish-s2-pro.md#quantization-strategy) — quantization strategy
