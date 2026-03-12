@@ -2,7 +2,7 @@
 
 import mlx.core as mx
 
-from mlx_forge.recipes.mistral_small import (
+from mlx_forge.recipes.mistral_small_31 import (
     classify_key,
     mistral_should_quantize,
     sanitize_language_model_key,

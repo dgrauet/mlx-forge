@@ -131,4 +131,4 @@ To remove: rm '/path/to/model.safetensors'
 
 - [LTX-2.3](models/ltx-2.3.md#split-component-map) — component map and output files
 - [Fish S2 Pro](models/fish-s2-pro.md#output-files) — output files
-- [Mistral Small 3.1](models/mistral-small.md#output-files) — output files
+- [Mistral Small 3.1](models/mistral-small-3.1.md#output-files) — output files

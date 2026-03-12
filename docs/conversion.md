@@ -193,4 +193,4 @@ The recipe name (dict key) is the user-facing CLI name. The module filename can 
 
 - [LTX-2.3](models/ltx-2.3.md) — 22B audio-video DiT
 - [Fish S2 Pro](models/fish-s2-pro.md) — 5B TTS (all components)
-- [Mistral Small 3.1](models/mistral-small.md) — 24B VLM (Pixtral + dense LLM)
+- [Mistral Small 3.1](models/mistral-small-3.1.md) — 24B VLM (Pixtral + dense LLM)

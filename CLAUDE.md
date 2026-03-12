@@ -28,7 +28,7 @@ src/mlx_forge/
     ├── __init__.py   # Recipe registry
     ├── ltx_23.py     # LTX-2.3 recipe
     ├── fish_s2.py    # Fish S2 Pro: Dual-AR TTS + DAC codec
-    └── mistral_small.py  # Mistral Small 3.1: 24B VLM (Pixtral + dense LLM)
+    └── mistral_small_31.py  # Mistral Small 3.1: 24B VLM (Pixtral + dense LLM)
 ```
 
 ## Adding a New Recipe

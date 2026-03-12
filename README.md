@@ -16,7 +16,7 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 |-------|--------|--------|
 | [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx-2.3` | Stable |
 | [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Stable |
-| [Mistral Small 3.1](https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503) (24B VLM) | `mistral-small` | Stable |
+| [Mistral Small 3.1](https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503) (24B VLM) | `mistral-small-3.1` | Stable |
 
 ## Installation
 
@@ -79,13 +79,13 @@ mlx-forge convert fish-s2-pro --quantize --bits 4 --dry-run
 
 ```bash
 # Convert (downloads ~48 GB from HuggingFace)
-mlx-forge convert mistral-small
+mlx-forge convert mistral-small-3.1
 
 # Convert with int8 quantization
-mlx-forge convert mistral-small --quantize --bits 8
+mlx-forge convert mistral-small-3.1 --quantize --bits 8
 
 # Preview conversion plan
-mlx-forge convert mistral-small --quantize --bits 4 --dry-run
+mlx-forge convert mistral-small-3.1 --quantize --bits 4 --dry-run
 ```
 
 ### Validate
@@ -150,7 +150,7 @@ mlx_forge/
 └── recipes/
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
     ├── fish_s2.py   # Fish S2 Pro: Dual-AR TTS + DAC codec
-    └── mistral_small.py  # Mistral Small 3.1: 24B VLM (Pixtral + dense LLM)
+    └── mistral_small_31.py  # Mistral Small 3.1: 24B VLM (Pixtral + dense LLM)
 ```
 
 Generic tools live at the top level. Model-specific logic lives in **recipes**. Adding support for a new model means creating a new recipe file.
@@ -191,7 +191,7 @@ Then register it in `recipes/__init__.py`:
 AVAILABLE_RECIPES = {
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
     "fish-s2-pro": "mlx_forge.recipes.fish_s2",
-    "mistral-small": "mlx_forge.recipes.mistral_small",
+    "mistral-small-3.1": "mlx_forge.recipes.mistral_small_31",
     "my-model": "mlx_forge.recipes.my_model",
 }
 ```

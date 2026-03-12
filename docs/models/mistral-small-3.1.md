@@ -8,19 +8,19 @@
 
 ```bash
 # Convert (downloads ~48 GB)
-mlx-forge convert mistral-small
+mlx-forge convert mistral-small-3.1
 
 # Convert + quantize
-mlx-forge convert mistral-small --quantize --bits 8
+mlx-forge convert mistral-small-3.1 --quantize --bits 8
 
 # Preview what will happen
-mlx-forge convert mistral-small --dry-run
+mlx-forge convert mistral-small-3.1 --dry-run
 
 # Convert from local checkpoint directory
-mlx-forge convert mistral-small --checkpoint ./models/
+mlx-forge convert mistral-small-3.1 --checkpoint ./models/
 
 # Validate
-mlx-forge validate mistral-small models/mistral-small-mlx
+mlx-forge validate mistral-small-3.1 models/mistral-small-3.1-mlx
 ```
 
 ## CLI Options
@@ -30,7 +30,7 @@ mlx-forge validate mistral-small models/mistral-small-mlx
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--checkpoint` | *(download)* | Path to local checkpoint directory |
-| `--output` | `models/mistral-small-mlx[-q<bits>]` | Output directory |
+| `--output` | `models/mistral-small-3.1-mlx[-q<bits>]` | Output directory |
 | `--quantize` | off | Quantize weights after conversion |
 | `--bits` | `8` | Quantization bits (`4` or `8`) |
 | `--group-size` | `64` | Quantization group size |

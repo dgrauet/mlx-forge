@@ -7,9 +7,9 @@ and multimodal_projector.
 No conv transposition needed — all layers are Linear/RMSNorm/Embedding.
 
 Usage:
-    mlx-forge convert mistral-small
-    mlx-forge convert mistral-small --quantize --bits 8
-    mlx-forge validate mistral-small models/mistral-small-mlx
+    mlx-forge convert mistral-small-3.1
+    mlx-forge convert mistral-small-3.1 --quantize --bits 8
+    mlx-forge validate mistral-small-3.1 models/mistral-small-3.1-mlx
 """
 
 from __future__ import annotations
@@ -234,7 +234,7 @@ def convert(args) -> None:
         output_dir = Path(args.output)
     else:
         suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"mistral-small-mlx{suffix}"
+        output_dir = Path("models") / f"mistral-small-3.1-mlx{suffix}"
 
     if args.dry_run:
         _dry_run(args, output_dir)
@@ -544,7 +544,7 @@ def add_convert_args(parser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ./models/mistral-small-mlx[-q<bits>])",
+        help="Output directory (default: ./models/mistral-small-3.1-mlx[-q<bits>])",
     )
     parser.add_argument(
         "--quantize", action="store_true", help="Quantize transformer weights after conversion"
