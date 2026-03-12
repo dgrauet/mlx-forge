@@ -31,6 +31,12 @@ uv pip install -e .
 
 Requires macOS with Apple Silicon and Python 3.11+.
 
+For recipes that load PyTorch `.pth` checkpoints (e.g. Fish S2 Pro codec):
+
+```bash
+pip install 'mlx-forge[torch]'
+```
+
 ## Usage
 
 ### Convert LTX-2.3
@@ -58,7 +64,7 @@ mlx-forge convert ltx-2.3 --quantize --bits 8 --dry-run
 ### Convert Fish S2 Pro (TTS)
 
 ```bash
-# Convert (downloads ~9.2 GB from HuggingFace)
+# Convert (downloads ~11 GB from HuggingFace)
 mlx-forge convert fish-s2-pro
 
 # Convert with int8 quantization
@@ -121,6 +127,7 @@ mlx-forge quantize model.safetensors --key-prefix transformer. --bits 4
 ```
 mlx_forge/
 ├── cli.py           # CLI entry point
+├── convert.py       # Shared conversion utilities (download, load, classify, process)
 ├── transpose.py     # Conv weight layout transposition (generic)
 ├── quantize.py      # Quantization engine (generic)
 ├── split.py         # Model splitting (generic)

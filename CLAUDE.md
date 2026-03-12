@@ -18,6 +18,7 @@ Generic framework with model-specific "recipes". First recipe: LTX-2.3 (22B vide
 ```
 src/mlx_forge/
 ├── cli.py           # CLI dispatcher (convert/validate/split/quantize/upload)
+├── convert.py       # Shared conversion utilities (download, load, classify, process)
 ├── transpose.py     # Conv weight layout transposition (PyTorch -> MLX)
 ├── quantize.py      # Generic quantization engine
 ├── split.py         # Split unified safetensors into components
@@ -26,7 +27,7 @@ src/mlx_forge/
 └── recipes/         # Model-specific conversion logic
     ├── __init__.py   # Recipe registry
     ├── ltx_23.py     # LTX-2.3 recipe
-    └── fish_s2.py    # Fish S2 Pro recipe (Phase 1)
+    └── fish_s2.py    # Fish S2 Pro: Dual-AR TTS + DAC codec
 ```
 
 ## Adding a New Recipe

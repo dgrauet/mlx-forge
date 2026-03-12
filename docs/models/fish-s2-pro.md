@@ -2,12 +2,12 @@
 
 [fishaudio/s2-pro](https://huggingface.co/fishaudio/s2-pro) — 5B parameter Dual-AR text-to-speech model based on a modified Qwen3-4B backbone.
 
-> **Phase 1**: MLX Forge converts the transformer components (text_model + audio_decoder). The DAC codec (vocoder) is not yet supported.
+> MLX Forge converts all three components: text_model (Slow AR), audio_decoder (Fast AR), and codec (DAC vocoder).
 
 ## Quick Start
 
 ```bash
-# Convert (downloads ~9.2 GB)
+# Convert (downloads ~11 GB)
 mlx-forge convert fish-s2-pro
 
 # Convert + quantize
@@ -54,10 +54,10 @@ mlx-forge validate fish-s2-pro models/fish-s2-pro-mlx
  │              └─────────┬───────────────┘                │
  │                        │                                │
  │              ┌─────────▼─────────┐                      │
- │              │  DAC Codec        │  NOT YET CONVERTED   │
- │              │  (vocoder)        │  1.87 GB             │
- │              │  Conv1d encoder/  │                      │
- │              │  decoder + RVQ    │                      │
+ │              │  DAC Codec        │  ~1.87 GB (bf16)     │
+ │              │  (vocoder)        │  Conv1d/ConvT1d      │
+ │              │  Encoder/Decoder  │  NOT quantized       │
+ │              │  + RVQ quantizer  │                      │
  │              └───────────────────┘                      │
  └─────────────────────────────────────────────────────────┘
 ```
@@ -135,8 +135,9 @@ output.weight                 # output head (Linear)
 |-----------------|-----------|-----------------|
 | `text_model.model.*` | text_model | *(strip `text_model.model.`)* |
 | `audio_decoder.*` | audio_decoder | *(strip `audio_decoder.`)* |
+| `generator.*` | codec | *(strip `generator.`)* |
 
-No conv transposition needed — all layers are Linear, RMSNorm, or Embedding.
+Transformer components (text_model, audio_decoder) need no conv transposition — all layers are Linear, RMSNorm, or Embedding. The codec requires Conv1d/ConvTranspose1d transposition (PyTorch channels-second → MLX channels-last).
 
 ## Quantization Strategy
 
@@ -152,6 +153,7 @@ No conv transposition needed — all layers are Linear, RMSNorm, or Embedding.
 - `*.embeddings.weight` — embedding tables
 - `*.codebook_embeddings.weight` — codebook embedding
 - `*norm*.weight` — all RMSNorm layers
+- All codec weights — conv-heavy, not compatible with affine quantization
 
 ## Output Files
 
@@ -159,6 +161,7 @@ No conv transposition needed — all layers are Linear, RMSNorm, or Embedding.
 |------|---------|
 | `text_model.safetensors` | Slow AR weights (~8.5 GB fp16, ~4.3 GB int8) |
 | `audio_decoder.safetensors` | Fast AR weights (~600 MB fp16, ~300 MB int8) |
+| `codec.safetensors` | DAC vocoder weights (~2.6 GB float32, not quantized) |
 | `config.json` | Model configuration (copied from source) |
 | `tokenizer.json` | Tokenizer (copied from source) |
 | `tokenizer_config.json` | Tokenizer config (copied from source) |
@@ -172,20 +175,9 @@ The source checkpoint is **sharded** (2 safetensors files + index):
 - `model-00001-of-00002.safetensors` (~5 GB) — text_model layers 0-20
 - `model-00002-of-00002.safetensors` (~4.1 GB) — text_model layers 21-35 + audio_decoder
 - `model.safetensors.index.json` — shard index
+- `codec.pth` (~1.87 GB) — DAC vocoder (PyTorch format, requires `torch`)
 
-MLX Forge loads shards sequentially via the index file.
-
-## Phase 2 Roadmap (DAC Codec)
-
-The DAC codec (1.87 GB) is not yet converted. It requires:
-
-- Loading a PyTorch `.pth` checkpoint
-- Conv1d / ConvTranspose1d transposition (already supported in `transpose.py`)
-- Weight normalization fusion (`weight_g` + `weight_v` -> `weight`)
-- Custom `Snake1d` activation implementation for MLX
-- Residual Vector Quantization (RVQ) codebook handling
-
-The codec is needed for end-to-end audio generation but not for the transformer weight conversion.
+MLX Forge loads shards sequentially via the index file. The codec is loaded separately via `torch.load()` (requires the optional `torch` dependency: `uv pip install 'mlx-forge[torch]'`).
 
 ## Validation Checks
 
@@ -196,5 +188,6 @@ The codec is needed for end-to-end audio generation but not for the transformer 
 | Text config | 36 layers, 32 heads, dim 2560 |
 | Audio config | 4 layers, 10 codebooks |
 | text_model keys | No `text_model.model.` prefix, embedding present, 36 layers, QK-norm present |
-| audio_decoder keys | No `audio_decoder.` prefix, codebook embeddings, output head, 4 layers |
+| audio_decoder keys | No double prefix, codebook embeddings, output head, 4 layers |
+| codec keys | No `generator.` prefix, encoder/decoder/quantizer present, conv weights are 3D |
 | Quantization | Scales/biases pairs for quantized weights |

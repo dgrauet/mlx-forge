@@ -192,4 +192,4 @@ The recipe name (dict key) is the user-facing CLI name. The module filename can 
 ## Model-Specific Guides
 
 - [LTX-2.3](models/ltx-2.3.md) — 22B audio-video DiT
-- [Fish S2 Pro](models/fish-s2-pro.md) — 5B TTS (Phase 1)
+- [Fish S2 Pro](models/fish-s2-pro.md) — 5B TTS (all components)
