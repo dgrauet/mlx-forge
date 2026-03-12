@@ -46,6 +46,17 @@ class TestConvertDispatch:
             mock_recipe.add_convert_args.assert_called_once()
             mock_recipe.convert.assert_called_once()
 
+    def test_convert_dry_run_creates_no_files(self, tmp_path, capsys):
+        with patch(
+            "sys.argv",
+            ["mlx-forge", "convert", "ltx-2.3", "--dry-run", "--output", str(tmp_path / "out")],
+        ):
+            main()
+        assert not (tmp_path / "out").exists()
+        captured = capsys.readouterr()
+        assert "DRY RUN" in captured.out
+        assert "transformer.safetensors" in captured.out
+
     def test_convert_invalid_recipe(self):
         with patch("sys.argv", ["mlx-forge", "convert", "bad-recipe"]):
             with pytest.raises(SystemExit):

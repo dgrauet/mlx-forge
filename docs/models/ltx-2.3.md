@@ -18,6 +18,9 @@ mlx-forge convert ltx-2.3 --quantize --bits 8
 # Convert from a local checkpoint
 mlx-forge convert ltx-2.3 --checkpoint ./ltx-2.3-22b-distilled.safetensors
 
+# Preview conversion plan (no download, no writes)
+mlx-forge convert ltx-2.3 --quantize --bits 8 --dry-run
+
 # Validate a converted model
 mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
 
@@ -37,6 +40,7 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 | `--quantize` | off | Quantize transformer after conversion |
 | `--bits` | `8` | Quantization bits (`4` or `8`) |
 | `--group-size` | `64` | Quantization group size |
+| `--dry-run` | off | Preview conversion plan without downloading or writing |
 
 ### Validate
 

@@ -49,6 +49,9 @@ mlx-forge convert ltx-2.3 --checkpoint /path/to/ltx-2.3-22b-distilled.safetensor
 
 # Custom output directory
 mlx-forge convert ltx-2.3 --output ~/models/ltx-2.3-mlx --quantize --bits 4
+
+# Preview what will happen (no download, no writes)
+mlx-forge convert ltx-2.3 --quantize --bits 8 --dry-run
 ```
 
 ### Validate
