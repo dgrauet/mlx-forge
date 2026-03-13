@@ -30,6 +30,17 @@ def fmt_size(mb: float) -> str:
     return f"{mb:.0f} MB"
 
 
+def _validate_path_within(filepath: Path, parent: Path) -> Path:
+    """Ensure filepath resolves within parent directory (prevents path traversal)."""
+    resolved = filepath.resolve()
+    parent_resolved = parent.resolve()
+    if not str(resolved).startswith(str(parent_resolved) + "/") and resolved != parent_resolved:
+        raise ValueError(
+            f"Path traversal detected: '{filepath}' resolves outside '{parent}'"
+        )
+    return resolved
+
+
 def download_hf_files(
     repo_id: str,
     filenames: list[str],
@@ -42,6 +53,7 @@ def download_hf_files(
     download_dir.mkdir(parents=True, exist_ok=True)
     for filename in filenames:
         target = download_dir / filename
+        _validate_path_within(target, download_dir)
         if target.exists():
             print(f"  Already downloaded: {filename}")
             continue
@@ -100,6 +112,7 @@ def load_weights(
         shard_files = sorted(set(index["weight_map"].values()))
         for shard in shard_files:
             shard_path = checkpoint_dir / shard
+            _validate_path_within(shard_path, checkpoint_dir)
             print(f"  Loading {shard}...")
             shard_weights = mx.load(str(shard_path))
             weights.update(shard_weights)

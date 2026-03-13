@@ -268,6 +268,9 @@ def convert(args) -> None:
             )
             raise SystemExit(1)
 
+        # SECURITY: weights_only=True restricts unpickling to tensor data only,
+        # blocking arbitrary code execution from malicious .pth files.
+        print("  (weights_only=True — safe deserialization mode)")
         codec_raw = torch.load(str(codec_path), map_location="cpu", weights_only=True)
         # Unwrap if wrapped in a "state_dict" key
         if isinstance(codec_raw, dict) and "state_dict" in codec_raw:
