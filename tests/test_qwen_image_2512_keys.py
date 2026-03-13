@@ -65,6 +65,9 @@ class TestShouldQuantize:
     def test_img_in_not_quantized(self):
         assert not qwen_image_should_quantize("img_in.weight", mx.zeros((3072, 3072)))
 
+    def test_txt_in_not_quantized(self):
+        assert not qwen_image_should_quantize("txt_in.weight", mx.zeros((3584, 3072)))
+
     def test_proj_out_not_quantized(self):
         assert not qwen_image_should_quantize("proj_out.weight", mx.zeros((256, 3072)))
 

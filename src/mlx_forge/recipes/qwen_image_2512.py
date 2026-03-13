@@ -107,6 +107,7 @@ _SKIP_QUANTIZE_COMPONENTS = {"vae"}
 # Keys to skip during quantization (norms, embeddings, projections, modulation).
 _SKIP_QUANTIZE_KEYS = [
     "img_in.",
+    "txt_in.",
     "proj_out.",
     "norm_out.",
     "time_text_embed.",

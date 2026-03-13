@@ -122,6 +122,7 @@ Transformer and text_encoder Linear weights are quantized. VAE is skipped (conv-
 | Layer | Reason |
 |-------|--------|
 | `img_in` (image input projection) | Sensitive input layer |
+| `txt_in` (text input projection) | Sensitive input layer |
 | `proj_out` (output projection) | Sensitive output layer |
 | `norm_out` (output normalization) | Normalization layer |
 | `time_text_embed` (timestep embedding) | Small, sensitive |
