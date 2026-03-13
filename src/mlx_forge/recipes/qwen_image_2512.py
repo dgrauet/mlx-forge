@@ -429,7 +429,7 @@ def validate(args) -> None:
         result.check(len(lm_head_keys) > 0, f"lm_head present ({len(lm_head_keys)})")
 
         if is_quantized:
-            validate_quantization(weights, result, block_key="layers")
+            validate_quantization(weights, result, block_key=["layers", "blocks"])
 
         total_params = sum(v.size for v in weights.values())
         print(f"  Total text_encoder parameters: {total_params / 1e9:.2f}B")

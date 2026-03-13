@@ -143,15 +143,18 @@ def validate_conv_layout(
 
 
 def validate_quantization(
-    weights: dict[str, mx.array], result: ValidationResult, *, block_key: str
+    weights: dict[str, mx.array],
+    result: ValidationResult,
+    *,
+    block_key: str | list[str],
 ) -> None:
     """Check quantized weights have matching .scales/.biases pairs.
 
     Args:
         weights: Dict of weight keys -> tensors.
         result: ValidationResult to record into.
-        block_key: Key substring that identifies the quantized layer group
-            (e.g. "transformer_blocks" for LTX-2.3).
+        block_key: Key substring(s) that identify the quantized layer groups
+            (e.g. "transformer_blocks" or ["layers", "blocks"]).
     """
     scale_keys = [k for k in weights if k.endswith(".scales")]
     bias_keys = [k for k in weights if k.endswith(".biases")]
@@ -160,9 +163,11 @@ def validate_quantization(
     result.check(len(bias_keys) > 0, f"Quantized: {len(bias_keys)} .biases keys")
     result.check(len(scale_keys) == len(bias_keys), "Equal .scales and .biases count")
 
-    non_block = [k for k in scale_keys if block_key not in k]
+    keys = [block_key] if isinstance(block_key, str) else block_key
+    label = "/".join(keys)
+    non_block = [k for k in scale_keys if not any(bk in k for bk in keys)]
     result.check(
         len(non_block) == 0,
-        f"Quantization only in {block_key} (non-block scales: {len(non_block)})",
+        f"Quantization only in {label} (non-block scales: {len(non_block)})",
         warn_only=True,
     )
