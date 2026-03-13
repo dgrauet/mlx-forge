@@ -28,6 +28,7 @@ from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
 from ..validate import (
     ValidationResult,
+    count_layer_indices,
     validate_conv_layout,
     validate_file_exists,
     validate_no_pytorch_prefix,
@@ -640,14 +641,7 @@ def validate(args) -> None:
             f"prompt_adaln_single keys present ({len(prompt_adaln)})",
         )
 
-        block_indices = set()
-        for k in keys:
-            if "transformer_blocks." in k:
-                parts = k.split("transformer_blocks.")
-                if len(parts) > 1:
-                    idx = parts[1].split(".")[0]
-                    if idx.isdigit():
-                        block_indices.add(int(idx))
+        block_indices = count_layer_indices(keys, block_key="transformer_blocks")
         result.check(len(block_indices) == 48, f"48 transformer blocks (got {len(block_indices)})")
 
         if is_quantized:
@@ -682,6 +676,8 @@ def validate(args) -> None:
         total_params = sum(v.size for v in weights.values())
         print(f"  Total transformer parameters: {total_params / 1e9:.2f}B")
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     # Connector
     print("\n== Connector Weights ==")
@@ -701,6 +697,8 @@ def validate(args) -> None:
             warn_only=True,
         )
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     # VAE decoder/encoder
     for component in ["vae_decoder", "vae_encoder"]:
@@ -716,6 +714,8 @@ def validate(args) -> None:
             )
             validate_conv_layout(weights, result, ndim=5)
             del weights
+            gc.collect()
+            mx.clear_cache()
 
     # Audio VAE
     print("\n== Audio VAE Weights ==")
@@ -725,6 +725,8 @@ def validate(args) -> None:
         bad = [k for k in weights if "audio_vae.decoder." in k]
         result.check(len(bad) == 0, f"No PyTorch 'audio_vae.decoder.' prefix (found {len(bad)})")
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     # Vocoder
     print("\n== Vocoder Weights ==")
@@ -736,6 +738,8 @@ def validate(args) -> None:
         conv1d = [(k, v) for k, v in weights.items() if "weight" in k and v.ndim == 3]
         result.check(len(conv1d) > 0, f"Conv1d weights present ({len(conv1d)})")
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     # Cross-reference
     if hasattr(args, "source") and args.source:

@@ -20,7 +20,7 @@ from huggingface_hub.errors import (
 )
 from tqdm import tqdm
 
-from .quantize import _materialize
+from .quantize import _materialize, quantize_weights
 
 
 def fmt_size(mb: float) -> str:
@@ -182,3 +182,50 @@ def process_component(
     gc.collect()
     mx.clear_cache()
     return count
+
+
+def quantize_component(
+    output_dir: Path,
+    component_name: str,
+    *,
+    bits: int = 8,
+    group_size: int = 64,
+    should_quantize: Callable[[str, mx.array], bool],
+) -> None:
+    """Quantize a component's weights in-place.
+
+    Args:
+        output_dir: Directory containing the component safetensors file.
+        component_name: Name of the component (e.g. "text_model").
+        bits: Quantization bits (4 or 8).
+        group_size: Quantization group size.
+        should_quantize: Predicate deciding which weights to quantize.
+    """
+    filepath = output_dir / f"{component_name}.safetensors"
+    if not filepath.exists():
+        print(f"  WARNING: {filepath.name} not found, skipping quantization")
+        return
+
+    print(f"\n  Quantizing {component_name} to int{bits} (group_size={group_size})...")
+    weights = mx.load(str(filepath))
+
+    result = quantize_weights(
+        weights,
+        bits=bits,
+        group_size=group_size,
+        should_quantize=should_quantize,
+    )
+
+    print(f"  Saving quantized {component_name} ({len(result)} keys)...")
+    mx.save_safetensors(str(filepath), result)
+
+    del result, weights
+    gc.collect()
+    mx.clear_cache()
+
+
+def shard_filenames(n: int, prefix: str = "model") -> list[str]:
+    """Generate shard filenames for n-shard models, plus the index file."""
+    shards = [f"{prefix}-{i:05d}-of-{n:05d}.safetensors" for i in range(1, n + 1)]
+    shards.append(f"{prefix}.safetensors.index.json")
+    return shards

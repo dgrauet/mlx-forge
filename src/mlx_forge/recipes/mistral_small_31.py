@@ -22,10 +22,18 @@ from pathlib import Path
 
 import mlx.core as mx
 
-from ..convert import classify_keys, download_hf_files, fmt_size, load_weights, process_component
-from ..quantize import quantize_weights
+from ..convert import (
+    classify_keys,
+    download_hf_files,
+    fmt_size,
+    load_weights,
+    process_component,
+    quantize_component,
+    shard_filenames,
+)
 from ..validate import (
     ValidationResult,
+    count_layer_indices,
     validate_file_exists,
     validate_no_pytorch_prefix,
     validate_quantization,
@@ -54,19 +62,7 @@ _COMPONENT_SIZE_MB = {
 
 _CHECKPOINT_SIZE_MB = 48000  # ~48 GB (10 shards)
 
-CHECKPOINT_FILES = [
-    "model-00001-of-00010.safetensors",
-    "model-00002-of-00010.safetensors",
-    "model-00003-of-00010.safetensors",
-    "model-00004-of-00010.safetensors",
-    "model-00005-of-00010.safetensors",
-    "model-00006-of-00010.safetensors",
-    "model-00007-of-00010.safetensors",
-    "model-00008-of-00010.safetensors",
-    "model-00009-of-00010.safetensors",
-    "model-00010-of-00010.safetensors",
-    "model.safetensors.index.json",
-]
+CHECKPOINT_FILES = shard_filenames(10)
 
 CONFIG_FILES = [
     "config.json",
@@ -144,37 +140,6 @@ def mistral_should_quantize(key: str, weight: mx.array) -> bool:
         and "norm" not in key
         and "lm_head" not in key
     )
-
-
-def quantize_component(
-    output_dir: Path,
-    component_name: str,
-    *,
-    bits: int = 8,
-    group_size: int = 64,
-) -> None:
-    """Quantize a component's weights in-place."""
-    filepath = output_dir / f"{component_name}.safetensors"
-    if not filepath.exists():
-        print(f"  WARNING: {filepath.name} not found, skipping quantization")
-        return
-
-    print(f"\n  Quantizing {component_name} to int{bits} (group_size={group_size})...")
-    weights = mx.load(str(filepath))
-
-    result = quantize_weights(
-        weights,
-        bits=bits,
-        group_size=group_size,
-        should_quantize=mistral_should_quantize,
-    )
-
-    print(f"  Saving quantized {component_name} ({len(result)} keys)...")
-    mx.save_safetensors(str(filepath), result)
-
-    del result, weights
-    gc.collect()
-    mx.clear_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -299,37 +264,19 @@ def convert(args) -> None:
     gc.collect()
     mx.clear_cache()
 
-    # Step 5: Create split_model.json
-    split_info: dict = {
-        "format": "split",
-        "source": REPO_ID,
-        "components": COMPONENTS,
-    }
-    with open(output_dir / "split_model.json", "w") as f:
-        json.dump(split_info, f, indent=2)
-
-    print(f"\n{'=' * 60}")
-    print(f"Conversion complete: {total_weights} total weights")
-    print(f"Output: {output_dir}")
-    for p in sorted(output_dir.iterdir()):
-        if p.is_file():
-            size_mb = p.stat().st_size / (1024 * 1024)
-            print(f"  {p.name}: {size_mb:.1f} MB")
-
-    # Step 6: Optional quantization (skip small/sensitive components)
+    # Step 5: Optional quantization (skip small/sensitive components)
     if args.quantize:
         for component_name in COMPONENTS:
             if component_name in _SKIP_QUANTIZE_COMPONENTS:
                 print(f"\n  Skipping quantization for {component_name} (small/sensitive)")
                 continue
             quantize_component(
-                output_dir, component_name, bits=args.bits, group_size=args.group_size
+                output_dir,
+                component_name,
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=mistral_should_quantize,
             )
-
-        split_info["quantized"] = True
-        split_info["quantization_bits"] = args.bits
-        with open(output_dir / "split_model.json", "w") as f:
-            json.dump(split_info, f, indent=2)
 
         qconfig = {
             "quantization": {
@@ -341,11 +288,25 @@ def convert(args) -> None:
         with open(output_dir / "quantize_config.json", "w") as f:
             json.dump(qconfig, f, indent=2)
 
-        print("\nFinal files after quantization:")
-        for p in sorted(output_dir.iterdir()):
-            if p.is_file():
-                size_mb = p.stat().st_size / (1024 * 1024)
-                print(f"  {p.name}: {size_mb:.1f} MB")
+    # Step 6: Create split_model.json (once, after quantization if applicable)
+    split_info: dict = {
+        "format": "split",
+        "source": REPO_ID,
+        "components": COMPONENTS,
+    }
+    if args.quantize:
+        split_info["quantized"] = True
+        split_info["quantization_bits"] = args.bits
+    with open(output_dir / "split_model.json", "w") as f:
+        json.dump(split_info, f, indent=2)
+
+    print(f"\n{'=' * 60}")
+    print(f"Conversion complete: {total_weights} total weights")
+    print(f"Output: {output_dir}")
+    for p in sorted(output_dir.iterdir()):
+        if p.is_file():
+            size_mb = p.stat().st_size / (1024 * 1024)
+            print(f"  {p.name}: {size_mb:.1f} MB")
 
     print("Done!")
 
@@ -433,14 +394,7 @@ def validate(args) -> None:
         lm_head_keys = [k for k in keys if "lm_head.weight" in k]
         result.check(len(lm_head_keys) > 0, "lm_head.weight present")
 
-        layer_indices = set()
-        for k in keys:
-            if "layers." in k:
-                parts = k.split("layers.")
-                if len(parts) > 1:
-                    idx = parts[1].split(".")[0]
-                    if idx.isdigit():
-                        layer_indices.add(int(idx))
+        layer_indices = count_layer_indices(keys)
         result.check(len(layer_indices) == 40, f"40 transformer layers (got {len(layer_indices)})")
 
         if is_quantized:
@@ -449,6 +403,8 @@ def validate(args) -> None:
         total_params = sum(v.size for v in weights.values())
         print(f"  Total language_model parameters: {total_params / 1e9:.2f}B")
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     # Vision tower
     print("\n== Vision Tower Weights ==")
@@ -461,14 +417,7 @@ def validate(args) -> None:
         # Verify no raw PyTorch double-prefix leaked through
         validate_no_pytorch_prefix(weights, "vision_tower.vision_tower.", result)
 
-        layer_indices = set()
-        for k in keys:
-            if "layers." in k:
-                parts = k.split("layers.")
-                if len(parts) > 1:
-                    idx = parts[1].split(".")[0]
-                    if idx.isdigit():
-                        layer_indices.add(int(idx))
+        layer_indices = count_layer_indices(keys)
         result.check(
             len(layer_indices) == 24, f"24 vision transformer layers (got {len(layer_indices)})"
         )
@@ -484,6 +433,8 @@ def validate(args) -> None:
         total_params = sum(v.size for v in weights.values())
         print(f"  Total vision_tower parameters: {total_params / 1e6:.1f}M")
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     # Multimodal projector
     print("\n== Multimodal Projector Weights ==")
@@ -506,6 +457,8 @@ def validate(args) -> None:
         total_params = sum(v.size for v in weights.values())
         print(f"  Total multimodal_projector parameters: {total_params / 1e6:.1f}M")
         del weights
+        gc.collect()
+        mx.clear_cache()
 
     result.summary()
     if not result.passed:

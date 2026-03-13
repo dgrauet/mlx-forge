@@ -79,6 +79,20 @@ def validate_file_exists(model_dir: Path, filename: str, result: ValidationResul
     return False
 
 
+def count_layer_indices(keys: set[str], block_key: str = "layers") -> set[int]:
+    """Extract unique integer layer indices from weight keys."""
+    indices = set()
+    marker = f"{block_key}."
+    for k in keys:
+        if marker in k:
+            parts = k.split(marker)
+            if len(parts) > 1:
+                idx = parts[1].split(".")[0]
+                if idx.isdigit():
+                    indices.add(int(idx))
+    return indices
+
+
 def validate_no_pytorch_prefix(
     weights: dict[str, mx.array], prefix: str, result: ValidationResult
 ) -> None:
