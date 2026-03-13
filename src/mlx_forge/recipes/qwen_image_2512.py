@@ -395,7 +395,7 @@ def validate(args) -> None:
         result.check(len(time_embed_keys) > 0, f"time_text_embed present ({len(time_embed_keys)})")
 
         if is_quantized:
-            validate_quantization(weights, result)
+            validate_quantization(weights, result, block_key="transformer_blocks")
 
         total_params = sum(v.size for v in weights.values())
         print(f"  Total transformer parameters: {total_params / 1e9:.2f}B")
@@ -429,7 +429,7 @@ def validate(args) -> None:
         result.check(len(lm_head_keys) > 0, f"lm_head present ({len(lm_head_keys)})")
 
         if is_quantized:
-            validate_quantization(weights, result)
+            validate_quantization(weights, result, block_key="layers")
 
         total_params = sum(v.size for v in weights.values())
         print(f"  Total text_encoder parameters: {total_params / 1e9:.2f}B")
