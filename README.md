@@ -40,62 +40,32 @@ pip install 'mlx-forge[torch]'
 
 ## Usage
 
-### Convert LTX-2.3
+### Convert
 
 ```bash
-# Convert distilled variant (downloads ~46 GB from HuggingFace)
+# Convert a model (downloads checkpoint from HuggingFace)
 mlx-forge convert ltx-2.3
-
-# Convert dev variant
-mlx-forge convert ltx-2.3 --variant dev
+mlx-forge convert fish-s2-pro
+mlx-forge convert mistral-small-3.1
 
 # Convert with int8 quantization
 mlx-forge convert ltx-2.3 --quantize --bits 8
 
-# Convert from local checkpoint
-mlx-forge convert ltx-2.3 --checkpoint /path/to/ltx-2.3-22b-distilled.safetensors --quantize --bits 8
+# Preview conversion plan (no download, no writes)
+mlx-forge convert fish-s2-pro --dry-run
 
-# Custom output directory
-mlx-forge convert ltx-2.3 --output ~/models/ltx-2.3-mlx --quantize --bits 4
-
-# Preview what will happen (no download, no writes)
-mlx-forge convert ltx-2.3 --quantize --bits 8 --dry-run
+# Convert from a local checkpoint
+mlx-forge convert ltx-2.3 --checkpoint /path/to/checkpoint.safetensors
 ```
 
-### Convert Fish S2 Pro (TTS)
-
-```bash
-# Convert (downloads ~11 GB from HuggingFace)
-mlx-forge convert fish-s2-pro
-
-# Convert with int8 quantization
-mlx-forge convert fish-s2-pro --quantize --bits 8
-
-# Preview conversion plan
-mlx-forge convert fish-s2-pro --quantize --bits 4 --dry-run
-```
-
-### Convert Mistral Small 3.1 (VLM)
-
-```bash
-# Convert (downloads ~48 GB from HuggingFace)
-mlx-forge convert mistral-small-3.1
-
-# Convert with int8 quantization
-mlx-forge convert mistral-small-3.1 --quantize --bits 8
-
-# Preview conversion plan
-mlx-forge convert mistral-small-3.1 --quantize --bits 4 --dry-run
-```
+See model-specific options in [docs/models/](docs/models/).
 
 ### Validate
 
 ```bash
-# Validate converted model
 mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
-
-# Validate with cross-reference against source checkpoint
-mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled --source /path/to/original.safetensors
+mlx-forge validate fish-s2-pro models/fish-s2-pro-mlx
+mlx-forge validate mistral-small-3.1 models/mistral-small-3.1-mlx
 ```
 
 ### Split (legacy unified models)
@@ -108,20 +78,14 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 
 ```bash
 # Upload with auto-derived repo name (reads split_model.json metadata)
-# Creates: user/ltx-2.3-mlx-distilled-q8
 mlx-forge upload models/ltx-2.3-mlx-distilled
 
-# Upload to a specific repo
-mlx-forge upload models/ltx-2.3-mlx-distilled --repo-id myuser/my-ltx-model
-
-# Upload to an organization
-mlx-forge upload models/ltx-2.3-mlx-distilled --namespace my-org
+# Upload to a specific repo or organization
+mlx-forge upload models/fish-s2-pro-mlx --repo-id myuser/my-model
+mlx-forge upload models/mistral-small-3.1-mlx --namespace my-org
 
 # Upload and add to a collection
-mlx-forge upload models/ltx-2.3-mlx-distilled --collection "MLX Forge Models"
-
-# Private repo with custom license
-mlx-forge upload ./my-model --private --license apache-2.0
+mlx-forge upload ./my-model --collection "MLX Forge Models"
 ```
 
 Requires authentication: run `huggingface-cli login` or set the `HF_TOKEN` environment variable.
@@ -222,39 +186,13 @@ PyTorch stores conv weights as `(O, I, ...)` while MLX expects channels-last `(O
 - Explicit `gc.collect()` + `mx.clear_cache()` between components
 - Each weight tensor is individually materialized before quantization to prevent OOM from accumulated lazy computation graphs
 
-## LTX-2.3 Known Gotchas
+## Model-Specific Documentation
 
-Hard-won lessons from building and debugging the LTX-2.3 MLX pipeline:
+Each recipe has its own detailed guide with architecture, key mapping, known gotchas, and validation details:
 
-### Conversion Pitfalls
-
-| Pitfall | Symptom | Solution |
-|---------|---------|----------|
-| Lazy tensors saved without materialization | All-zero weights in output safetensors | Materialize tensors (via `_materialize()`) before every save call |
-| Conv weights not transposed | Garbled output, NaN activations | Transpose all conv weights to channels-last layout |
-| ConvTranspose1d != Conv1d layout | Vocoder produces noise | `(I,O,K) -> (O,K,I)` not `(O,I,K) -> (O,K,I)` — detect via "ups" in key |
-| `per_channel_statistics` shared | VAE decode fails with missing keys | Duplicate to both `vae_decoder.safetensors` and `vae_encoder.safetensors` |
-| `last_scale_shift_table` absent | Confusion during validation | Normal — initialized to zeros at load time, not in checkpoint |
-
-### Quantization Pitfalls
-
-| Pitfall | Symptom | Solution |
-|---------|---------|----------|
-| Quantizing adaln_single, proj_out, patchify_proj | Broken generation, visual artifacts | Only quantize `transformer_blocks` Linear weights |
-| Non-quantizable tensors not materialized first | Silently zeroed weights (data corruption) | Materialize ALL kept tensors before any `mx.quantize()` call |
-| Accumulated lazy graph during quantization loop | OOM during quantization | Materialize each weight individually before quantizing |
-| Seed 42 + int8 quantization | Grayscale-only output | Model/quantization artifact — use random seed or avoid seed 42 |
-
-### Runtime Pitfalls (for model loaders)
-
-| Pitfall | Symptom | Solution |
-|---------|---------|----------|
-| Connector `positional_embedding_max_pos` default `[1]` | Model ignores all prompts, produces B&W vintage footage | Must be `[4096]` for LTX-2.3 |
-| Connector `rope_type` default `INTERLEAVED` | Scrambled text embeddings | Must be `SPLIT` for LTX-2.3 |
-| LTX-2.0 LoRAs loaded on 2.3 | Broken output | Different latent spaces — LoRAs must be retrained for 2.3 |
-| Upsampler weights quantized | Quality loss / errors | Upsampler is Conv3d, not Linear — skip quantization |
-| VAE unpatchify H/W transposed | 4x4 block artifacts (looks like low resolution) | Transpose order `(0,1,4,5,3,6,2)` not `(0,1,4,5,2,6,3)` |
-| Audio latent reshape order | Garbled audio | `reshape(B,8,16,T).transpose(0,1,3,2)` NOT `reshape(B,8,T,16)` |
+- [LTX-2.3](docs/models/ltx-2.3.md) — 22B video DiT (6 components, Conv3d/Conv1d transposition)
+- [Fish S2 Pro](docs/models/fish-s2-pro.md) — 5B TTS (Dual-AR + DAC codec)
+- [Mistral Small 3.1](docs/models/mistral-small-3.1.md) — 24B VLM (Pixtral vision + dense LLM)
 
 ## License
 
