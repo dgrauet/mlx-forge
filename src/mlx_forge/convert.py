@@ -35,9 +35,7 @@ def _validate_path_within(filepath: Path, parent: Path) -> Path:
     resolved = filepath.resolve()
     parent_resolved = parent.resolve()
     if not str(resolved).startswith(str(parent_resolved) + "/") and resolved != parent_resolved:
-        raise ValueError(
-            f"Path traversal detected: '{filepath}' resolves outside '{parent}'"
-        )
+        raise ValueError(f"Path traversal detected: '{filepath}' resolves outside '{parent}'")
     return resolved
 
 
