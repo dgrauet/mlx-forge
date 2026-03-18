@@ -182,7 +182,9 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
     if component == "transformer":
         return value  # All Linear, no conv
 
-    is_conv = "conv" in key.lower() and "weight" in key
+    is_conv = (
+        "conv" in key.lower() or (component == "vocoder" and "ups" in key)
+    ) and "weight" in key
     if not is_conv:
         return value
 
@@ -514,6 +516,10 @@ def convert(args) -> None:
         "components": COMPONENTS,
         "source": "Lightricks/LTX-2.3",
         "variant": args.variant,
+        "notes": {
+            "vocoder": "Also contains BWE (bandwidth extension) generator weights"
+            " — upsample layers [6,5,2,2,2] (240x) and mel_stft parameters.",
+        },
     }
     with open(output_dir / "split_model.json", "w") as f:
         json.dump(split_info, f, indent=2)
@@ -737,6 +743,16 @@ def validate(args) -> None:
         result.check(has_prefix, f"All keys have 'vocoder.' prefix ({len(weights)} keys)")
         conv1d = [(k, v) for k, v in weights.items() if "weight" in k and v.ndim == 3]
         result.check(len(conv1d) > 0, f"Conv1d weights present ({len(conv1d)})")
+        # ConvTranspose1d (ups) should be in MLX layout (O, K, I), not PyTorch (I, O, K)
+        for k, v in weights.items():
+            if "ups" in k and "weight" in k and v.ndim == 3:
+                # In MLX layout, dim0 (O) should be smaller than dim2 (I) would be wrong;
+                # specifically for this vocoder: ups go from high channels to low,
+                # so shape should be (O, K, I) where O < I (e.g. 768, 11, 1536)
+                result.check(
+                    v.shape[0] < v.shape[2],
+                    f"{k}: MLX layout (O,K,I)={v.shape} — O < I",
+                )
         del weights
         gc.collect()
         mx.clear_cache()
