@@ -211,7 +211,7 @@ def _is_conv_buffer(key: str, value: mx.array) -> bool:
     if value.ndim < 3:
         return False
     suffix = key.rsplit(".", 1)[-1]
-    return suffix in ("filter", "basis")
+    return suffix == "filter" or suffix.endswith("_basis")
 
 
 def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
