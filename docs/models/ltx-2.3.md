@@ -16,7 +16,7 @@ mlx-forge convert ltx-2.3 --variant dev
 mlx-forge convert ltx-2.3 --quantize --bits 8
 
 # Convert with upscalers (separate downloads from HF)
-mlx-forge convert ltx-2.3 --spatial-upscaler x2 x1.5 --temporal-upscaler
+mlx-forge convert ltx-2.3 --spatial-upscaler x2 x1.5 --temporal-upscaler x2
 
 # Convert from a local checkpoint
 mlx-forge convert ltx-2.3 --checkpoint ./ltx-2.3-22b-distilled.safetensors
@@ -46,8 +46,8 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 | `--dry-run` | off | Preview conversion plan without downloading or writing |
 | `--spatial-upscaler` | *(none)* | Spatial upscaler scale(s): `x2`, `x1.5`, or both |
 | `--spatial-upscaler-checkpoint` | *(download)* | Local path(s) to spatial upscaler checkpoints |
-| `--temporal-upscaler` | off | Include temporal x2 upscaler |
-| `--temporal-upscaler-checkpoint` | *(download)* | Local path to temporal upscaler checkpoint |
+| `--temporal-upscaler` | *(none)* | Temporal upscaler scale(s): `x2` |
+| `--temporal-upscaler-checkpoint` | *(download)* | Local path(s) to temporal upscaler checkpoints |
 
 ### Validate
 
@@ -131,10 +131,20 @@ LTX-2.3 consists of six core components from the main checkpoint, plus optional 
 | Transformer | None (all-Linear) | No |
 | VAE decoder/encoder | Conv3d | Yes |
 | Audio VAE | Conv1d | Yes |
-| Vocoder | Conv1d + ConvTranspose1d | Yes (ConvTranspose1d detected via `"ups"` in key) |
+| Vocoder | Conv1d + ConvTranspose1d + buffers | Yes (ConvTranspose1d detected via `"ups"` in key) |
 | Spatial upscaler x2 | Conv3d | Yes |
-| Spatial upscaler x1.5 | Conv3d + Conv2d (rational resampler) | Yes |
+| Spatial upscaler x1.5 | Conv3d + Conv2d (rational resampler) + buffer | Yes |
 | Temporal upscaler x2 | Conv3d | Yes |
+
+### Conv-like Buffers
+
+Some `register_buffer` tensors have conv-shaped layouts (3D+) and need the same transposition as conv weights. These are detected by suffix:
+
+| Suffix | Component | Keys | Shape | Transpose |
+|--------|-----------|------|-------|-----------|
+| `.filter` | Vocoder | `*.upsample.filter`, `*.downsample.lowpass.filter` | (1,1,12) | Conv1d (0,2,1) |
+| `.basis` | Vocoder | `mel_stft.stft_fn.forward_basis`, `mel_stft.stft_fn.inverse_basis` | (514,1,512) | Conv1d (0,2,1) |
+| `.kernel` | Spatial upscaler x1.5 | `upsampler.blur_down.kernel` | (1,1,5,5) | Conv2d (0,2,3,1) |
 
 ## Quantization Strategy
 
@@ -238,6 +248,7 @@ For the `split` command (legacy unified models):
 | Conv weights not transposed | Garbled output, NaN activations | Transpose all conv weights to channels-last |
 | ConvTranspose1d != Conv1d layout | Vocoder produces noise | `(I,O,K) → (O,K,I)` not `(O,I,K) → (O,K,I)` — detect via `"ups"` in key |
 | `per_channel_statistics` shared | VAE decode fails with missing keys | Duplicate to both decoder and encoder |
+| Conv-like buffers not transposed | Vocoder/upscaler produce incorrect output | Transpose 3D+ buffers ending in `.filter`, `.basis`, `.kernel` |
 | `last_scale_shift_table` absent | Confusion during validation | Normal — initialized to zeros at load time |
 
 ### Quantization Pitfalls
