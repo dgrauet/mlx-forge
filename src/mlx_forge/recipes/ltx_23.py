@@ -49,6 +49,8 @@ _COMPONENT_SIZE_MB = {
     "vae_encoder": 300,
     "audio_vae": 50,
     "vocoder": 50,
+    "spatial_upscaler": 1_000,
+    "temporal_upscaler_x2": 260,
 }
 
 _CHECKPOINT_SIZE_MB = 46_000  # ~46 GB download
@@ -61,6 +63,23 @@ COMPONENT_PREFIX = {
     "audio_vae": "audio_vae",
     "vocoder": "vocoder",
 }
+
+# ---------------------------------------------------------------------------
+# Upscaler checkpoint filenames on HuggingFace
+# ---------------------------------------------------------------------------
+
+SPATIAL_UPSCALER_FILES = {
+    "x2": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+    "x1.5": "ltx-2.3-spatial-upscaler-x1.5-1.0.safetensors",
+}
+
+# Maps CLI scale choice → output component name
+SPATIAL_UPSCALER_COMPONENT = {
+    "x2": "spatial_upscaler_x2",
+    "x1.5": "spatial_upscaler_x1_5",
+}
+
+TEMPORAL_UPSCALER_FILE = "ltx-2.3-temporal-upscaler-x2-1.0.safetensors"
 
 
 def classify_key(key: str) -> str | None:
@@ -370,6 +389,83 @@ def quantize_transformer(output_dir: Path, *, bits: int = 8, group_size: int = 6
 
 
 # ---------------------------------------------------------------------------
+# Upscaler conversion
+# ---------------------------------------------------------------------------
+
+
+def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
+    """Check if a key is a conv weight in the upscaler that needs transposition."""
+    if not key.endswith(".weight"):
+        return False
+    # Conv weights are 3D+ (Conv1d/2d/3d). Norm/linear weights are 1D/2D.
+    if weight.ndim < 3:
+        return False
+    # BlurDownsample kernel buffer is a fixed depthwise blur filter (1,1,K,K) — also needs transpose
+    if "kernel" in key:
+        return True
+    # All other 3D+ .weight tensors in the upscaler are conv layers
+    return True
+
+
+def convert_upscaler(
+    checkpoint_path: str,
+    output_dir: Path,
+    component_name: str,
+) -> int:
+    """Convert a standalone upscaler checkpoint to MLX format.
+
+    The upscaler checkpoints have bare keys (no prefix). All conv weights
+    need PyTorch→MLX transposition.
+
+    Args:
+        checkpoint_path: Path to the upscaler .safetensors file.
+        output_dir: Output directory for the converted file.
+        component_name: Output filename stem (e.g. "spatial_upscaler").
+
+    Returns:
+        Number of weights saved.
+    """
+    print(f"\n[{component_name}] Loading {checkpoint_path}...")
+    weights = mx.load(checkpoint_path)
+    print(f"  {len(weights)} keys")
+
+    converted: dict[str, mx.array] = {}
+    for key in weights:
+        value = weights[key]
+
+        if _is_upscaler_conv_weight(key, value):
+            value = transpose_conv(value)
+
+        _materialize(value)
+        converted[f"{component_name}.{key}"] = value
+
+    output_file = output_dir / f"{component_name}.safetensors"
+    print(f"  Saving {len(converted)} weights to {output_file.name}...")
+    mx.save_safetensors(str(output_file), converted)
+
+    # Extract config from safetensors metadata
+    _, metadata = mx.load(checkpoint_path, return_metadata=True)
+    if metadata:
+        upscaler_config = {}
+        for k, v in metadata.items():
+            try:
+                upscaler_config[k] = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                upscaler_config[k] = v
+        if upscaler_config:
+            config_file = output_dir / f"{component_name}_config.json"
+            with open(config_file, "w") as f:
+                json.dump(upscaler_config, f, indent=2)
+            print(f"  Saved config to {config_file.name}")
+
+    count = len(converted)
+    del converted, weights
+    gc.collect()
+    mx.clear_cache()
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Main convert entry point
 # ---------------------------------------------------------------------------
 
@@ -408,16 +504,34 @@ def _dry_run(args, output_dir: Path) -> None:
 
     print("  config.json, split_model.json, ...")
 
+    # Upscalers
+    upscaler_download_mb = 0.0
+    for scale in args.spatial_upscaler:
+        size_mb = _COMPONENT_SIZE_MB["spatial_upscaler"]
+        comp_name = SPATIAL_UPSCALER_COMPONENT[scale]
+        filename = SPATIAL_UPSCALER_FILES[scale]
+        print(f"  {comp_name}.safetensors: ~{fmt_size(size_mb)} (fp16)")
+        total_mb += size_mb
+        upscaler_download_mb += size_mb
+        print(f"    Source: {filename}")
+    if args.temporal_upscaler:
+        size_mb = _COMPONENT_SIZE_MB["temporal_upscaler_x2"]
+        print(f"  temporal_upscaler.safetensors: ~{fmt_size(size_mb)} (fp16)")
+        total_mb += size_mb
+        upscaler_download_mb += size_mb
+        print(f"    Source: {TEMPORAL_UPSCALER_FILE}")
+
     # Quantization
     if args.quantize:
         print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
         print("  Target: transformer_blocks Linear weights only")
 
     # Totals
+    total_download = _CHECKPOINT_SIZE_MB + upscaler_download_mb
     print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
     if not args.checkpoint:
-        print(f"Estimated download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)}")
-        print(f"Estimated total disk: ~{fmt_size(total_mb + _CHECKPOINT_SIZE_MB)}")
+        print(f"Estimated download:   ~{fmt_size(total_download)}")
+        print(f"Estimated total disk: ~{fmt_size(total_mb + total_download)}")
 
 
 def convert(args) -> None:
@@ -509,11 +623,44 @@ def convert(args) -> None:
     gc.collect()
     mx.clear_cache()
 
-    # Step 5: Create split_model.json
+    # Step 5: Convert upscalers (separate checkpoint files)
+    upscaler_components = []
+    download_dir = Path("models") / "ltx-2.3-src"
+
+    for i, scale in enumerate(args.spatial_upscaler):
+        comp_name = SPATIAL_UPSCALER_COMPONENT[scale]
+        filename = SPATIAL_UPSCALER_FILES[scale]
+        if i < len(args.spatial_upscaler_checkpoint):
+            upscaler_path = args.spatial_upscaler_checkpoint[i]
+        else:
+            print(f"\nDownloading spatial upscaler {scale} ({filename})...")
+            download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
+            upscaler_path = str(download_dir / filename)
+        t0 = time.monotonic()
+        count = convert_upscaler(upscaler_path, output_dir, comp_name)
+        total_weights += count
+        upscaler_components.append(comp_name)
+        print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+
+    if args.temporal_upscaler:
+        if args.temporal_upscaler_checkpoint:
+            upscaler_path = args.temporal_upscaler_checkpoint
+        else:
+            print(f"\nDownloading temporal upscaler ({TEMPORAL_UPSCALER_FILE})...")
+            download_hf_files("Lightricks/LTX-2.3", [TEMPORAL_UPSCALER_FILE], download_dir)
+            upscaler_path = str(download_dir / TEMPORAL_UPSCALER_FILE)
+        t0 = time.monotonic()
+        count = convert_upscaler(upscaler_path, output_dir, "temporal_upscaler_x2")
+        total_weights += count
+        upscaler_components.append("temporal_upscaler_x2")
+        print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+
+    # Step 6: Create split_model.json
+    all_components = COMPONENTS + upscaler_components
     split_info = {
         "format": "split",
         "model_version": config["model_version"],
-        "components": COMPONENTS,
+        "components": all_components,
         "source": "Lightricks/LTX-2.3",
         "variant": args.variant,
         "notes": {
@@ -532,7 +679,7 @@ def convert(args) -> None:
             size_mb = p.stat().st_size / (1024 * 1024)
             print(f"  {p.name}: {size_mb:.1f} MB")
 
-    # Step 6: Optional quantization
+    # Step 7: Optional quantization
     if args.quantize:
         quantize_transformer(output_dir, bits=args.bits, group_size=args.group_size)
 
@@ -587,7 +734,17 @@ def validate(args) -> None:
     ]
     for fname in expected:
         validate_file_exists(model_dir, fname, result)
-    for fname in ["quantize_config.json", "embedded_config.json"]:
+    optional_files = [
+        "quantize_config.json",
+        "embedded_config.json",
+        "spatial_upscaler_x2.safetensors",
+        "spatial_upscaler_x2_config.json",
+        "spatial_upscaler_x1_5.safetensors",
+        "spatial_upscaler_x1_5_config.json",
+        "temporal_upscaler.safetensors",
+        "temporal_upscaler_config.json",
+    ]
+    for fname in optional_files:
         if (model_dir / fname).exists():
             print(f"  \033[92m\u2713\033[0m {fname} exists (optional)")
 
@@ -757,6 +914,54 @@ def validate(args) -> None:
         gc.collect()
         mx.clear_cache()
 
+    # Upscalers (optional)
+    for upscaler_name in ["spatial_upscaler_x2", "spatial_upscaler_x1_5", "temporal_upscaler_x2"]:
+        upscaler_path = model_dir / f"{upscaler_name}.safetensors"
+        if upscaler_path.exists():
+            print(f"\n== {upscaler_name} Weights ==")
+            weights = mx.load(str(upscaler_path))
+            prefix = f"{upscaler_name}."
+            has_prefix = all(k.startswith(prefix) for k in weights)
+            result.check(
+                has_prefix,
+                f"All keys have '{prefix}' prefix ({len(weights)} keys)",
+            )
+
+            # Check expected structure: initial_conv, res_blocks, upsampler,
+            # post_upsample_res_blocks, final_conv
+            bare_keys = {k.removeprefix(prefix) for k in weights}
+            result.check(
+                "initial_conv.weight" in bare_keys,
+                f"{upscaler_name}: initial_conv present",
+            )
+            result.check(
+                "final_conv.weight" in bare_keys,
+                f"{upscaler_name}: final_conv present",
+            )
+            res_block_keys = [k for k in bare_keys if k.startswith("res_blocks.")]
+            result.check(
+                len(res_block_keys) > 0,
+                f"{upscaler_name}: res_blocks present ({len(res_block_keys)} keys)",
+            )
+            post_keys = [k for k in bare_keys if k.startswith("post_upsample_res_blocks.")]
+            result.check(
+                len(post_keys) > 0,
+                f"{upscaler_name}: post_upsample_res_blocks present ({len(post_keys)} keys)",
+            )
+
+            # Validate conv layout (channels-last) — spatial uses Conv2d, temporal Conv3d
+            conv_keys = {wk: wv for wk, wv in weights.items() if "conv" in wk.lower()}
+            has_4d = any(v.ndim == 4 for v in conv_keys.values())
+            has_5d = any(v.ndim == 5 for v in conv_keys.values())
+            if has_4d:
+                validate_conv_layout(weights, result, ndim=4)
+            if has_5d:
+                validate_conv_layout(weights, result, ndim=5)
+
+            del weights
+            gc.collect()
+            mx.clear_cache()
+
     # Cross-reference
     if hasattr(args, "source") and args.source:
         _cross_reference(model_dir, args.source, result)
@@ -878,6 +1083,36 @@ def add_convert_args(parser) -> None:
         "--dry-run",
         action="store_true",
         help="Preview conversion plan without downloading or writing anything",
+    )
+    # Upscalers
+    parser.add_argument(
+        "--spatial-upscaler",
+        type=str,
+        nargs="+",
+        default=[],
+        choices=["x2", "x1.5"],
+        help="Include spatial upscaler(s) (separate download from HF). Can specify multiple.",
+    )
+    parser.add_argument(
+        "--spatial-upscaler-checkpoint",
+        type=str,
+        nargs="+",
+        default=[],
+        help=(
+            "Path(s) to local spatial upscaler .safetensors (skips download). "
+            "Must match --spatial-upscaler order."
+        ),
+    )
+    parser.add_argument(
+        "--temporal-upscaler",
+        action="store_true",
+        help="Include temporal x2 upscaler (separate download from HF)",
+    )
+    parser.add_argument(
+        "--temporal-upscaler-checkpoint",
+        type=str,
+        default=None,
+        help="Path to local temporal upscaler .safetensors (skips download)",
     )
 
 

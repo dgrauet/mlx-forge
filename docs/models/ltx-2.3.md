@@ -15,11 +15,14 @@ mlx-forge convert ltx-2.3 --variant dev
 # Convert + quantize in one pass
 mlx-forge convert ltx-2.3 --quantize --bits 8
 
+# Convert with upscalers (separate downloads from HF)
+mlx-forge convert ltx-2.3 --spatial-upscaler x2 x1.5 --temporal-upscaler
+
 # Convert from a local checkpoint
 mlx-forge convert ltx-2.3 --checkpoint ./ltx-2.3-22b-distilled.safetensors
 
 # Preview conversion plan (no download, no writes)
-mlx-forge convert ltx-2.3 --quantize --bits 8 --dry-run
+mlx-forge convert ltx-2.3 --quantize --bits 8 --spatial-upscaler x2 --dry-run
 
 # Validate a converted model
 mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
@@ -41,6 +44,10 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 | `--bits` | `8` | Quantization bits (`4` or `8`) |
 | `--group-size` | `64` | Quantization group size |
 | `--dry-run` | off | Preview conversion plan without downloading or writing |
+| `--spatial-upscaler` | *(none)* | Spatial upscaler scale(s): `x2`, `x1.5`, or both |
+| `--spatial-upscaler-checkpoint` | *(download)* | Local path(s) to spatial upscaler checkpoints |
+| `--temporal-upscaler` | off | Include temporal x2 upscaler |
+| `--temporal-upscaler-checkpoint` | *(download)* | Local path to temporal upscaler checkpoint |
 
 ### Validate
 
@@ -51,7 +58,7 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 
 ## Model Architecture
 
-LTX-2.3 consists of six components, each saved as a separate safetensors file:
+LTX-2.3 consists of six core components from the main checkpoint, plus optional upscalers (separate downloads):
 
 ```
                 ┌─────────────────────────────────────┐
@@ -69,6 +76,16 @@ LTX-2.3 consists of six components, each saved as a separate safetensors file:
    │  only  │ │  text   │ │        │ │        │ │        │ │        │
    └────────┘ └─────────┘ └────────┘ └────────┘ └────────┘ └────────┘
      ~44 GB     ~200 MB     ~300 MB    ~300 MB    ~50 MB     ~50 MB
+
+   Optional upscalers (separate checkpoint files):
+   ┌────────────┐ ┌────────────┐ ┌────────────┐
+   │  Spatial   │ │  Spatial   │ │  Temporal  │
+   │ Upscaler   │ │ Upscaler   │ │ Upscaler   │
+   │    x2      │ │   x1.5     │ │    x2      │
+   │  Conv3d    │ │ Conv3d +   │ │  Conv3d    │
+   │ +PixShuf   │ │ Rational   │ │ +PixShuf   │
+   └────────────┘ └────────────┘ └────────────┘
+      ~950 MB       ~1.0 GB        ~250 MB
 ```
 
 ### Key Classification
@@ -115,6 +132,9 @@ LTX-2.3 consists of six components, each saved as a separate safetensors file:
 | VAE decoder/encoder | Conv3d | Yes |
 | Audio VAE | Conv1d | Yes |
 | Vocoder | Conv1d + ConvTranspose1d | Yes (ConvTranspose1d detected via `"ups"` in key) |
+| Spatial upscaler x2 | Conv3d | Yes |
+| Spatial upscaler x1.5 | Conv3d + Conv2d (rational resampler) | Yes |
+| Temporal upscaler x2 | Conv3d | Yes |
 
 ## Quantization Strategy
 
@@ -132,6 +152,27 @@ Only `transformer_blocks` Linear weights are quantized (int8 recommended).
 | Embedding layers | Small tensors, negligible savings |
 
 Recommended setting: `--bits 8 --group-size 64` (transformer: ~44 GB → ~22 GB).
+
+## Upscalers
+
+LTX-2.3 includes optional latent upscalers for multi-stage pipelines. These are **separate checkpoint files** on HuggingFace (not part of the main 46 GB checkpoint).
+
+| Upscaler | Scale | HF file | Architecture | Size |
+|----------|-------|---------|-------------|------|
+| Spatial x2 | 2x resolution | `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` | Conv3d + PixelShuffle(2) | ~950 MB |
+| Spatial x1.5 | 1.5x resolution | `ltx-2.3-spatial-upscaler-x1.5-1.0.safetensors` | Conv3d + SpatialRationalResampler | ~1.0 GB |
+| Temporal x2 | 2x frame rate | `ltx-2.3-temporal-upscaler-x2-1.0.safetensors` | Conv3d + PixelShuffle(1) | ~250 MB |
+
+All upscalers share the `LatentUpsampler` architecture:
+- `initial_conv` → `initial_norm` (GroupNorm) → SiLU
+- 4 `res_blocks` (ResBlock = conv + norm + conv + norm + residual)
+- `upsampler` (varies by type)
+- 4 `post_upsample_res_blocks`
+- `final_conv`
+
+The spatial x1.5 upscaler uses a `SpatialRationalResampler` (Conv2d → PixelShuffle → BlurDownsample) instead of a simple PixelShuffle, which also adds a `blur_down.kernel` buffer (fixed binomial filter).
+
+**Upscalers are never quantized** — they are entirely Conv-based (no Linear layers), and the quality loss would outweigh the negligible size savings.
 
 ## Shared VAE Statistics
 
@@ -155,16 +196,22 @@ These are extracted from the safetensors file metadata and written to `config.js
 
 ```
 output_dir/
-├── config.json                # Architectural parameters
-├── embedded_config.json       # Original embedded config (if present)
-├── split_model.json           # Split metadata (source, variant, components)
-├── transformer.safetensors    # ~44 GB (fp16) or ~22 GB (int8)
-├── connector.safetensors      # ~200 MB
-├── vae_decoder.safetensors    # ~300 MB
-├── vae_encoder.safetensors    # ~300 MB
-├── audio_vae.safetensors      # ~50 MB
-├── vocoder.safetensors        # ~50 MB
-└── quantize_config.json       # Only if --quantize was used
+├── config.json                       # Architectural parameters
+├── embedded_config.json              # Original embedded config (if present)
+├── split_model.json                  # Split metadata (source, variant, components)
+├── transformer.safetensors           # ~44 GB (fp16) or ~22 GB (int8)
+├── connector.safetensors             # ~200 MB
+├── vae_decoder.safetensors           # ~300 MB
+├── vae_encoder.safetensors           # ~300 MB
+├── audio_vae.safetensors             # ~50 MB
+├── vocoder.safetensors               # ~50 MB
+├── quantize_config.json              # Only if --quantize was used
+├── spatial_upscaler_x2.safetensors   # ~950 MB (optional, --spatial-upscaler x2)
+├── spatial_upscaler_x2_config.json   # Upscaler config from safetensors metadata
+├── spatial_upscaler_x1_5.safetensors # ~1.0 GB (optional, --spatial-upscaler x1.5)
+├── spatial_upscaler_x1_5_config.json
+├── temporal_upscaler_x2.safetensors  # ~250 MB (optional, --temporal-upscaler)
+└── temporal_upscaler_x2_config.json
 ```
 
 ## Split Component Map
@@ -226,4 +273,5 @@ The `validate` command verifies:
 - Conv weights in MLX channels-last layout
 - Quantization pairs (.scales/.biases) are consistent
 - Per-channel statistics present in VAE components
+- Upscalers (if present): correct prefix, expected structure (initial_conv, res_blocks, post_upsample_res_blocks, final_conv), conv layout
 - Optional: cross-reference tensor values against source checkpoint
