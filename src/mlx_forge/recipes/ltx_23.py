@@ -50,7 +50,7 @@ _COMPONENT_SIZE_MB = {
     "audio_vae": 50,
     "vocoder": 50,
     "spatial_upscaler": 1_000,
-    "temporal_upscaler_x2": 260,
+    "temporal_upscaler": 260,
 }
 
 _CHECKPOINT_SIZE_MB = 46_000  # ~46 GB download
@@ -73,13 +73,14 @@ SPATIAL_UPSCALER_FILES = {
     "x1.5": "ltx-2.3-spatial-upscaler-x1.5-1.0.safetensors",
 }
 
-# Maps CLI scale choice → output component name
+# Maps CLI scale choice → output component name (includes version)
 SPATIAL_UPSCALER_COMPONENT = {
-    "x2": "spatial_upscaler_x2",
-    "x1.5": "spatial_upscaler_x1_5",
+    "x2": "spatial_upscaler_x2_v1_1",
+    "x1.5": "spatial_upscaler_x1_5_v1_0",
 }
 
 TEMPORAL_UPSCALER_FILE = "ltx-2.3-temporal-upscaler-x2-1.0.safetensors"
+TEMPORAL_UPSCALER_COMPONENT = "temporal_upscaler_x2_v1_0"
 
 
 def classify_key(key: str) -> str | None:
@@ -515,8 +516,8 @@ def _dry_run(args, output_dir: Path) -> None:
         upscaler_download_mb += size_mb
         print(f"    Source: {filename}")
     if args.temporal_upscaler:
-        size_mb = _COMPONENT_SIZE_MB["temporal_upscaler_x2"]
-        print(f"  temporal_upscaler.safetensors: ~{fmt_size(size_mb)} (fp16)")
+        size_mb = _COMPONENT_SIZE_MB["temporal_upscaler"]
+        print(f"  {TEMPORAL_UPSCALER_COMPONENT}.safetensors: ~{fmt_size(size_mb)} (fp16)")
         total_mb += size_mb
         upscaler_download_mb += size_mb
         print(f"    Source: {TEMPORAL_UPSCALER_FILE}")
@@ -650,9 +651,9 @@ def convert(args) -> None:
             download_hf_files("Lightricks/LTX-2.3", [TEMPORAL_UPSCALER_FILE], download_dir)
             upscaler_path = str(download_dir / TEMPORAL_UPSCALER_FILE)
         t0 = time.monotonic()
-        count = convert_upscaler(upscaler_path, output_dir, "temporal_upscaler_x2")
+        count = convert_upscaler(upscaler_path, output_dir, TEMPORAL_UPSCALER_COMPONENT)
         total_weights += count
-        upscaler_components.append("temporal_upscaler_x2")
+        upscaler_components.append(TEMPORAL_UPSCALER_COMPONENT)
         print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
     # Step 6: Create split_model.json
@@ -734,16 +735,11 @@ def validate(args) -> None:
     ]
     for fname in expected:
         validate_file_exists(model_dir, fname, result)
-    optional_files = [
-        "quantize_config.json",
-        "embedded_config.json",
-        "spatial_upscaler_x2.safetensors",
-        "spatial_upscaler_x2_config.json",
-        "spatial_upscaler_x1_5.safetensors",
-        "spatial_upscaler_x1_5_config.json",
-        "temporal_upscaler.safetensors",
-        "temporal_upscaler_config.json",
-    ]
+    _upscaler_names = list(SPATIAL_UPSCALER_COMPONENT.values()) + [TEMPORAL_UPSCALER_COMPONENT]
+    optional_files = ["quantize_config.json", "embedded_config.json"]
+    for name in _upscaler_names:
+        optional_files.append(f"{name}.safetensors")
+        optional_files.append(f"{name}_config.json")
     for fname in optional_files:
         if (model_dir / fname).exists():
             print(f"  \033[92m\u2713\033[0m {fname} exists (optional)")
@@ -915,7 +911,7 @@ def validate(args) -> None:
         mx.clear_cache()
 
     # Upscalers (optional)
-    for upscaler_name in ["spatial_upscaler_x2", "spatial_upscaler_x1_5", "temporal_upscaler_x2"]:
+    for upscaler_name in _upscaler_names:
         upscaler_path = model_dir / f"{upscaler_name}.safetensors"
         if upscaler_path.exists():
             print(f"\n== {upscaler_name} Weights ==")

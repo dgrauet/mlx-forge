@@ -206,12 +206,12 @@ output_dir/
 ├── audio_vae.safetensors             # ~50 MB
 ├── vocoder.safetensors               # ~50 MB
 ├── quantize_config.json              # Only if --quantize was used
-├── spatial_upscaler_x2.safetensors   # ~950 MB (optional, --spatial-upscaler x2)
-├── spatial_upscaler_x2_config.json   # Upscaler config from safetensors metadata
-├── spatial_upscaler_x1_5.safetensors # ~1.0 GB (optional, --spatial-upscaler x1.5)
-├── spatial_upscaler_x1_5_config.json
-├── temporal_upscaler_x2.safetensors  # ~250 MB (optional, --temporal-upscaler)
-└── temporal_upscaler_x2_config.json
+├── spatial_upscaler_x2_v1_1.safetensors   # ~950 MB (optional, --spatial-upscaler x2)
+├── spatial_upscaler_x2_v1_1_config.json   # Upscaler config from safetensors metadata
+├── spatial_upscaler_x1_5_v1_0.safetensors # ~1.0 GB (optional, --spatial-upscaler x1.5)
+├── spatial_upscaler_x1_5_v1_0_config.json
+├── temporal_upscaler_x2_v1_0.safetensors  # ~250 MB (optional, --temporal-upscaler)
+└── temporal_upscaler_x2_v1_0_config.json
 ```
 
 ## Split Component Map
