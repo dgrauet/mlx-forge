@@ -79,8 +79,13 @@ SPATIAL_UPSCALER_COMPONENT = {
     "x1.5": "spatial_upscaler_x1_5_v1_0",
 }
 
-TEMPORAL_UPSCALER_FILE = "ltx-2.3-temporal-upscaler-x2-1.0.safetensors"
-TEMPORAL_UPSCALER_COMPONENT = "temporal_upscaler_x2_v1_0"
+TEMPORAL_UPSCALER_FILES = {
+    "x2": "ltx-2.3-temporal-upscaler-x2-1.0.safetensors",
+}
+
+TEMPORAL_UPSCALER_COMPONENT = {
+    "x2": "temporal_upscaler_x2_v1_0",
+}
 
 
 def classify_key(key: str) -> str | None:
@@ -197,10 +202,26 @@ SANITIZERS = {
 # ---------------------------------------------------------------------------
 
 
+def _is_conv_buffer(key: str, value: mx.array) -> bool:
+    """Check if a key is a register_buffer with conv-like layout (3D+) needing transposition.
+
+    Matches vocoder buffers: *.upsample.filter, *.downsample.lowpass.filter,
+    mel_stft.stft_fn.forward_basis, mel_stft.stft_fn.inverse_basis.
+    """
+    if value.ndim < 3:
+        return False
+    suffix = key.rsplit(".", 1)[-1]
+    return suffix in ("filter", "basis")
+
+
 def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
     """Transpose conv weights from PyTorch to MLX layout if needed."""
     if component == "transformer":
         return value  # All Linear, no conv
+
+    # Conv-like register_buffer tensors (filter, basis) need the same transpose
+    if _is_conv_buffer(key, value):
+        return transpose_conv(value)
 
     is_conv = (
         "conv" in key.lower() or (component == "vocoder" and "ups" in key)
@@ -396,16 +417,13 @@ def quantize_transformer(output_dir: Path, *, bits: int = 8, group_size: int = 6
 
 def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
     """Check if a key is a conv weight in the upscaler that needs transposition."""
-    if not key.endswith(".weight"):
-        return False
-    # Conv weights are 3D+ (Conv1d/2d/3d). Norm/linear weights are 1D/2D.
     if weight.ndim < 3:
         return False
-    # BlurDownsample kernel buffer is a fixed depthwise blur filter (1,1,K,K) — also needs transpose
-    if "kernel" in key:
+    # BlurDownsample kernel buffer is a fixed depthwise blur filter (1,1,K,K)
+    if key.endswith(".kernel"):
         return True
     # All other 3D+ .weight tensors in the upscaler are conv layers
-    return True
+    return key.endswith(".weight")
 
 
 def convert_upscaler(
@@ -515,12 +533,14 @@ def _dry_run(args, output_dir: Path) -> None:
         total_mb += size_mb
         upscaler_download_mb += size_mb
         print(f"    Source: {filename}")
-    if args.temporal_upscaler:
+    for scale in args.temporal_upscaler:
         size_mb = _COMPONENT_SIZE_MB["temporal_upscaler"]
-        print(f"  {TEMPORAL_UPSCALER_COMPONENT}.safetensors: ~{fmt_size(size_mb)} (fp16)")
+        comp_name = TEMPORAL_UPSCALER_COMPONENT[scale]
+        filename = TEMPORAL_UPSCALER_FILES[scale]
+        print(f"  {comp_name}.safetensors: ~{fmt_size(size_mb)} (fp16)")
         total_mb += size_mb
         upscaler_download_mb += size_mb
-        print(f"    Source: {TEMPORAL_UPSCALER_FILE}")
+        print(f"    Source: {filename}")
 
     # Quantization
     if args.quantize:
@@ -643,17 +663,19 @@ def convert(args) -> None:
         upscaler_components.append(comp_name)
         print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
-    if args.temporal_upscaler:
-        if args.temporal_upscaler_checkpoint:
-            upscaler_path = args.temporal_upscaler_checkpoint
+    for i, scale in enumerate(args.temporal_upscaler):
+        comp_name = TEMPORAL_UPSCALER_COMPONENT[scale]
+        filename = TEMPORAL_UPSCALER_FILES[scale]
+        if i < len(args.temporal_upscaler_checkpoint):
+            upscaler_path = args.temporal_upscaler_checkpoint[i]
         else:
-            print(f"\nDownloading temporal upscaler ({TEMPORAL_UPSCALER_FILE})...")
-            download_hf_files("Lightricks/LTX-2.3", [TEMPORAL_UPSCALER_FILE], download_dir)
-            upscaler_path = str(download_dir / TEMPORAL_UPSCALER_FILE)
+            print(f"\nDownloading temporal upscaler {scale} ({filename})...")
+            download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
+            upscaler_path = str(download_dir / filename)
         t0 = time.monotonic()
-        count = convert_upscaler(upscaler_path, output_dir, TEMPORAL_UPSCALER_COMPONENT)
+        count = convert_upscaler(upscaler_path, output_dir, comp_name)
         total_weights += count
-        upscaler_components.append(TEMPORAL_UPSCALER_COMPONENT)
+        upscaler_components.append(comp_name)
         print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
     # Step 6: Create split_model.json
@@ -735,7 +757,9 @@ def validate(args) -> None:
     ]
     for fname in expected:
         validate_file_exists(model_dir, fname, result)
-    _upscaler_names = list(SPATIAL_UPSCALER_COMPONENT.values()) + [TEMPORAL_UPSCALER_COMPONENT]
+    _upscaler_names = list(SPATIAL_UPSCALER_COMPONENT.values()) + list(
+        TEMPORAL_UPSCALER_COMPONENT.values()
+    )
     optional_files = ["quantize_config.json", "embedded_config.json"]
     for name in _upscaler_names:
         optional_files.append(f"{name}.safetensors")
@@ -1101,14 +1125,21 @@ def add_convert_args(parser) -> None:
     )
     parser.add_argument(
         "--temporal-upscaler",
-        action="store_true",
-        help="Include temporal x2 upscaler (separate download from HF)",
+        type=str,
+        nargs="+",
+        default=[],
+        choices=list(TEMPORAL_UPSCALER_FILES),
+        help="Include temporal upscaler(s) (separate download from HF). Can specify multiple.",
     )
     parser.add_argument(
         "--temporal-upscaler-checkpoint",
         type=str,
-        default=None,
-        help="Path to local temporal upscaler .safetensors (skips download)",
+        nargs="+",
+        default=[],
+        help=(
+            "Path(s) to local temporal upscaler .safetensors (skips download). "
+            "Must match --temporal-upscaler order."
+        ),
     )
 
 
