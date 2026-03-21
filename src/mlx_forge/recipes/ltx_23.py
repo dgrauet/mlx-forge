@@ -920,8 +920,18 @@ def validate(args) -> None:
     avae_path = model_dir / "audio_vae.safetensors"
     if avae_path.exists():
         weights = mx.load(str(avae_path))
-        bad = [k for k in weights if "audio_vae.decoder." in k]
-        result.check(len(bad) == 0, f"No PyTorch 'audio_vae.decoder.' prefix (found {len(bad)})")
+        # Check prefix structure: all keys should start with audio_vae.
+        all_prefixed = all(k.startswith("audio_vae.") for k in weights)
+        result.check(all_prefixed, f"All keys have 'audio_vae.' prefix ({len(weights)} keys)")
+        # Check decoder and encoder keys present
+        dec_keys = [k for k in weights if k.startswith("audio_vae.decoder.")]
+        enc_keys = [k for k in weights if k.startswith("audio_vae.encoder.")]
+        stats_keys = [k for k in weights if "per_channel_statistics" in k]
+        result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
+        result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
+        result.check(len(stats_keys) >= 2, f"Per-channel statistics present ({len(stats_keys)})")
+        # Check Conv2d layout (4D weights should be OHWI)
+        validate_conv_layout(weights, result, ndim=4)
         del weights
         gc.collect()
         mx.clear_cache()
