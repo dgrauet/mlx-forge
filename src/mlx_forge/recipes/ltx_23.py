@@ -168,15 +168,30 @@ def sanitize_vae_encoder_key(key: str) -> str | None:
 
 
 def sanitize_audio_vae_key(key: str) -> str | None:
-    """Convert a PyTorch audio VAE key to MLX format."""
-    if key.startswith("audio_vae.decoder."):
-        return key.replace("audio_vae.decoder.", "")
-    if key.startswith("audio_vae.per_channel_statistics."):
-        if "mean-of-means" in key:
+    """Convert a PyTorch audio VAE key to MLX format.
+
+    Handles decoder, encoder, and per-channel statistics keys.
+    Output format preserves decoder/encoder prefix so ltx-2-mlx can load
+    each sub-model by prefix filtering.
+
+    Examples:
+        audio_vae.decoder.conv_in.weight -> decoder.conv_in.weight
+        audio_vae.encoder.conv_in.weight -> encoder.conv_in.weight
+        audio_vae.per_channel_statistics.mean-of-means -> per_channel_statistics._mean_of_means
+    """
+    if not key.startswith("audio_vae."):
+        return None
+    suffix = key[len("audio_vae.") :]
+    # Per-channel statistics: remap hyphenated buffer names to underscore-prefixed
+    if suffix.startswith("per_channel_statistics."):
+        if "mean-of-means" in suffix:
             return "per_channel_statistics._mean_of_means"
-        if "std-of-means" in key:
+        if "std-of-means" in suffix:
             return "per_channel_statistics._std_of_means"
         return None
+    # Decoder and encoder keys: keep decoder./encoder. prefix
+    if suffix.startswith("decoder.") or suffix.startswith("encoder."):
+        return suffix
     return None
 
 

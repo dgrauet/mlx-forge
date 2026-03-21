@@ -96,7 +96,16 @@ class TestSanitizeVaeEncoderKey:
 
 class TestSanitizeAudioVaeKey:
     def test_decoder_prefix(self):
-        assert sanitize_audio_vae_key("audio_vae.decoder.conv_in.weight") == "conv_in.weight"
+        key = "audio_vae.decoder.conv_in.weight"
+        assert sanitize_audio_vae_key(key) == "decoder.conv_in.weight"
+
+    def test_encoder_prefix(self):
+        key = "audio_vae.encoder.conv_in.weight"
+        assert sanitize_audio_vae_key(key) == "encoder.conv_in.weight"
+
+    def test_encoder_down_block(self):
+        key = "audio_vae.encoder.down.0.block.0.conv1.weight"
+        assert sanitize_audio_vae_key(key) == "encoder.down.0.block.0.conv1.weight"
 
     def test_stats(self):
         result = sanitize_audio_vae_key("audio_vae.per_channel_statistics.mean-of-means")
