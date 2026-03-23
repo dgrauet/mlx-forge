@@ -15,8 +15,8 @@ from pathlib import Path
 import mlx.core as mx
 from huggingface_hub import hf_hub_download
 
-# Enable hf_transfer for faster downloads when available
-os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+# Enable high-performance mode for hf-xet (saturates network bandwidth)
+os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 from huggingface_hub.errors import (
     HfHubHTTPError,
     LocalEntryNotFoundError,

@@ -10,8 +10,8 @@ import json
 import os
 from pathlib import Path
 
-# Enable hf_transfer for faster uploads when available
-os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+# Enable high-performance mode for hf-xet (saturates network bandwidth)
+os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
