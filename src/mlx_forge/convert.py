@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import gc
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
 import mlx.core as mx
 from huggingface_hub import hf_hub_download
+
+# Enable hf_transfer for faster downloads when available
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 from huggingface_hub.errors import (
     HfHubHTTPError,
     LocalEntryNotFoundError,
@@ -151,6 +155,7 @@ def process_component(
     *,
     sanitizer: Callable[[str], str | None],
     transform: WeightTransform | None = None,
+    output_filename: str | None = None,
 ) -> int:
     """Process one component: sanitize keys, optionally transform, materialize, save.
 
@@ -162,6 +167,7 @@ def process_component(
         component_prefix: Prefix to prepend to sanitized keys in output.
         sanitizer: Function to rename keys. Returns None to skip a key.
         transform: Optional per-weight transform (e.g. conv transposition).
+        output_filename: Override output filename (default: {component_name}.safetensors).
 
     Returns:
         Number of weights saved.
@@ -185,7 +191,8 @@ def process_component(
         return 0
 
     count = len(component_weights)
-    output_file = output_dir / f"{component_name}.safetensors"
+    fname = output_filename or f"{component_name}.safetensors"
+    output_file = output_dir / fname
     print(f"  Saving {count} weights to {output_file.name}...")
     mx.save_safetensors(str(output_file), component_weights)
 

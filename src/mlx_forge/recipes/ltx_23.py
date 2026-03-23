@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import gc
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -85,6 +86,21 @@ TEMPORAL_UPSCALER_FILES = {
 
 TEMPORAL_UPSCALER_COMPONENT = {
     "x2": "temporal_upscaler_x2_v1_0",
+}
+
+# ---------------------------------------------------------------------------
+# LoRA checkpoint filenames on HuggingFace (synced as-is, no conversion)
+# ---------------------------------------------------------------------------
+
+LORA_FILES = {
+    "distilled-384": "ltx-2.3-22b-distilled-lora-384.safetensors",
+}
+
+_LORA_SIZE_MB = 7250  # ~7.25 GB
+
+VARIANT_FILENAMES = {
+    "distilled": "transformer-distilled.safetensors",
+    "dev": "transformer-dev.safetensors",
 }
 
 
@@ -256,12 +272,15 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
 def _detect_cross_attention_adaln(checkpoint_path: str) -> bool:
     """Detect if the model uses cross-attention AdaLN by inspecting weight shapes.
 
-    Dev (full) models have scale_shift_table with 9 params (6 base + 3 cross-attn).
-    Distilled models have 5 params (no cross-attention AdaLN).
+    Both 2.3 variants have scale_shift_table with 9 params (6 base + 3 cross-attn).
+    Earlier versions (pre-2.3) may have 5 params.
+
+    Matches only keys ending with '.scale_shift_table' to avoid picking up
+    cross-attention variants like 'scale_shift_table_a2v_ca_audio' (5 params).
     """
     weights = mx.load(checkpoint_path)
     for key in weights:
-        if "scale_shift_table" in key and "prompt" not in key and "audio_prompt" not in key:
+        if key.endswith(".scale_shift_table"):
             shape = weights[key].shape
             del weights
             return shape[0] == 9
@@ -269,14 +288,19 @@ def _detect_cross_attention_adaln(checkpoint_path: str) -> bool:
     return False
 
 
-def extract_config(checkpoint_path: str) -> dict:
-    """Read model config from safetensors file metadata."""
+def extract_config(checkpoint_path: str) -> tuple[dict, bool]:
+    """Read model config from safetensors file metadata.
+
+    Returns:
+        Tuple of (shared_config, cross_attention_adaln). The cross_attention_adaln
+        value is variant-specific and should be stored per-variant by the caller.
+    """
     _, metadata = mx.load(checkpoint_path, return_metadata=True)
 
     model_version = metadata.get("model_version", "unknown")
     is_v2 = model_version.startswith("2.3")
 
-    # Detect cross_attention_adaln from actual weights — distilled has 5 params, dev has 9
+    # Detect cross_attention_adaln from actual weights (both 2.3 variants have 9 params)
     has_cross_attn_adaln = _detect_cross_attention_adaln(checkpoint_path) if is_v2 else False
 
     config = {
@@ -291,7 +315,6 @@ def extract_config(checkpoint_path: str) -> dict:
         "cross_attention_dim": 4096,
         "caption_channels": None if is_v2 else 3840,
         "apply_gated_attention": is_v2,
-        "cross_attention_adaln": has_cross_attn_adaln,
         "audio_num_attention_heads": 32,
         "audio_attention_head_dim": 64,
         "audio_in_channels": 128,
@@ -317,7 +340,7 @@ def extract_config(checkpoint_path: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    return config
+    return config, has_cross_attn_adaln
 
 
 # ---------------------------------------------------------------------------
@@ -389,14 +412,17 @@ def ltx23_should_quantize(key: str, weight: mx.array) -> bool:
     )
 
 
-def quantize_transformer(output_dir: Path, *, bits: int = 8, group_size: int = 64) -> None:
+def quantize_transformer(
+    output_dir: Path, *, variant: str = "distilled", bits: int = 8, group_size: int = 64
+) -> None:
     """Quantize transformer weights in-place."""
-    tf_file = output_dir / "transformer.safetensors"
+    tf_filename = VARIANT_FILENAMES[variant]
+    tf_file = output_dir / tf_filename
     if not tf_file.exists():
-        print("ERROR: transformer.safetensors not found")
+        print(f"ERROR: {tf_filename} not found")
         return
 
-    print(f"\nQuantizing transformer to int{bits} (group_size={group_size})...")
+    print(f"\nQuantizing transformer ({variant}) to int{bits} (group_size={group_size})...")
     weights = mx.load(str(tf_file))
 
     result = quantize_weights(
@@ -506,6 +532,7 @@ def convert_upscaler(
 
 def _dry_run(args, output_dir: Path) -> None:
     """Print conversion plan without executing anything."""
+    variants: list[str] = args.variant
     print("=" * 60)
     print("DRY RUN — no files will be downloaded or written")
     print("=" * 60)
@@ -514,29 +541,37 @@ def _dry_run(args, output_dir: Path) -> None:
     if args.checkpoint:
         print(f"\nSource:     {args.checkpoint} (local)")
     else:
-        filename = f"ltx-2.3-22b-{args.variant}.safetensors"
-        print(f"\nSource:     Lightricks/LTX-2.3 / {filename}")
-        print(f"Download:   ~{_CHECKPOINT_SIZE_MB / 1000:.0f} GB → ./models/{filename}")
+        for v in variants:
+            filename = f"ltx-2.3-22b-{v}.safetensors"
+            print(f"\nSource:     Lightricks/LTX-2.3 / {filename}")
+            print(f"Download:   ~{_CHECKPOINT_SIZE_MB / 1000:.0f} GB → ./models/{filename}")
 
     # Output
-    print(f"Output dir: {output_dir}")
-    print(f"Variant:    {args.variant}")
+    print(f"\nOutput dir: {output_dir}")
+    print(f"Variants:   {', '.join(variants)}")
 
     # Components
-    print("\nOutput files:")
+    print("\nOutput files (shared):")
     total_mb = 0.0
-    for comp in COMPONENTS:
+    shared = [c for c in COMPONENTS if c != "transformer"]
+    for comp in shared:
         size_mb = _COMPONENT_SIZE_MB[comp]
-        if comp == "transformer" and args.quantize:
-            ratio = 16 / args.bits
-            size_mb = size_mb / ratio
-            label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})"
-        else:
-            label = f"  {comp}.safetensors: ~{fmt_size(size_mb)} (fp16)"
-        print(label)
+        print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (fp16)")
         total_mb += size_mb
 
-    print("  config.json, split_model.json, ...")
+    print("\nTransformer variants:")
+    for v in variants:
+        tf_name = VARIANT_FILENAMES[v]
+        size_mb = _COMPONENT_SIZE_MB["transformer"]
+        if args.quantize:
+            ratio = 16 / args.bits
+            size_mb = size_mb / ratio
+            print(f"  {tf_name}: ~{fmt_size(size_mb)} (int{args.bits})")
+        else:
+            print(f"  {tf_name}: ~{fmt_size(size_mb)} (fp16)")
+        total_mb += size_mb
+
+    print("\n  config.json, split_model.json, ...")
 
     # Upscalers
     upscaler_download_mb = 0.0
@@ -557,39 +592,49 @@ def _dry_run(args, output_dir: Path) -> None:
         upscaler_download_mb += size_mb
         print(f"    Source: {filename}")
 
+    # LoRA
+    lora_download_mb = 0.0
+    for lora_name in args.lora:
+        filename = LORA_FILES[lora_name]
+        print(f"  {filename}: ~{fmt_size(_LORA_SIZE_MB)} (bf16, synced as-is)")
+        total_mb += _LORA_SIZE_MB
+        lora_download_mb += _LORA_SIZE_MB
+
     # Quantization
     if args.quantize:
         print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
         print("  Target: transformer_blocks Linear weights only")
 
     # Totals
-    total_download = _CHECKPOINT_SIZE_MB + upscaler_download_mb
+    num_downloads = 0 if args.checkpoint else len(variants)
+    total_download = _CHECKPOINT_SIZE_MB * num_downloads + upscaler_download_mb + lora_download_mb
     print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
     if not args.checkpoint:
         print(f"Estimated download:   ~{fmt_size(total_download)}")
         print(f"Estimated total disk: ~{fmt_size(total_mb + total_download)}")
 
 
-def convert(args) -> None:
-    """Convert LTX-2.3 PyTorch checkpoint to MLX split format."""
-    if args.output:
-        output_dir = Path(args.output)
-    else:
-        suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"ltx-2.3-mlx-{args.variant}{suffix}"
+def _convert_variant(
+    args,
+    variant: str,
+    output_dir: Path,
+    *,
+    is_first: bool,
+) -> tuple[dict, bool, int]:
+    """Convert a single variant's checkpoint.
 
-    if args.dry_run:
-        _dry_run(args, output_dir)
-        return
+    For the first variant, processes all components (shared + transformer).
+    For subsequent variants, only processes the transformer (shared already exist).
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Step 1: Get checkpoint
+    Returns:
+        Tuple of (config_dict, cross_attention_adaln, total_weight_count).
+    """
+    # Get checkpoint
     if args.checkpoint:
         checkpoint_path = args.checkpoint
         print(f"Using local checkpoint: {checkpoint_path}")
     else:
-        filename = f"ltx-2.3-22b-{args.variant}.safetensors"
+        filename = f"ltx-2.3-22b-{variant}.safetensors"
         print(f"Downloading {filename} from Lightricks/LTX-2.3...")
         print("(This is ~46 GB, may take a while)")
         download_dir = Path("models") / "ltx-2.3-src"
@@ -597,21 +642,15 @@ def convert(args) -> None:
         checkpoint_path = str(download_dir / filename)
         print(f"Downloaded to: {checkpoint_path}")
 
-    # Step 2: Extract config
+    # Extract config
     print("\nExtracting config from safetensors metadata...")
-    config = extract_config(checkpoint_path)
+    config, cross_attn_adaln = extract_config(checkpoint_path)
     print(f"  Model version: {config['model_version']}")
     print(f"  Is V2 (2.3): {config['is_v2']}")
     print(f"  Gated attention: {config['apply_gated_attention']}")
+    print(f"  Cross-attention AdaLN: {cross_attn_adaln}")
 
-    config_out = {k: v for k, v in config.items() if k != "embedded_config"}
-    with open(output_dir / "config.json", "w") as f:
-        json.dump(config_out, f, indent=2)
-    if "embedded_config" in config:
-        with open(output_dir / "embedded_config.json", "w") as f:
-            json.dump(config["embedded_config"], f, indent=2)
-
-    # Step 3: Load weights lazily
+    # Load weights lazily
     print("\nLoading weights lazily via mx.load...")
     t0 = time.monotonic()
     checkpoint_weights = mx.load(checkpoint_path)
@@ -625,47 +664,126 @@ def convert(args) -> None:
         print(f"  {comp}: {len(keys)} keys")
     print(f"  Loaded + classified in {time.monotonic() - t0:.1f}s")
 
-    # Step 4: Process each component
+    # Determine which components to process
     total_weights = 0
-    for component_name in COMPONENTS:
-        keys = keys_by_component.get(component_name, [])
-        if not keys:
-            print(f"\n[{component_name}] No keys found, skipping")
-            continue
+    tf_filename = VARIANT_FILENAMES[variant]
 
-        component_prefix = COMPONENT_PREFIX[component_name]
-        print(f"\n[{component_name}] Processing {len(keys)} keys...")
-        t0 = time.monotonic()
-        count = process_component(
-            checkpoint_weights,
-            component_name,
-            keys,
-            output_dir,
-            component_prefix,
-            sanitizer=SANITIZERS[component_name],
-            transform=maybe_transpose,
-        )
-        elapsed = time.monotonic() - t0
-        total_weights += count
-        print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+    if is_first:
+        # First variant: process all components
+        for component_name in COMPONENTS:
+            keys = keys_by_component.get(component_name, [])
+            if not keys:
+                print(f"\n[{component_name}] No keys found, skipping")
+                continue
 
-    # Handle shared stats
-    shared_keys = keys_by_component.get("vae_shared_stats", [])
-    if shared_keys:
-        print(f"\n[shared stats] Processing {len(shared_keys)} per_channel_statistics keys...")
-        process_shared_stats(checkpoint_weights, shared_keys, output_dir)
+            component_prefix = COMPONENT_PREFIX[component_name]
+            out_name = tf_filename if component_name == "transformer" else None
+            print(f"\n[{component_name}] Processing {len(keys)} keys...")
+            t0 = time.monotonic()
+            count = process_component(
+                checkpoint_weights,
+                component_name,
+                keys,
+                output_dir,
+                component_prefix,
+                sanitizer=SANITIZERS[component_name],
+                transform=maybe_transpose,
+                output_filename=out_name,
+            )
+            elapsed = time.monotonic() - t0
+            total_weights += count
+            print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+
+        # Handle shared stats
+        shared_keys = keys_by_component.get("vae_shared_stats", [])
+        if shared_keys:
+            print(f"\n[shared stats] Processing {len(shared_keys)} per_channel_statistics keys...")
+            process_shared_stats(checkpoint_weights, shared_keys, output_dir)
+    else:
+        # Subsequent variant: only process transformer
+        keys = keys_by_component.get("transformer", [])
+        if keys:
+            print(f"\n[transformer → {tf_filename}] Processing {len(keys)} keys...")
+            t0 = time.monotonic()
+            count = process_component(
+                checkpoint_weights,
+                "transformer",
+                keys,
+                output_dir,
+                COMPONENT_PREFIX["transformer"],
+                sanitizer=SANITIZERS["transformer"],
+                transform=maybe_transpose,
+                output_filename=tf_filename,
+            )
+            elapsed = time.monotonic() - t0
+            total_weights += count
+            print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+        else:
+            print("\n[transformer] No keys found!")
 
     del checkpoint_weights
     gc.collect()
     mx.clear_cache()
 
-    # Step 5: Convert upscalers (separate checkpoint files)
+    return config, cross_attn_adaln, total_weights
+
+
+def convert(args) -> None:
+    """Convert LTX-2.3 PyTorch checkpoint to MLX split format."""
+    variants: list[str] = args.variant
+
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        suffix = f"-q{args.bits}" if args.quantize else ""
+        output_dir = Path("models") / f"ltx-2.3-mlx{suffix}"
+
+    if args.dry_run:
+        _dry_run(args, output_dir)
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Process each variant
+    total_weights = 0
+    variant_adaln: dict[str, bool] = {}
+    config = None
+
+    for i, variant in enumerate(variants):
+        print(f"\n{'=' * 60}")
+        print(f"Converting variant: {variant} ({i + 1}/{len(variants)})")
+        print("=" * 60)
+
+        cfg, cross_attn_adaln, count = _convert_variant(
+            args, variant, output_dir, is_first=(i == 0)
+        )
+        total_weights += count
+        variant_adaln[variant] = cross_attn_adaln
+        if config is None:
+            config = cfg
+
+    assert config is not None
+
+    # Write config.json with per-variant fields
+    config_out = {k: v for k, v in config.items() if k != "embedded_config"}
+    config_out["variants"] = {v: {"cross_attention_adaln": a} for v, a in variant_adaln.items()}
+    with open(output_dir / "config.json", "w") as f:
+        json.dump(config_out, f, indent=2)
+    if "embedded_config" in config:
+        with open(output_dir / "embedded_config.json", "w") as f:
+            json.dump(config["embedded_config"], f, indent=2)
+
+    # Convert upscalers (separate checkpoint files)
     upscaler_components = []
     download_dir = Path("models") / "ltx-2.3-src"
 
     for i, scale in enumerate(args.spatial_upscaler):
         comp_name = SPATIAL_UPSCALER_COMPONENT[scale]
         filename = SPATIAL_UPSCALER_FILES[scale]
+        if (output_dir / f"{comp_name}.safetensors").exists():
+            print(f"\n[{comp_name}] Already exists, skipping")
+            upscaler_components.append(comp_name)
+            continue
         if i < len(args.spatial_upscaler_checkpoint):
             upscaler_path = args.spatial_upscaler_checkpoint[i]
         else:
@@ -681,6 +799,10 @@ def convert(args) -> None:
     for i, scale in enumerate(args.temporal_upscaler):
         comp_name = TEMPORAL_UPSCALER_COMPONENT[scale]
         filename = TEMPORAL_UPSCALER_FILES[scale]
+        if (output_dir / f"{comp_name}.safetensors").exists():
+            print(f"\n[{comp_name}] Already exists, skipping")
+            upscaler_components.append(comp_name)
+            continue
         if i < len(args.temporal_upscaler_checkpoint):
             upscaler_path = args.temporal_upscaler_checkpoint[i]
         else:
@@ -693,14 +815,35 @@ def convert(args) -> None:
         upscaler_components.append(comp_name)
         print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
-    # Step 6: Create split_model.json
-    all_components = COMPONENTS + upscaler_components
-    split_info = {
+    # Sync LoRA files (no conversion, just download and copy)
+    lora_synced: list[str] = []
+    for lora_name in args.lora:
+        filename = LORA_FILES[lora_name]
+        dest = output_dir / filename
+        if dest.exists():
+            print(f"\n[lora:{lora_name}] {filename} already exists, skipping")
+            lora_synced.append(filename)
+            continue
+        if hasattr(args, "lora_checkpoint") and args.lora_checkpoint:
+            # Local override (not yet exposed via CLI, future-proof)
+            shutil.copy2(args.lora_checkpoint, str(dest))
+        else:
+            print(f"\nDownloading LoRA {lora_name} ({filename})...")
+            download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
+            src = download_dir / filename
+            shutil.copy2(str(src), str(dest))
+        lora_synced.append(filename)
+        print(f"  Synced {filename} ({dest.stat().st_size / (1024**2):.0f} MB)")
+
+    # Create split_model.json
+    shared_components = [c for c in COMPONENTS if c != "transformer"] + upscaler_components
+    split_info: dict = {
         "format": "split",
         "model_version": config["model_version"],
-        "components": all_components,
+        "components": shared_components,
+        "transformer_variants": list(variant_adaln.keys()),
+        "lora": lora_synced,
         "source": "Lightricks/LTX-2.3",
-        "variant": args.variant,
         "notes": {
             "vocoder": "Also contains BWE (bandwidth extension) generator weights"
             " — upsample layers [6,5,2,2,2] (240x) and mel_stft parameters.",
@@ -717,9 +860,12 @@ def convert(args) -> None:
             size_mb = p.stat().st_size / (1024 * 1024)
             print(f"  {p.name}: {size_mb:.1f} MB")
 
-    # Step 7: Optional quantization
+    # Optional quantization — quantize each variant's transformer
     if args.quantize:
-        quantize_transformer(output_dir, bits=args.bits, group_size=args.group_size)
+        for variant in variants:
+            quantize_transformer(
+                output_dir, variant=variant, bits=args.bits, group_size=args.group_size
+            )
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
@@ -738,6 +884,73 @@ def convert(args) -> None:
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
+
+def _validate_transformer(
+    model_dir: Path,
+    variant: str,
+    tf_filename: str,
+    result: ValidationResult,
+    *,
+    is_quantized: bool,
+) -> None:
+    """Validate a single transformer variant file."""
+    print(f"\n== Transformer Weights ({variant}) ==")
+    tf_path = model_dir / tf_filename
+    if not tf_path.exists():
+        result.check(False, f"{tf_filename} exists")
+        return
+
+    print(f"  \033[92m\u2713\033[0m {tf_filename} exists")
+    weights = mx.load(str(tf_path))
+    keys = set(weights.keys())
+
+    validate_no_pytorch_prefix(weights, "model.diffusion_model.", result)
+    result.check(not any(".ff.net." in k for k in keys), "No un-sanitized FF keys")
+    result.check(not any(".to_out.0." in k for k in keys), "No un-sanitized to_out keys")
+
+    gate_keys = [k for k in keys if "to_gate_logits" in k]
+    result.check(len(gate_keys) > 0, f"Gated attention keys present ({len(gate_keys)})")
+
+    prompt_adaln = [k for k in keys if "prompt_adaln_single" in k]
+    result.check(
+        len(prompt_adaln) > 0,
+        f"prompt_adaln_single keys present ({len(prompt_adaln)})",
+    )
+
+    block_indices = count_layer_indices(keys, block_key="transformer_blocks")
+    result.check(len(block_indices) == 48, f"48 transformer blocks (got {len(block_indices)})")
+
+    if is_quantized:
+        validate_quantization(weights, result, block_key="transformer_blocks")
+
+    sst_keys = [k for k in keys if k.endswith(".scale_shift_table")]
+    if sst_keys:
+        shape = weights[sst_keys[0]].shape
+        result.check(
+            shape[0] == _EXPECTED_SST_SIZE,
+            f"scale_shift_table param count (got {shape[0]}, expected {_EXPECTED_SST_SIZE})",
+        )
+
+    # last_scale_shift_table is NOT in the original weights — initialized to zeros
+    # at model load time. Its absence is expected and correct.
+    lsst_keys = [k for k in keys if "last_scale_shift_table" in k]
+    result.check(
+        len(lsst_keys) == 0,
+        "last_scale_shift_table absent (expected — initialized to zeros at load time)",
+        warn_only=True,
+    )
+
+    total_params = sum(v.size for v in weights.values())
+    print(f"  Total transformer parameters: {total_params / 1e9:.2f}B")
+    del weights
+    gc.collect()
+    mx.clear_cache()
+
+
+# Expected scale_shift_table size for LTX-2.3.
+# 9 params = 6 base + 3 cross-attn AdaLN. Both variants use this.
+_EXPECTED_SST_SIZE = 9
 
 
 def validate(args) -> None:
@@ -763,7 +976,6 @@ def validate(args) -> None:
     expected = [
         "config.json",
         "split_model.json",
-        "transformer.safetensors",
         "connector.safetensors",
         "vae_decoder.safetensors",
         "vae_encoder.safetensors",
@@ -772,6 +984,19 @@ def validate(args) -> None:
     ]
     for fname in expected:
         validate_file_exists(model_dir, fname, result)
+
+    # Check at least one transformer variant exists
+    found_variants: list[str] = []
+    for variant, tf_filename in VARIANT_FILENAMES.items():
+        if (model_dir / tf_filename).exists():
+            found_variants.append(variant)
+            print(f"  \033[92m\u2713\033[0m {tf_filename} exists ({variant})")
+    result.check(
+        len(found_variants) > 0,
+        "At least one transformer variant present"
+        f" (checked: {', '.join(VARIANT_FILENAMES.values())})",
+    )
+
     _upscaler_names = list(SPATIAL_UPSCALER_COMPONENT.values()) + list(
         TEMPORAL_UPSCALER_COMPONENT.values()
     )
@@ -795,12 +1020,6 @@ def validate(args) -> None:
         )
         result.check(config.get("is_v2") is True, "is_v2 flag is True")
         result.check(config.get("apply_gated_attention") is True, "apply_gated_attention is True")
-        cross_adaln = config.get("cross_attention_adaln")
-        result.check(
-            isinstance(cross_adaln, bool),
-            f"cross_attention_adaln is bool (got: {cross_adaln})"
-            " — True for dev, False for distilled",
-        )
         result.check(config.get("caption_channels") is None, "caption_channels is None (V2)")
         result.check(
             config.get("num_layers") == 48, f"num_layers == 48 (got: {config.get('num_layers')})"
@@ -819,63 +1038,26 @@ def validate(args) -> None:
             f"connector_rope_type == SPLIT (got: {config.get('connector_rope_type')})",
         )
 
-    # Transformer
-    print("\n== Transformer Weights ==")
-    tf_path = model_dir / "transformer.safetensors"
-    if tf_path.exists():
-        weights = mx.load(str(tf_path))
-        keys = set(weights.keys())
-
-        validate_no_pytorch_prefix(weights, "model.diffusion_model.", result)
-        result.check(not any(".ff.net." in k for k in keys), "No un-sanitized FF keys")
-        result.check(not any(".to_out.0." in k for k in keys), "No un-sanitized to_out keys")
-
-        gate_keys = [k for k in keys if "to_gate_logits" in k]
-        result.check(len(gate_keys) > 0, f"Gated attention keys present ({len(gate_keys)})")
-
-        prompt_adaln = [k for k in keys if "prompt_adaln_single" in k]
-        result.check(
-            len(prompt_adaln) > 0,
-            f"prompt_adaln_single keys present ({len(prompt_adaln)})",
-        )
-
-        block_indices = count_layer_indices(keys, block_key="transformer_blocks")
-        result.check(len(block_indices) == 48, f"48 transformer blocks (got {len(block_indices)})")
-
-        if is_quantized:
-            validate_quantization(weights, result, block_key="transformer_blocks")
-
-        sst_keys = [
-            k
-            for k in keys
-            if "scale_shift_table" in k and "prompt" not in k and "audio_prompt" not in k
-        ]
-        if sst_keys:
-            shape = weights[sst_keys[0]].shape
-            # AdaLN params vary by variant:
-            #   dev (full, cross_attention_adaln=True): 9 params (6 base + 3 cross-attn)
-            #   distilled (cross_attention_adaln=False): 5 params
-            valid_sizes = {5, 9}
+        # Per-variant config — both 2.3 variants have cross_attention_adaln=True
+        variants_cfg = config.get("variants", {})
+        for variant in found_variants:
+            vcfg = variants_cfg.get(variant, {})
+            cross_adaln = vcfg.get("cross_attention_adaln")
             result.check(
-                shape[0] in valid_sizes,
-                f"scale_shift_table has valid param count"
-                f" (got {shape[0]}, expected one of {valid_sizes})",
+                cross_adaln is True,
+                f"variants.{variant}.cross_attention_adaln == True (got: {cross_adaln})",
             )
 
-        # last_scale_shift_table is NOT in the original weights — initialized to zeros
-        # at model load time. Its absence is expected and correct.
-        lsst_keys = [k for k in keys if "last_scale_shift_table" in k]
-        result.check(
-            len(lsst_keys) == 0,
-            "last_scale_shift_table absent (expected — initialized to zeros at load time)",
-            warn_only=True,
+    # Validate each transformer variant
+    for variant in found_variants:
+        tf_filename = VARIANT_FILENAMES[variant]
+        _validate_transformer(
+            model_dir,
+            variant,
+            tf_filename,
+            result,
+            is_quantized=is_quantized,
         )
-
-        total_params = sum(v.size for v in weights.values())
-        print(f"  Total transformer parameters: {total_params / 1e9:.2f}B")
-        del weights
-        gc.collect()
-        mx.clear_cache()
 
     # Connector
     print("\n== Connector Weights ==")
@@ -1026,6 +1208,12 @@ def _cross_reference(model_dir: Path, source_path: str, result: ValidationResult
     classified = sum(1 for k in source_weights if classify_key(k) is not None)
     result.check(classified > 0, f"Classified {classified}/{len(source_weights)} source keys")
 
+    # Detect which variant this source is (dev=9 params, distilled=5)
+    has_cross_attn = _detect_cross_attention_adaln(source_path)
+    variant = "dev" if has_cross_attn else "distilled"
+    tf_filename = VARIANT_FILENAMES[variant]
+    print(f"  Detected variant: {variant} → {tf_filename}")
+
     # Spot-check tensor values
     print("\n  Spot-checking tensor values...")
     spot_checks = [
@@ -1034,7 +1222,13 @@ def _cross_reference(model_dir: Path, source_path: str, result: ValidationResult
         "model.diffusion_model.transformer_blocks.0.attn1.to_gate_logits.weight",
     ]
 
-    tf_weights = mx.load(str(model_dir / "transformer.safetensors"))
+    tf_path = model_dir / tf_filename
+    if not tf_path.exists():
+        result.check(False, f"{tf_filename} exists for cross-reference")
+        del source_weights
+        return
+
+    tf_weights = mx.load(str(tf_path))
 
     for src_key in spot_checks:
         if src_key not in source_weights:
@@ -1105,15 +1299,16 @@ def add_convert_args(parser) -> None:
     parser.add_argument(
         "--variant",
         type=str,
-        default="distilled",
+        nargs="*",
+        default=["distilled", "dev"],
         choices=["distilled", "dev"],
-        help="Model variant (default: distilled)",
+        help="Transformer variant(s) to convert (default: both)",
     )
     parser.add_argument(
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ./models/ltx-2.3-mlx-<variant>[-q<bits>])",
+        help="Output directory (default: ./models/ltx-2.3-mlx[-q<bits>])",
     )
     parser.add_argument(
         "--quantize", action="store_true", help="Quantize transformer after conversion"
@@ -1133,10 +1328,10 @@ def add_convert_args(parser) -> None:
     parser.add_argument(
         "--spatial-upscaler",
         type=str,
-        nargs="+",
-        default=[],
+        nargs="*",
+        default=list(SPATIAL_UPSCALER_FILES),
         choices=["x2", "x1.5"],
-        help="Include spatial upscaler(s) (separate download from HF). Can specify multiple.",
+        help="Spatial upscaler(s) to include (default: all)",
     )
     parser.add_argument(
         "--spatial-upscaler-checkpoint",
@@ -1151,10 +1346,10 @@ def add_convert_args(parser) -> None:
     parser.add_argument(
         "--temporal-upscaler",
         type=str,
-        nargs="+",
-        default=[],
+        nargs="*",
+        default=list(TEMPORAL_UPSCALER_FILES),
         choices=list(TEMPORAL_UPSCALER_FILES),
-        help="Include temporal upscaler(s) (separate download from HF). Can specify multiple.",
+        help="Temporal upscaler(s) to include (default: all)",
     )
     parser.add_argument(
         "--temporal-upscaler-checkpoint",
@@ -1165,6 +1360,15 @@ def add_convert_args(parser) -> None:
             "Path(s) to local temporal upscaler .safetensors (skips download). "
             "Must match --temporal-upscaler order."
         ),
+    )
+    # LoRA
+    parser.add_argument(
+        "--lora",
+        type=str,
+        nargs="*",
+        default=list(LORA_FILES),
+        choices=list(LORA_FILES),
+        help="LoRA file(s) to sync from source (default: all)",
     )
 
 

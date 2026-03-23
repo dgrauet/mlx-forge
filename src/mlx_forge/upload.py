@@ -7,7 +7,11 @@ uploads model files, and optionally adds to a collection.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+# Enable hf_transfer for faster uploads when available
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
@@ -44,7 +48,7 @@ def derive_repo_id(
 ) -> str:
     """Derive a HuggingFace repo ID from model metadata.
 
-    Pattern: {namespace}/{model}-mlx-{variant}[-q{bits}]
+    Pattern: {namespace}/{model}-mlx[-q{bits}]
 
     Args:
         split_info: Parsed split_model.json contents.
@@ -53,7 +57,7 @@ def derive_repo_id(
         namespace: HF namespace/org (default: authenticated user).
 
     Returns:
-        Repo ID string like "user/ltx-2.3-mlx-distilled-q8".
+        Repo ID string like "user/ltx-2.3-mlx-q8".
     """
     # Extract model name from source (e.g. "Lightricks/LTX-2.3" -> "ltx-2.3")
     source = split_info.get("source", "")
@@ -62,7 +66,6 @@ def derive_repo_id(
     else:
         model_name = source.lower() or model_dir.name
 
-    variant = split_info.get("variant", "")
     quantized = split_info.get("quantized", False)
     bits = split_info.get("quantization_bits")
 
@@ -78,8 +81,6 @@ def derive_repo_id(
         namespace = user_info["name"]
 
     parts = [model_name, "mlx"]
-    if variant:
-        parts.append(variant)
     if quantized and bits:
         parts.append(f"q{bits}")
 
@@ -110,7 +111,7 @@ def generate_model_card(
         Model card content as a string.
     """
     source = split_info.get("source", "")
-    variant = split_info.get("variant", "")
+    transformer_variants = split_info.get("transformer_variants", [])
     quantized = split_info.get("quantized", False)
     bits = split_info.get("quantization_bits")
     model_version = config.get("model_version")
@@ -145,8 +146,8 @@ def generate_model_card(
 
     # Details
     details = []
-    if variant:
-        details.append(f"- **Variant:** {variant}")
+    if transformer_variants:
+        details.append(f"- **Transformer variants:** {', '.join(transformer_variants)}")
     if model_version:
         details.append(f"- **Model version:** {model_version}")
     if quantized and bits:

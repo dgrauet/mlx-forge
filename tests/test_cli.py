@@ -55,7 +55,7 @@ class TestConvertDispatch:
         assert not (tmp_path / "out").exists()
         captured = capsys.readouterr()
         assert "DRY RUN" in captured.out
-        assert "transformer.safetensors" in captured.out
+        assert "transformer-distilled.safetensors" in captured.out
 
     def test_convert_invalid_recipe(self):
         with patch("sys.argv", ["mlx-forge", "convert", "bad-recipe"]):

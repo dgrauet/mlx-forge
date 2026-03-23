@@ -39,30 +39,24 @@ class TestDeriveRepoId:
         return api
 
     def test_basic(self):
-        split_info = {"source": "Lightricks/LTX-2.3", "variant": "distilled"}
-        repo_id = derive_repo_id(split_info, Path("/tmp/model"), api=self._make_api())
-        assert repo_id == "testuser/ltx-2.3-mlx-distilled"
-
-    def test_with_quantization(self):
-        split_info = {
-            "source": "Lightricks/LTX-2.3",
-            "variant": "distilled",
-            "quantized": True,
-            "quantization_bits": 8,
-        }
-        repo_id = derive_repo_id(split_info, Path("/tmp/model"), api=self._make_api())
-        assert repo_id == "testuser/ltx-2.3-mlx-distilled-q8"
-
-    def test_no_variant(self):
         split_info = {"source": "Lightricks/LTX-2.3"}
         repo_id = derive_repo_id(split_info, Path("/tmp/model"), api=self._make_api())
         assert repo_id == "testuser/ltx-2.3-mlx"
 
+    def test_with_quantization(self):
+        split_info = {
+            "source": "Lightricks/LTX-2.3",
+            "quantized": True,
+            "quantization_bits": 8,
+        }
+        repo_id = derive_repo_id(split_info, Path("/tmp/model"), api=self._make_api())
+        assert repo_id == "testuser/ltx-2.3-mlx-q8"
+
     def test_explicit_namespace(self):
-        split_info = {"source": "Lightricks/LTX-2.3", "variant": "full"}
+        split_info = {"source": "Lightricks/LTX-2.3"}
         api = self._make_api()
         repo_id = derive_repo_id(split_info, Path("/tmp/model"), api=api, namespace="myorg")
-        assert repo_id == "myorg/ltx-2.3-mlx-full"
+        assert repo_id == "myorg/ltx-2.3-mlx"
         api.whoami.assert_not_called()
 
     def test_no_source_uses_dir_name(self):
@@ -96,7 +90,10 @@ class TestGenerateModelCard:
 
         card = generate_model_card(
             tmp_path,
-            split_info={"source": "Org/Model", "variant": "distilled"},
+            split_info={
+                "source": "Org/Model",
+                "transformer_variants": ["distilled", "dev"],
+            },
             config={"model_version": "2.3"},
             repo_id="user/model-mlx",
         )
