@@ -160,6 +160,12 @@ def main() -> None:
         action="store_true",
         help="Create a private repo",
     )
+    upload_parser.add_argument(
+        "--usage-url",
+        type=str,
+        default=None,
+        help="URL to an inference project that uses these weights (added to model card)",
+    )
 
     # Two-pass parsing: first get the command and recipe, then add recipe-specific args
     args, remaining = parser.parse_known_args()
@@ -284,6 +290,7 @@ def _run_upload(args) -> None:
         repo_id=repo_id,
         base_model=args.base_model,
         license_id=args.license,
+        usage_url=args.usage_url,
     )
     readme_path = model_dir / "README.md"
     with open(readme_path, "w") as f:
