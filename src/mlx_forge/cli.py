@@ -166,6 +166,13 @@ def main() -> None:
         default=None,
         help="URL to an inference project that uses these weights (added to model card)",
     )
+    upload_parser.add_argument(
+        "--link",
+        action="append",
+        default=None,
+        metavar="'Label: URL'",
+        help="Related project link for model card (repeatable, format: 'Label: URL')",
+    )
 
     # Two-pass parsing: first get the command and recipe, then add recipe-specific args
     args, remaining = parser.parse_known_args()
@@ -291,6 +298,7 @@ def _run_upload(args) -> None:
         base_model=args.base_model,
         license_id=args.license,
         usage_url=args.usage_url,
+        links=args.link,
     )
     readme_path = model_dir / "README.md"
     with open(readme_path, "w") as f:

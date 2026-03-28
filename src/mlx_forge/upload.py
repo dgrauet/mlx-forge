@@ -97,6 +97,7 @@ def generate_model_card(
     base_model: str | None = None,
     license_id: str = "other",
     usage_url: str | None = None,
+    links: list[str] | None = None,
 ) -> str:
     """Generate a HuggingFace model card with YAML frontmatter.
 
@@ -108,6 +109,7 @@ def generate_model_card(
         base_model: Base model HF ID (default: read from split_info).
         license_id: SPDX license identifier.
         usage_url: Optional URL to an inference project that uses these weights.
+        links: Optional list of related project links in "Label: URL" format.
 
     Returns:
         Model card content as a string.
@@ -164,6 +166,18 @@ def generate_model_card(
         lines.append("")
         project_name = usage_url.rstrip("/").split("/")[-1]
         lines.append(f"These weights can be used with [{project_name}]({usage_url}).")
+        lines.append("")
+
+    # Related projects
+    if links:
+        lines.append("## Related Projects")
+        lines.append("")
+        for link in links:
+            if ": " in link:
+                label, url = link.split(": ", 1)
+                lines.append(f"- **{label}:** {url}")
+            else:
+                lines.append(f"- {link}")
         lines.append("")
 
     # File listing
