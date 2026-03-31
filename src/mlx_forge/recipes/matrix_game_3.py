@@ -1,0 +1,942 @@
+"""Matrix-Game-3 conversion recipe.
+
+Converts the Skywork/Matrix-Game-3.0 PyTorch checkpoint to MLX split format.
+Handles: dit (WanModel DiT backbone), t5_encoder (UMT5-XXL), vae (Wan2.2 VAE).
+
+Source checkpoint layout on HuggingFace (Skywork/Matrix-Game-3.0):
+  - base_model/diffusion_pytorch_model.safetensors — DiT (diffusers WanModel)
+  - models_t5_umt5-xxl-enc-bf16.pth                — T5 encoder
+  - Wan2.2_VAE.pth                                  — VAE (encoder + decoder)
+
+Usage:
+    mlx-forge convert matrix-game-3
+    mlx-forge convert matrix-game-3 --quantize --bits 8
+    mlx-forge validate matrix-game-3 models/matrix-game-3-mlx
+"""
+
+from __future__ import annotations
+
+import gc
+import json
+import time
+from pathlib import Path
+
+import mlx.core as mx
+
+from ..convert import (
+    download_hf_files,
+    fmt_size,
+    quantize_component,
+)
+from ..quantize import _materialize
+from ..transpose import transpose_conv
+from ..validate import (
+    ValidationResult,
+    count_layer_indices,
+    validate_conv_layout,
+    validate_file_exists,
+    validate_quantization,
+)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+REPO_ID = "Skywork/Matrix-Game-3.0"
+
+COMPONENTS = ["dit", "t5_encoder", "vae"]
+
+COMPONENT_PREFIX: dict[str, str] = {
+    "dit": "dit",
+    "t5_encoder": "t5_encoder",
+    "vae": "vae",
+}
+
+# Approximate sizes in MB (bf16/fp16)
+_COMPONENT_SIZE_MB: dict[str, int] = {
+    "dit": 10_500,  # ~10.5 GB
+    "t5_encoder": 9_000,  # ~9 GB
+    "vae": 400,  # ~400 MB
+}
+
+_CHECKPOINT_SIZE_MB = 20_000  # ~20 GB total download
+
+# Source files on HuggingFace
+DIT_FILES = [
+    "base_model/config.json",
+    "base_model/diffusion_pytorch_model.safetensors",
+]
+
+T5_FILES = [
+    "models_t5_umt5-xxl-enc-bf16.pth",
+]
+
+VAE_FILES = [
+    "Wan2.2_VAE.pth",
+]
+
+TOKENIZER_FILES = [
+    "google/umt5-xxl/tokenizer.json",
+    "google/umt5-xxl/tokenizer_config.json",
+    "google/umt5-xxl/special_tokens_map.json",
+    "google/umt5-xxl/spiece.model",
+]
+
+# ---------------------------------------------------------------------------
+# DiT key sanitization
+# ---------------------------------------------------------------------------
+
+# PyTorch uses nn.Sequential for several sub-modules. The MLX port uses
+# explicit named Linear layers instead. These mappings handle the conversion.
+
+_DIT_SEQUENTIAL_MAP: list[tuple[str, str]] = [
+    # WanModel top-level Sequential -> named Linear
+    ("text_embedding.0.", "text_embedding_linear1."),
+    ("text_embedding.2.", "text_embedding_linear2."),
+    ("time_embedding.0.", "time_embedding_linear1."),
+    ("time_embedding.2.", "time_embedding_linear2."),
+    ("time_projection.1.", "time_projection_linear1."),
+    # WanAttentionBlock.ffn Sequential -> named Linear
+    (".ffn.0.", ".ffn_linear1."),
+    (".ffn.2.", ".ffn_linear2."),
+    # ActionModule.keyboard_embed Sequential -> named Linear
+    (".action_model.keyboard_embed.0.", ".action_model.keyboard_embed_linear1."),
+    (".action_model.keyboard_embed.2.", ".action_model.keyboard_embed_linear2."),
+    # ActionModule.mouse_mlp Sequential -> named Linear
+    (".action_model.mouse_mlp.0.", ".action_model.mouse_mlp_linear1."),
+    (".action_model.mouse_mlp.2.", ".action_model.mouse_mlp_linear2."),
+    (".action_model.mouse_mlp.3.", ".action_model.mouse_mlp_layernorm."),
+]
+
+
+def sanitize_dit_key(key: str) -> str | None:
+    """Convert a PyTorch DiT key to MLX format.
+
+    Handles:
+      - nn.Sequential index-based keys -> named Linear keys
+      - patch_embedding Conv3d -> Linear (weight reshape handled separately)
+    """
+    for old, new in _DIT_SEQUENTIAL_MAP:
+        if old in key:
+            key = key.replace(old, new)
+            break
+    return key
+
+
+# ---------------------------------------------------------------------------
+# T5 key sanitization
+# ---------------------------------------------------------------------------
+
+
+def sanitize_t5_key(key: str) -> str | None:
+    """Convert a PyTorch T5 encoder key to MLX format.
+
+    The T5 .pth file stores T5Encoder state_dict directly (encoder_only=True),
+    so keys like token_embedding.weight, blocks.0.attn.q.weight, etc. already
+    match the MLX T5Encoder attribute structure. No renaming needed.
+    """
+    return key
+
+
+# ---------------------------------------------------------------------------
+# VAE key sanitization
+# ---------------------------------------------------------------------------
+
+# The Wan2.2_VAE.pth file uses diffusers-style keys that must be mapped to
+# WanVAE_ attribute names. This mirrors _map_lightvae_key_to_wanvae from
+# the PyTorch reference.
+
+
+def _map_resnet_tail(tail: str) -> str:
+    """Map diffusers ResNet sub-keys to WanVAE_ sequential format."""
+    if tail.startswith("norm1."):
+        return "residual.0." + tail[len("norm1.") :]
+    if tail.startswith("conv1."):
+        return "residual.2." + tail[len("conv1.") :]
+    if tail.startswith("norm2."):
+        return "residual.3." + tail[len("norm2.") :]
+    if tail.startswith("conv2."):
+        return "residual.6." + tail[len("conv2.") :]
+    if tail.startswith("conv_shortcut."):
+        return "shortcut." + tail[len("conv_shortcut.") :]
+    return tail
+
+
+def _normalize_vae_key(key: str) -> str | None:
+    """Map a single VAE key from diffusers format to WanVAE_ format.
+
+    Returns None to skip training-only keys.
+    """
+    # Skip training-only projection heads
+    if key.startswith("dynamic_feature_projection_heads."):
+        return None
+
+    # Top-level projections
+    if key.startswith("quant_conv."):
+        return key.replace("quant_conv.", "conv1.", 1)
+    if key.startswith("post_quant_conv."):
+        return key.replace("post_quant_conv.", "conv2.", 1)
+
+    # --- Encoder ---
+    if key.startswith("encoder.conv_in."):
+        return key.replace("encoder.conv_in.", "encoder.conv1.", 1)
+    if key.startswith("encoder.mid_block.resnets.0."):
+        tail = key[len("encoder.mid_block.resnets.0.") :]
+        return "encoder.middle.0." + _map_resnet_tail(tail)
+    if key.startswith("encoder.mid_block.attentions.0."):
+        return key.replace("encoder.mid_block.attentions.0.", "encoder.middle.1.", 1)
+    if key.startswith("encoder.mid_block.resnets.1."):
+        tail = key[len("encoder.mid_block.resnets.1.") :]
+        return "encoder.middle.2." + _map_resnet_tail(tail)
+    if key.startswith("encoder.norm_out."):
+        return key.replace("encoder.norm_out.", "encoder.head.0.", 1)
+    if key.startswith("encoder.conv_out."):
+        return key.replace("encoder.conv_out.", "encoder.head.2.", 1)
+
+    # Encoder down blocks
+    if key.startswith("encoder.down_blocks."):
+        parts = key.split(".")
+        if len(parts) >= 6 and parts[3] == "resnets":
+            tail = ".".join(parts[5:])
+            return f"encoder.downsamples.{parts[2]}.downsamples.{parts[4]}." + _map_resnet_tail(
+                tail
+            )
+        if len(parts) >= 7 and parts[3] == "downsampler" and parts[4] == "resample":
+            return f"encoder.downsamples.{parts[2]}.downsamples.2.resample.{parts[5]}." + ".".join(
+                parts[6:]
+            )
+        if len(parts) >= 6 and parts[3] == "downsampler" and parts[4] == "time_conv":
+            return f"encoder.downsamples.{parts[2]}.downsamples.2.time_conv." + ".".join(parts[5:])
+
+    # --- Decoder ---
+    if key.startswith("decoder.conv_in."):
+        return key.replace("decoder.conv_in.", "decoder.conv1.", 1)
+    if key.startswith("decoder.mid_block.resnets.0."):
+        tail = key[len("decoder.mid_block.resnets.0.") :]
+        return "decoder.middle.0." + _map_resnet_tail(tail)
+    if key.startswith("decoder.mid_block.attentions.0."):
+        return key.replace("decoder.mid_block.attentions.0.", "decoder.middle.1.", 1)
+    if key.startswith("decoder.mid_block.resnets.1."):
+        tail = key[len("decoder.mid_block.resnets.1.") :]
+        return "decoder.middle.2." + _map_resnet_tail(tail)
+    if key.startswith("decoder.norm_out."):
+        return key.replace("decoder.norm_out.", "decoder.head.0.", 1)
+    if key.startswith("decoder.conv_out."):
+        return key.replace("decoder.conv_out.", "decoder.head.2.", 1)
+
+    # Decoder up blocks
+    if key.startswith("decoder.up_blocks."):
+        parts = key.split(".")
+        if len(parts) >= 6 and parts[3] == "resnets":
+            tail = ".".join(parts[5:])
+            return f"decoder.upsamples.{parts[2]}.upsamples.{parts[4]}." + _map_resnet_tail(tail)
+        if len(parts) >= 7 and parts[3] == "upsampler" and parts[4] == "resample":
+            return f"decoder.upsamples.{parts[2]}.upsamples.3.resample.{parts[5]}." + ".".join(
+                parts[6:]
+            )
+        if len(parts) >= 6 and parts[3] == "upsampler" and parts[4] == "time_conv":
+            return f"decoder.upsamples.{parts[2]}.upsamples.3.time_conv." + ".".join(parts[5:])
+
+    # Already in WanVAE_ naming — pass through
+    return key
+
+
+def sanitize_vae_key(key: str) -> str | None:
+    """Convert a PyTorch VAE key to MLX format."""
+    return _normalize_vae_key(key)
+
+
+SANITIZERS: dict[str, object] = {
+    "dit": sanitize_dit_key,
+    "t5_encoder": sanitize_t5_key,
+    "vae": sanitize_vae_key,
+}
+
+
+# ---------------------------------------------------------------------------
+# Conv transposition + patch_embedding Conv3d -> Linear
+# ---------------------------------------------------------------------------
+
+
+def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
+    """Transpose conv weights from PyTorch to MLX layout if needed.
+
+    Special case: the DiT patch_embedding is a Conv3d in PyTorch but a Linear
+    in our MLX port. The Conv3d weight (dim, in_dim, pt, ph, pw) must be
+    flattened and transposed to Linear format (in_dim*pt*ph*pw, dim).
+    """
+    if component == "dit":
+        # patch_embedding Conv3d -> Linear conversion
+        if "patch_embedding.weight" in key and "wancamctrl" not in key:
+            if value.ndim == 5:
+                # Conv3d: (O, I, D, H, W) -> flatten to (O, I*D*H*W) -> transpose to (I*D*H*W, O)
+                o, i, d, h, w = value.shape
+                value = value.reshape(o, i * d * h * w)
+                value = mx.transpose(value)
+                return value
+        # DiT is all Linear (no conv to transpose)
+        return value
+
+    if component == "t5_encoder":
+        # T5 is all Linear, no conv
+        return value
+
+    if component == "vae":
+        # VAE has Conv3d layers that need transposition
+        is_conv = "conv" in key.lower() and "weight" in key
+        if is_conv and value.ndim >= 3:
+            return transpose_conv(value)
+        return value
+
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Quantization
+# ---------------------------------------------------------------------------
+
+
+def should_quantize(key: str, weight: mx.array) -> bool:
+    """Determine if a weight should be quantized.
+
+    Only quantize Linear .weight matrices in DiT transformer blocks.
+    Exclude sensitive layers that harm quality when quantized.
+    """
+    # Only 2D weight matrices (Linear layers)
+    if weight.ndim != 2 or not key.endswith(".weight"):
+        return False
+
+    # Quantization artifacts in these layers
+    bare_key = key.replace("dit.", "", 1)
+
+    # Exclude timestep/time embedding layers
+    if "time_embedding" in bare_key or "time_projection" in bare_key:
+        return False
+
+    # Exclude patch embedding (input projection)
+    if "patch_embedding" in bare_key:
+        return False
+
+    # Exclude final head projection
+    if bare_key.startswith("head.") or bare_key == "head.head.weight":
+        return False
+
+    # Exclude normalization weights (RMSNorm, LayerNorm)
+    if "norm" in bare_key.split(".")[-2:][0]:
+        return False
+
+    # Exclude camera injection layers
+    if "cam_injector" in bare_key or "cam_scale" in bare_key or "cam_shift" in bare_key:
+        return False
+    if "c2ws_hidden_states" in bare_key:
+        return False
+
+    # Exclude modulation parameters (not Linear but can appear as 2D)
+    if "modulation" in bare_key:
+        return False
+
+    # Exclude text embedding (small, sensitive)
+    if "text_embedding" in bare_key:
+        return False
+
+    # Quantize everything else (blocks.N.self_attn.*, blocks.N.cross_attn.*,
+    # blocks.N.ffn_linear*, blocks.N.action_model.*)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+
+def _build_config(dit_config_path: Path) -> dict:
+    """Build output config.json from the diffusers config."""
+    with open(dit_config_path) as f:
+        src = json.load(f)
+
+    return {
+        "model_type": src.get("model_type", "ti2v"),
+        "dim": src.get("dim", 3072),
+        "ffn_dim": src.get("ffn_dim", 14336),
+        "freq_dim": src.get("freq_dim", 256),
+        "in_dim": src.get("in_dim", 48),
+        "out_dim": src.get("out_dim", 48),
+        "text_len": src.get("text_len", 512),
+        "num_heads": src.get("num_heads", 24),
+        "num_layers": src.get("num_layers", 30),
+        "eps": src.get("eps", 1e-6),
+        "sigma_theta": src.get("sigma_theta", 0.8),
+        "action_config": src.get("action_config", {}),
+        "use_text_crossattn": src.get("use_text_crossattn", True),
+        "is_action_model": src.get("is_action_model", True),
+        "source": REPO_ID,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main convert entry point
+# ---------------------------------------------------------------------------
+
+
+def convert(args) -> None:
+    """Convert Matrix-Game-3 PyTorch checkpoint to MLX split format."""
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        suffix = f"-q{args.bits}" if args.quantize else ""
+        output_dir = Path("models") / f"matrix-game-3-mlx{suffix}"
+
+    if args.dry_run:
+        _dry_run(args, output_dir)
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    download_dir = Path("models") / "matrix-game-3-src"
+
+    total_weights = 0
+
+    # -----------------------------------------------------------------------
+    # 1. DiT (diffusers safetensors)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting DiT backbone")
+    print("=" * 60)
+
+    if args.dit_checkpoint:
+        dit_path = args.dit_checkpoint
+        dit_config_path = None
+    else:
+        print(f"Downloading DiT from {REPO_ID}...")
+        download_hf_files(REPO_ID, DIT_FILES, download_dir)
+        dit_path = str(download_dir / "base_model" / "diffusion_pytorch_model.safetensors")
+        dit_config_path = download_dir / "base_model" / "config.json"
+
+    print(f"\nLoading DiT weights lazily from {dit_path}...")
+    t0 = time.monotonic()
+    dit_weights = mx.load(dit_path)
+    print(f"  {len(dit_weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
+
+    # Process: sanitize keys, handle patch_embedding Conv3d->Linear, save
+    print(f"\nProcessing {len(dit_weights)} DiT keys...")
+    t0 = time.monotonic()
+    dit_output: dict[str, mx.array] = {}
+    for key in dit_weights:
+        new_key = sanitize_dit_key(key)
+        if new_key is None:
+            continue
+        weight = dit_weights[key]
+        weight = maybe_transpose(new_key, weight, "dit")
+        _materialize(weight)
+        dit_output[f"dit.{new_key}"] = weight
+
+    count = len(dit_output)
+    print(f"  Saving {count} weights to dit.safetensors...")
+    mx.save_safetensors(str(output_dir / "dit.safetensors"), dit_output)
+    total_weights += count
+    elapsed = time.monotonic() - t0
+    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+
+    del dit_output, dit_weights
+    gc.collect()
+    mx.clear_cache()
+
+    # -----------------------------------------------------------------------
+    # 2. T5 encoder (.pth)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting T5 encoder")
+    print("=" * 60)
+
+    if args.t5_checkpoint:
+        t5_path = args.t5_checkpoint
+    else:
+        print(f"Downloading T5 from {REPO_ID}...")
+        download_hf_files(REPO_ID, T5_FILES, download_dir)
+        t5_path = str(download_dir / "models_t5_umt5-xxl-enc-bf16.pth")
+
+    print(f"\nLoading T5 weights lazily from {t5_path}...")
+    t0 = time.monotonic()
+    t5_weights = mx.load(t5_path)
+    print(f"  {len(t5_weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
+
+    print(f"\nProcessing {len(t5_weights)} T5 keys...")
+    t0 = time.monotonic()
+    t5_output: dict[str, mx.array] = {}
+    for key in t5_weights:
+        new_key = sanitize_t5_key(key)
+        if new_key is None:
+            continue
+        weight = t5_weights[key]
+        _materialize(weight)
+        t5_output[f"t5_encoder.{new_key}"] = weight
+
+    count = len(t5_output)
+    print(f"  Saving {count} weights to t5_encoder.safetensors...")
+    mx.save_safetensors(str(output_dir / "t5_encoder.safetensors"), t5_output)
+    total_weights += count
+    elapsed = time.monotonic() - t0
+    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+
+    del t5_output, t5_weights
+    gc.collect()
+    mx.clear_cache()
+
+    # -----------------------------------------------------------------------
+    # 3. VAE (.pth)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting VAE")
+    print("=" * 60)
+
+    if args.vae_checkpoint:
+        vae_path = args.vae_checkpoint
+    else:
+        print(f"Downloading VAE from {REPO_ID}...")
+        download_hf_files(REPO_ID, VAE_FILES, download_dir)
+        vae_path = str(download_dir / "Wan2.2_VAE.pth")
+
+    print(f"\nLoading VAE weights lazily from {vae_path}...")
+    t0 = time.monotonic()
+    vae_weights_raw = mx.load(vae_path)
+    print(f"  {len(vae_weights_raw)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
+
+    print(f"\nProcessing {len(vae_weights_raw)} VAE keys...")
+    t0 = time.monotonic()
+    vae_output: dict[str, mx.array] = {}
+    for key in vae_weights_raw:
+        new_key = sanitize_vae_key(key)
+        if new_key is None:
+            continue
+        weight = vae_weights_raw[key]
+        weight = maybe_transpose(new_key, weight, "vae")
+        _materialize(weight)
+        vae_output[f"vae.{new_key}"] = weight
+
+    count = len(vae_output)
+    print(f"  Saving {count} weights to vae.safetensors...")
+    mx.save_safetensors(str(output_dir / "vae.safetensors"), vae_output)
+    total_weights += count
+    elapsed = time.monotonic() - t0
+    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+
+    del vae_output, vae_weights_raw
+    gc.collect()
+    mx.clear_cache()
+
+    # -----------------------------------------------------------------------
+    # 4. Tokenizer files
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Syncing tokenizer files")
+    print("=" * 60)
+
+    if not args.skip_tokenizer:
+        download_hf_files(REPO_ID, TOKENIZER_FILES, download_dir)
+        tokenizer_dir = output_dir / "google" / "umt5-xxl"
+        tokenizer_dir.mkdir(parents=True, exist_ok=True)
+        import shutil
+
+        for fname in TOKENIZER_FILES:
+            src = download_dir / fname
+            dst = output_dir / fname
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.exists():
+                shutil.copy2(str(src), str(dst))
+                print(f"  Copied {fname}")
+
+    # -----------------------------------------------------------------------
+    # 5. Config
+    # -----------------------------------------------------------------------
+    if dit_config_path and dit_config_path.exists():
+        config = _build_config(dit_config_path)
+    else:
+        # Fallback defaults
+        config = _build_config_defaults()
+
+    with open(output_dir / "config.json", "w") as f:
+        json.dump(config, f, indent=2)
+    print("\nSaved config.json")
+
+    # Split model manifest
+    split_info = {
+        "format": "split",
+        "components": COMPONENTS,
+        "source": REPO_ID,
+    }
+    with open(output_dir / "split_model.json", "w") as f:
+        json.dump(split_info, f, indent=2)
+
+    # -----------------------------------------------------------------------
+    # 6. Optional quantization
+    # -----------------------------------------------------------------------
+    if args.quantize:
+        print(f"\nQuantizing DiT to int{args.bits} (group_size={args.group_size})...")
+        quantize_component(
+            output_dir,
+            "dit",
+            bits=args.bits,
+            group_size=args.group_size,
+            should_quantize=should_quantize,
+        )
+
+        split_info["quantized"] = True
+        split_info["quantization_bits"] = args.bits
+        with open(output_dir / "split_model.json", "w") as f:
+            json.dump(split_info, f, indent=2)
+
+    # -----------------------------------------------------------------------
+    # Summary
+    # -----------------------------------------------------------------------
+    print(f"\n{'=' * 60}")
+    print(f"Conversion complete: {total_weights} total weights")
+    print(f"Output: {output_dir}")
+    for p in sorted(output_dir.rglob("*")):
+        if p.is_file():
+            size_mb = p.stat().st_size / (1024 * 1024)
+            rel = p.relative_to(output_dir)
+            print(f"  {rel}: {size_mb:.1f} MB")
+    print("\nDone!")
+
+
+def _build_config_defaults() -> dict:
+    """Fallback config when diffusers config.json is not available."""
+    return {
+        "model_type": "ti2v",
+        "dim": 3072,
+        "ffn_dim": 14336,
+        "freq_dim": 256,
+        "in_dim": 48,
+        "out_dim": 48,
+        "text_len": 512,
+        "num_heads": 24,
+        "num_layers": 30,
+        "eps": 1e-6,
+        "sigma_theta": 0.8,
+        "action_config": {
+            "blocks": list(range(15)),
+            "enable_keyboard": True,
+            "enable_mouse": True,
+            "heads_num": 16,
+            "hidden_size": 128,
+            "img_hidden_size": 3072,
+            "keyboard_dim_in": 6,
+            "keyboard_hidden_dim": 1024,
+            "mouse_dim_in": 2,
+            "mouse_hidden_dim": 1024,
+            "mouse_qk_dim_list": [8, 28, 28],
+            "patch_size": [1, 2, 2],
+            "qk_norm": True,
+            "qkv_bias": False,
+            "rope_dim_list": [8, 28, 28],
+            "rope_theta": 256,
+            "vae_time_compression_ratio": 4,
+            "windows_size": 3,
+        },
+        "use_text_crossattn": True,
+        "is_action_model": True,
+        "source": REPO_ID,
+    }
+
+
+def _dry_run(args, output_dir: Path) -> None:
+    """Print conversion plan without executing anything."""
+    print("=" * 60)
+    print("DRY RUN — no files will be downloaded or written")
+    print("=" * 60)
+
+    print(f"\nSource:     {REPO_ID} (HuggingFace)")
+    print(f"Output dir: {output_dir}")
+    print("\nOutput files:")
+
+    total_mb = 0.0
+    for comp in COMPONENTS:
+        size_mb = _COMPONENT_SIZE_MB[comp]
+        if args.quantize and comp == "dit":
+            ratio = 16 / args.bits
+            size_mb = size_mb / ratio
+            print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})")
+        else:
+            print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (fp16)")
+        total_mb += size_mb
+
+    print("  config.json, split_model.json")
+    print("  google/umt5-xxl/ (tokenizer files)")
+
+    if args.quantize:
+        print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
+        print("  Target: DiT blocks Linear weights only")
+
+    print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
+    print(f"Estimated download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)}")
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def validate(args) -> None:
+    """Validate a converted Matrix-Game-3 model."""
+    model_dir = Path(args.model_dir)
+    if not model_dir.exists():
+        print(f"ERROR: {model_dir} does not exist")
+        raise SystemExit(1)
+
+    print(f"Validating: {model_dir}")
+    result = ValidationResult()
+
+    # Check quantization
+    is_quantized = (model_dir / "quantize_config.json").exists()
+    if is_quantized:
+        with open(model_dir / "quantize_config.json") as f:
+            qconfig = json.load(f)
+        bits = qconfig.get("quantization", {}).get("bits", "?")
+        print(f"Model is quantized: int{bits}")
+
+    # --- File structure ---
+    print("\n== File Structure ==")
+    expected = [
+        "config.json",
+        "split_model.json",
+        "dit.safetensors",
+        "t5_encoder.safetensors",
+        "vae.safetensors",
+    ]
+    for fname in expected:
+        validate_file_exists(model_dir, fname, result)
+
+    # --- Config ---
+    print("\n== Config Validation ==")
+    config_path = model_dir / "config.json"
+    if config_path.exists():
+        with open(config_path) as f:
+            config = json.load(f)
+        result.check(
+            config.get("num_layers") == 30,
+            f"num_layers == 30 (got: {config.get('num_layers')})",
+        )
+        result.check(
+            config.get("num_heads") == 24,
+            f"num_heads == 24 (got: {config.get('num_heads')})",
+        )
+        result.check(
+            config.get("dim") == 3072,
+            f"dim == 3072 (got: {config.get('dim')})",
+        )
+        result.check(
+            config.get("in_dim") == 48,
+            f"in_dim == 48 (got: {config.get('in_dim')})",
+        )
+
+    # --- DiT weights ---
+    print("\n== DiT Weights ==")
+    dit_path = model_dir / "dit.safetensors"
+    if dit_path.exists():
+        weights = mx.load(str(dit_path))
+        keys = set(weights.keys())
+
+        # Check prefix
+        all_prefixed = all(k.startswith("dit.") for k in keys)
+        result.check(all_prefixed, f"All keys have 'dit.' prefix ({len(keys)} keys)")
+
+        # Check no un-sanitized Sequential keys remain
+        result.check(
+            not any(".ffn.0." in k or ".ffn.2." in k for k in keys),
+            "No un-sanitized ffn Sequential keys",
+        )
+        result.check(
+            not any("text_embedding.0." in k or "text_embedding.2." in k for k in keys),
+            "No un-sanitized text_embedding Sequential keys",
+        )
+        result.check(
+            not any("time_embedding.0." in k or "time_embedding.2." in k for k in keys),
+            "No un-sanitized time_embedding Sequential keys",
+        )
+
+        # Check patch_embedding is Linear (2D weight)
+        pe_key = "dit.patch_embedding.weight"
+        if pe_key in keys:
+            pe_shape = weights[pe_key].shape
+            result.check(
+                weights[pe_key].ndim == 2,
+                f"patch_embedding.weight is 2D Linear (shape: {pe_shape})",
+            )
+
+        # Block count
+        bare_keys = {k.removeprefix("dit.") for k in keys}
+        block_indices = count_layer_indices(bare_keys, block_key="blocks")
+        result.check(
+            len(block_indices) == 30,
+            f"30 transformer blocks (got {len(block_indices)})",
+        )
+
+        # Action model present in first 15 blocks
+        action_keys = [k for k in keys if "action_model" in k]
+        result.check(
+            len(action_keys) > 0,
+            f"Action model keys present ({len(action_keys)})",
+        )
+
+        # Camera injection layers
+        cam_keys = [k for k in keys if "cam_injector" in k or "cam_scale" in k or "cam_shift" in k]
+        result.check(
+            len(cam_keys) > 0,
+            f"Camera injection keys present ({len(cam_keys)})",
+        )
+
+        # Modulation parameters
+        mod_keys = [k for k in keys if "modulation" in k]
+        result.check(
+            len(mod_keys) > 0,
+            f"Modulation parameters present ({len(mod_keys)})",
+        )
+
+        if is_quantized:
+            validate_quantization(weights, result, block_key="blocks")
+
+        total_params = sum(v.size for v in weights.values())
+        print(f"  Total DiT parameters: {total_params / 1e9:.2f}B")
+        del weights
+        gc.collect()
+        mx.clear_cache()
+
+    # --- T5 weights ---
+    print("\n== T5 Encoder Weights ==")
+    t5_path = model_dir / "t5_encoder.safetensors"
+    if t5_path.exists():
+        weights = mx.load(str(t5_path))
+        keys = set(weights.keys())
+
+        all_prefixed = all(k.startswith("t5_encoder.") for k in keys)
+        result.check(all_prefixed, f"All keys have 't5_encoder.' prefix ({len(keys)} keys)")
+
+        # Check for key T5 components
+        bare_keys = {k.removeprefix("t5_encoder.") for k in keys}
+        result.check(
+            "token_embedding.weight" in bare_keys,
+            "token_embedding present",
+        )
+        result.check(
+            "norm.weight" in bare_keys,
+            "Final norm present",
+        )
+
+        block_indices = count_layer_indices(bare_keys, block_key="blocks")
+        result.check(
+            len(block_indices) == 24,
+            f"24 encoder blocks (got {len(block_indices)})",
+        )
+
+        total_params = sum(v.size for v in weights.values())
+        print(f"  Total T5 parameters: {total_params / 1e9:.2f}B")
+        del weights
+        gc.collect()
+        mx.clear_cache()
+
+    # --- VAE weights ---
+    print("\n== VAE Weights ==")
+    vae_path = model_dir / "vae.safetensors"
+    if vae_path.exists():
+        weights = mx.load(str(vae_path))
+        keys = set(weights.keys())
+
+        all_prefixed = all(k.startswith("vae.") for k in keys)
+        result.check(all_prefixed, f"All keys have 'vae.' prefix ({len(keys)} keys)")
+
+        # Check encoder and decoder present
+        enc_keys = [k for k in keys if k.startswith("vae.encoder.")]
+        dec_keys = [k for k in keys if k.startswith("vae.decoder.")]
+        result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
+        result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
+
+        # Conv layout (channels-last): Conv3d weights should have I as last dim
+        validate_conv_layout(weights, result, ndim=5)
+
+        total_params = sum(v.size for v in weights.values())
+        print(f"  Total VAE parameters: {total_params / 1e6:.1f}M")
+        del weights
+        gc.collect()
+        mx.clear_cache()
+
+    result.summary()
+    if not result.passed:
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# CLI argument registration
+# ---------------------------------------------------------------------------
+
+
+def add_convert_args(parser) -> None:
+    """Add Matrix-Game-3 convert arguments to a parser."""
+    parser.add_argument(
+        "--dit-checkpoint",
+        type=str,
+        default=None,
+        help="Path to local DiT .safetensors checkpoint (skips download)",
+    )
+    parser.add_argument(
+        "--t5-checkpoint",
+        type=str,
+        default=None,
+        help="Path to local T5 .pth checkpoint (skips download)",
+    )
+    parser.add_argument(
+        "--vae-checkpoint",
+        type=str,
+        default=None,
+        help="Path to local VAE .pth checkpoint (skips download)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output directory (default: ./models/matrix-game-3-mlx[-q<bits>])",
+    )
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Quantize DiT after conversion",
+    )
+    parser.add_argument(
+        "--bits",
+        type=int,
+        default=8,
+        choices=[4, 8],
+        help="Quantization bits (default: 8)",
+    )
+    parser.add_argument(
+        "--group-size",
+        type=int,
+        default=64,
+        help="Quantization group size (default: 64)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview conversion plan without downloading or writing anything",
+    )
+    parser.add_argument(
+        "--skip-tokenizer",
+        action="store_true",
+        help="Skip copying tokenizer files",
+    )
+
+
+def add_validate_args(parser) -> None:
+    """Add Matrix-Game-3 validate arguments to a parser."""
+    parser.add_argument(
+        "model_dir",
+        type=str,
+        help="Path to converted model directory",
+    )
+
+
+def add_split_args(parser) -> None:
+    """Add Matrix-Game-3 split arguments to a parser."""
+    parser.add_argument(
+        "model_dir",
+        type=str,
+        help="Model directory containing unified safetensors",
+    )

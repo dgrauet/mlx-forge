@@ -11,6 +11,7 @@ Each recipe defines:
 AVAILABLE_RECIPES = {
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
     "fish-s2-pro": "mlx_forge.recipes.fish_s2",
+    "matrix-game-3": "mlx_forge.recipes.matrix_game_3",
     "mistral-small-3.1": "mlx_forge.recipes.mistral_small_31",
     "qwen-image-2512": "mlx_forge.recipes.qwen_image_2512",
 }
