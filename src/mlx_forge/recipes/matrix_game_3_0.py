@@ -1,17 +1,18 @@
-"""Matrix-Game-3 conversion recipe.
+"""Matrix-Game-3.0 conversion recipe.
 
-Converts the Skywork/Matrix-Game-3.0 PyTorch checkpoint to MLX split format.
-Handles: dit (WanModel DiT backbone), t5_encoder (UMT5-XXL), vae (Wan2.2 VAE).
-
-Source checkpoint layout on HuggingFace (Skywork/Matrix-Game-3.0):
-  - base_model/diffusion_pytorch_model.safetensors — DiT (diffusers WanModel)
-  - models_t5_umt5-xxl-enc-bf16.pth                — T5 encoder
-  - Wan2.2_VAE.pth                                  — VAE (encoder + decoder)
+Converts the full Skywork/Matrix-Game-3.0 PyTorch checkpoint to MLX split format.
+All model variants are converted in a single pass:
+  - dit            — DiT base backbone (50-step inference)
+  - dit_distilled  — DiT distilled backbone (3-step inference)
+  - t5_encoder     — UMT5-XXL text encoder
+  - vae            — Wan2.2 VAE (full)
+  - vae_lightvae   — MG-LightVAE (pruning 0.5)
+  - vae_lightvae_v2 — MG-LightVAE v2 (pruning 0.75)
 
 Usage:
-    mlx-forge convert matrix-game-3
-    mlx-forge convert matrix-game-3 --quantize --bits 8
-    mlx-forge validate matrix-game-3 models/matrix-game-3-mlx
+    mlx-forge convert matrix-game-3.0
+    mlx-forge convert matrix-game-3.0 --quantize --bits 8
+    mlx-forge validate matrix-game-3.0 models/matrix-game-3.0-mlx
 """
 
 from __future__ import annotations
@@ -44,36 +45,48 @@ from ..validate import (
 
 REPO_ID = "Skywork/Matrix-Game-3.0"
 
-COMPONENTS = ["dit", "t5_encoder", "vae"]
-
-COMPONENT_PREFIX: dict[str, str] = {
-    "dit": "dit",
-    "t5_encoder": "t5_encoder",
-    "vae": "vae",
-}
+COMPONENTS = [
+    "dit",
+    "dit_distilled",
+    "t5_encoder",
+    "vae",
+    "vae_lightvae",
+    "vae_lightvae_v2",
+]
 
 # Approximate sizes in MB (bf16/fp16)
 _COMPONENT_SIZE_MB: dict[str, int] = {
     "dit": 10_500,  # ~10.5 GB
+    "dit_distilled": 21_000,  # ~21 GB
     "t5_encoder": 9_000,  # ~9 GB
-    "vae": 400,  # ~400 MB
+    "vae": 400,  # ~400 MB (Wan2.2)
+    "vae_lightvae": 2_800,  # ~2.8 GB (LightVAE v1, pruning 0.5)
+    "vae_lightvae_v2": 850,  # ~850 MB (LightVAE v2, pruning 0.75)
 }
 
-_CHECKPOINT_SIZE_MB = 20_000  # ~20 GB total download
-
 # Source files on HuggingFace
-DIT_FILES = [
-    "base_model/config.json",
-    "base_model/diffusion_pytorch_model.safetensors",
-]
-
-T5_FILES = [
-    "models_t5_umt5-xxl-enc-bf16.pth",
-]
-
-VAE_FILES = [
-    "Wan2.2_VAE.pth",
-]
+_HF_FILES: dict[str, list[str]] = {
+    "dit": [
+        "base_model/config.json",
+        "base_model/diffusion_pytorch_model.safetensors",
+    ],
+    "dit_distilled": [
+        "base_distilled_model/config.json",
+        "base_distilled_model/diffusion_pytorch_model.safetensors",
+    ],
+    "t5_encoder": [
+        "models_t5_umt5-xxl-enc-bf16.pth",
+    ],
+    "vae": [
+        "Wan2.2_VAE.pth",
+    ],
+    "vae_lightvae": [
+        "MG-LightVAE.pth",
+    ],
+    "vae_lightvae_v2": [
+        "MG-LightVAE_v2.pth",
+    ],
+}
 
 TOKENIZER_FILES = [
     "google/umt5-xxl/tokenizer.json",
@@ -246,13 +259,6 @@ def sanitize_vae_key(key: str) -> str | None:
     return _normalize_vae_key(key)
 
 
-SANITIZERS: dict[str, object] = {
-    "dit": sanitize_dit_key,
-    "t5_encoder": sanitize_t5_key,
-    "vae": sanitize_vae_key,
-}
-
-
 # ---------------------------------------------------------------------------
 # Conv transposition + patch_embedding Conv3d -> Linear
 # ---------------------------------------------------------------------------
@@ -374,50 +380,29 @@ def _build_config(dit_config_path: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Main convert entry point
+# Component conversion helpers
 # ---------------------------------------------------------------------------
 
 
-def convert(args) -> None:
-    """Convert Matrix-Game-3 PyTorch checkpoint to MLX split format."""
-    if args.output:
-        output_dir = Path(args.output)
-    else:
-        suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"matrix-game-3-mlx{suffix}"
-
-    if args.dry_run:
-        _dry_run(args, output_dir)
-        return
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    download_dir = Path("models") / "matrix-game-3-src"
-
-    total_weights = 0
-
-    # -----------------------------------------------------------------------
-    # 1. DiT (diffusers safetensors)
-    # -----------------------------------------------------------------------
+def _convert_dit(args, download_dir: Path, output_dir: Path, component: str, hf_subdir: str) -> int:
+    """Download, convert and save a DiT variant. Returns weight count."""
     print("\n" + "=" * 60)
-    print("Converting DiT backbone")
+    print(f"Converting {component}")
     print("=" * 60)
 
-    if args.dit_checkpoint:
+    if args.dit_checkpoint and component == "dit":
         dit_path = args.dit_checkpoint
-        dit_config_path = None
     else:
-        print(f"Downloading DiT from {REPO_ID}...")
-        download_hf_files(REPO_ID, DIT_FILES, download_dir)
-        dit_path = str(download_dir / "base_model" / "diffusion_pytorch_model.safetensors")
-        dit_config_path = download_dir / "base_model" / "config.json"
+        print(f"Downloading {component} from {REPO_ID}...")
+        download_hf_files(REPO_ID, _HF_FILES[component], download_dir)
+        dit_path = str(download_dir / hf_subdir / "diffusion_pytorch_model.safetensors")
 
-    print(f"\nLoading DiT weights lazily from {dit_path}...")
+    print(f"\nLoading {component} weights lazily from {dit_path}...")
     t0 = time.monotonic()
     dit_weights = mx.load(dit_path)
     print(f"  {len(dit_weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
 
-    # Process: sanitize keys, handle patch_embedding Conv3d->Linear, save
-    print(f"\nProcessing {len(dit_weights)} DiT keys...")
+    print(f"\nProcessing {len(dit_weights)} {component} keys...")
     t0 = time.monotonic()
     dit_output: dict[str, mx.array] = {}
     for key in dit_weights:
@@ -427,34 +412,24 @@ def convert(args) -> None:
         weight = dit_weights[key]
         weight = maybe_transpose(new_key, weight, "dit")
         _materialize(weight)
-        dit_output[f"dit.{new_key}"] = weight
+        dit_output[f"{component}.{new_key}"] = weight
 
     count = len(dit_output)
-    print(f"  Saving {count} weights to dit.safetensors...")
-    mx.save_safetensors(str(output_dir / "dit.safetensors"), dit_output)
-    total_weights += count
+    out_file = f"{component}.safetensors"
+    print(f"  Saving {count} weights to {out_file}...")
+    mx.save_safetensors(str(output_dir / out_file), dit_output)
     elapsed = time.monotonic() - t0
     print(f"  Done: {count} weights saved in {elapsed:.1f}s")
 
     del dit_output, dit_weights
     gc.collect()
     mx.clear_cache()
+    return count
 
-    # -----------------------------------------------------------------------
-    # 2. T5 encoder (.pth)
-    # -----------------------------------------------------------------------
-    print("\n" + "=" * 60)
-    print("Converting T5 encoder")
-    print("=" * 60)
 
-    if args.t5_checkpoint:
-        t5_path = args.t5_checkpoint
-    else:
-        print(f"Downloading T5 from {REPO_ID}...")
-        download_hf_files(REPO_ID, T5_FILES, download_dir)
-        t5_path = str(download_dir / "models_t5_umt5-xxl-enc-bf16.pth")
-
-    print(f"\nLoading T5 weights from {t5_path}...")
+def _convert_t5_pth(pth_path: str, output_dir: Path) -> int:
+    """Load T5 .pth, convert to mx arrays, save as safetensors. Returns weight count."""
+    print(f"\nLoading T5 weights from {pth_path}...")
     t0 = time.monotonic()
     try:
         import torch
@@ -462,11 +437,9 @@ def convert(args) -> None:
         print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
         raise SystemExit(1)
 
-    # SECURITY: weights_only=True restricts unpickling to tensor data only.
     print("  (weights_only=True — safe deserialization mode)")
-    t5_raw = torch.load(t5_path, map_location="cpu", weights_only=True)
-    if isinstance(t5_raw, dict) and "state_dict" in t5_raw:
-        t5_raw = t5_raw["state_dict"]
+    t5_raw = torch.load(pth_path, map_location="cpu", weights_only=True)
+    t5_raw = _extract_state_dict(t5_raw)
     print(f"  {len(t5_raw)} keys loaded in {time.monotonic() - t0:.1f}s")
 
     print(f"\nProcessing {len(t5_raw)} T5 keys...")
@@ -482,29 +455,35 @@ def convert(args) -> None:
     count = len(t5_output)
     print(f"  Saving {count} weights to t5_encoder.safetensors...")
     mx.save_safetensors(str(output_dir / "t5_encoder.safetensors"), t5_output)
-    total_weights += count
     elapsed = time.monotonic() - t0
     print(f"  Done: {count} weights saved in {elapsed:.1f}s")
 
     del t5_output, t5_raw
     gc.collect()
     mx.clear_cache()
+    return count
 
-    # -----------------------------------------------------------------------
-    # 3. VAE (.pth)
-    # -----------------------------------------------------------------------
-    print("\n" + "=" * 60)
-    print("Converting VAE")
-    print("=" * 60)
 
-    if args.vae_checkpoint:
-        vae_path = args.vae_checkpoint
-    else:
-        print(f"Downloading VAE from {REPO_ID}...")
-        download_hf_files(REPO_ID, VAE_FILES, download_dir)
-        vae_path = str(download_dir / "Wan2.2_VAE.pth")
+def _extract_state_dict(checkpoint: dict) -> dict:
+    """Recursively unwrap a PyTorch checkpoint to find the flat state_dict.
 
-    print(f"\nLoading VAE weights from {vae_path}...")
+    Some checkpoints nest the actual weights under keys like 'state_dict',
+    'gen_model', or 'generator'. This mirrors _extract_checkpoint_state_dict
+    from the Matrix-Game-3 reference code.
+    """
+    wrapper_keys = ("state_dict", "gen_model", "generator")
+    for wk in wrapper_keys:
+        if isinstance(checkpoint, dict) and wk in checkpoint:
+            return _extract_state_dict(checkpoint[wk])
+    return checkpoint
+
+
+def _convert_vae_pth(pth_path: str, output_path: Path, prefix: str) -> int:
+    """Load a VAE .pth, sanitize keys, transpose convs, and save as safetensors.
+
+    Returns the number of weights saved.
+    """
+    print(f"\nLoading VAE weights from {pth_path}...")
     t0 = time.monotonic()
     try:
         import torch
@@ -513,9 +492,8 @@ def convert(args) -> None:
         raise SystemExit(1)
 
     print("  (weights_only=True — safe deserialization mode)")
-    vae_raw = torch.load(vae_path, map_location="cpu", weights_only=True)
-    if isinstance(vae_raw, dict) and "state_dict" in vae_raw:
-        vae_raw = vae_raw["state_dict"]
+    vae_raw = torch.load(pth_path, map_location="cpu", weights_only=True)
+    vae_raw = _extract_state_dict(vae_raw)
     print(f"  {len(vae_raw)} keys loaded in {time.monotonic() - t0:.1f}s")
 
     print(f"\nProcessing {len(vae_raw)} VAE keys...")
@@ -528,21 +506,118 @@ def convert(args) -> None:
         weight = mx.array(value.float().numpy())
         weight = maybe_transpose(new_key, weight, "vae")
         _materialize(weight)
-        vae_output[f"vae.{new_key}"] = weight
+        vae_output[f"{prefix}.{new_key}"] = weight
 
     count = len(vae_output)
-    print(f"  Saving {count} weights to vae.safetensors...")
-    mx.save_safetensors(str(output_dir / "vae.safetensors"), vae_output)
-    total_weights += count
+    print(f"  Saving {count} weights to {output_path.name}...")
+    mx.save_safetensors(str(output_path), vae_output)
     elapsed = time.monotonic() - t0
     print(f"  Done: {count} weights saved in {elapsed:.1f}s")
 
     del vae_output, vae_raw
     gc.collect()
     mx.clear_cache()
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Main convert entry point
+# ---------------------------------------------------------------------------
+
+
+def convert(args) -> None:
+    """Convert all Matrix-Game-3.0 variants to MLX split format."""
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        suffix = f"-q{args.bits}" if args.quantize else ""
+        output_dir = Path("models") / f"matrix-game-3.0-mlx{suffix}"
+
+    if args.dry_run:
+        _dry_run(args, output_dir)
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    download_dir = Path("models") / "matrix-game-3.0-src"
+
+    total_weights = 0
 
     # -----------------------------------------------------------------------
-    # 4. Tokenizer files
+    # 1. DiT base (diffusers safetensors)
+    # -----------------------------------------------------------------------
+    total_weights += _convert_dit(args, download_dir, output_dir, "dit", "base_model")
+
+    # -----------------------------------------------------------------------
+    # 2. DiT distilled (diffusers safetensors)
+    # -----------------------------------------------------------------------
+    total_weights += _convert_dit(
+        args, download_dir, output_dir, "dit_distilled", "base_distilled_model"
+    )
+
+    # -----------------------------------------------------------------------
+    # 3. T5 encoder (.pth)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting T5 encoder")
+    print("=" * 60)
+
+    if args.t5_checkpoint:
+        t5_path = args.t5_checkpoint
+    else:
+        print(f"Downloading T5 from {REPO_ID}...")
+        download_hf_files(REPO_ID, _HF_FILES["t5_encoder"], download_dir)
+        t5_path = str(download_dir / "models_t5_umt5-xxl-enc-bf16.pth")
+
+    total_weights += _convert_t5_pth(t5_path, output_dir)
+
+    # -----------------------------------------------------------------------
+    # 4. VAE — Wan2.2 (full)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting Wan2.2 VAE")
+    print("=" * 60)
+
+    if args.vae_checkpoint:
+        vae_wan_path = args.vae_checkpoint
+    else:
+        print(f"Downloading Wan2.2 VAE from {REPO_ID}...")
+        download_hf_files(REPO_ID, _HF_FILES["vae"], download_dir)
+        vae_wan_path = str(download_dir / "Wan2.2_VAE.pth")
+
+    total_weights += _convert_vae_pth(vae_wan_path, output_dir / "vae.safetensors", "vae")
+
+    # -----------------------------------------------------------------------
+    # 5. VAE — MG-LightVAE (pruning 0.5)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting MG-LightVAE")
+    print("=" * 60)
+
+    print(f"Downloading MG-LightVAE from {REPO_ID}...")
+    download_hf_files(REPO_ID, _HF_FILES["vae_lightvae"], download_dir)
+    total_weights += _convert_vae_pth(
+        str(download_dir / "MG-LightVAE.pth"),
+        output_dir / "vae_lightvae.safetensors",
+        "vae_lightvae",
+    )
+
+    # -----------------------------------------------------------------------
+    # 6. VAE — MG-LightVAE v2 (pruning 0.75)
+    # -----------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("Converting MG-LightVAE v2")
+    print("=" * 60)
+
+    print(f"Downloading MG-LightVAE v2 from {REPO_ID}...")
+    download_hf_files(REPO_ID, _HF_FILES["vae_lightvae_v2"], download_dir)
+    total_weights += _convert_vae_pth(
+        str(download_dir / "MG-LightVAE_v2.pth"),
+        output_dir / "vae_lightvae_v2.safetensors",
+        "vae_lightvae_v2",
+    )
+
+    # -----------------------------------------------------------------------
+    # 7. Tokenizer files
     # -----------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("Syncing tokenizer files")
@@ -550,8 +625,6 @@ def convert(args) -> None:
 
     if not args.skip_tokenizer:
         download_hf_files(REPO_ID, TOKENIZER_FILES, download_dir)
-        tokenizer_dir = output_dir / "google" / "umt5-xxl"
-        tokenizer_dir.mkdir(parents=True, exist_ok=True)
         import shutil
 
         for fname in TOKENIZER_FILES:
@@ -563,12 +636,12 @@ def convert(args) -> None:
                 print(f"  Copied {fname}")
 
     # -----------------------------------------------------------------------
-    # 5. Config
+    # 8. Config (from base_model config.json)
     # -----------------------------------------------------------------------
-    if dit_config_path and dit_config_path.exists():
+    dit_config_path = download_dir / "base_model" / "config.json"
+    if dit_config_path.exists():
         config = _build_config(dit_config_path)
     else:
-        # Fallback defaults
         config = _build_config_defaults()
 
     with open(output_dir / "config.json", "w") as f:
@@ -576,7 +649,7 @@ def convert(args) -> None:
     print("\nSaved config.json")
 
     # Split model manifest
-    split_info = {
+    split_info: dict = {
         "format": "split",
         "components": COMPONENTS,
         "source": REPO_ID,
@@ -585,17 +658,18 @@ def convert(args) -> None:
         json.dump(split_info, f, indent=2)
 
     # -----------------------------------------------------------------------
-    # 6. Optional quantization
+    # 9. Optional quantization (both DiT variants)
     # -----------------------------------------------------------------------
     if args.quantize:
-        print(f"\nQuantizing DiT to int{args.bits} (group_size={args.group_size})...")
-        quantize_component(
-            output_dir,
-            "dit",
-            bits=args.bits,
-            group_size=args.group_size,
-            should_quantize=should_quantize,
-        )
+        for dit_comp in ("dit", "dit_distilled"):
+            print(f"\nQuantizing {dit_comp} to int{args.bits} (group_size={args.group_size})...")
+            quantize_component(
+                output_dir,
+                dit_comp,
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=should_quantize,
+            )
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
@@ -669,7 +743,7 @@ def _dry_run(args, output_dir: Path) -> None:
     total_mb = 0.0
     for comp in COMPONENTS:
         size_mb = _COMPONENT_SIZE_MB[comp]
-        if args.quantize and comp == "dit":
+        if args.quantize and comp.startswith("dit"):
             ratio = 16 / args.bits
             size_mb = size_mb / ratio
             print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})")
@@ -682,10 +756,9 @@ def _dry_run(args, output_dir: Path) -> None:
 
     if args.quantize:
         print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
-        print("  Target: DiT blocks Linear weights only")
+        print("  Target: DiT blocks Linear weights only (both base and distilled)")
 
     print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
-    print(f"Estimated download:   ~{fmt_size(_CHECKPOINT_SIZE_MB)}")
 
 
 # ---------------------------------------------------------------------------
@@ -693,8 +766,112 @@ def _dry_run(args, output_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _validate_dit(
+    model_dir: Path,
+    component: str,
+    result: ValidationResult,
+    is_quantized: bool,
+) -> None:
+    """Validate a DiT component (dit or dit_distilled)."""
+    print(f"\n== {component} Weights ==")
+    dit_path = model_dir / f"{component}.safetensors"
+    if not dit_path.exists():
+        return
+
+    weights = mx.load(str(dit_path))
+    keys = set(weights.keys())
+
+    prefix = f"{component}."
+    all_prefixed = all(k.startswith(prefix) for k in keys)
+    result.check(all_prefixed, f"All keys have '{prefix}' prefix ({len(keys)} keys)")
+
+    # Check no un-sanitized Sequential keys remain
+    result.check(
+        not any(".ffn.0." in k or ".ffn.2." in k for k in keys),
+        "No un-sanitized ffn Sequential keys",
+    )
+    result.check(
+        not any("text_embedding.0." in k or "text_embedding.2." in k for k in keys),
+        "No un-sanitized text_embedding Sequential keys",
+    )
+    result.check(
+        not any("time_embedding.0." in k or "time_embedding.2." in k for k in keys),
+        "No un-sanitized time_embedding Sequential keys",
+    )
+
+    # Check patch_embedding is Linear (2D weight)
+    pe_key = f"{component}.patch_embedding.weight"
+    if pe_key in keys:
+        pe_shape = weights[pe_key].shape
+        result.check(
+            weights[pe_key].ndim == 2,
+            f"patch_embedding.weight is 2D Linear (shape: {pe_shape})",
+        )
+
+    # Block count
+    bare_keys = {k.removeprefix(prefix) for k in keys}
+    block_indices = count_layer_indices(bare_keys, block_key="blocks")
+    result.check(
+        len(block_indices) == 30,
+        f"30 transformer blocks (got {len(block_indices)})",
+    )
+
+    # Action model present
+    action_keys = [k for k in keys if "action_model" in k]
+    result.check(len(action_keys) > 0, f"Action model keys present ({len(action_keys)})")
+
+    # Camera injection layers
+    cam_keys = [k for k in keys if "cam_injector" in k or "cam_scale" in k or "cam_shift" in k]
+    result.check(len(cam_keys) > 0, f"Camera injection keys present ({len(cam_keys)})")
+
+    # Modulation parameters
+    mod_keys = [k for k in keys if "modulation" in k]
+    result.check(len(mod_keys) > 0, f"Modulation parameters present ({len(mod_keys)})")
+
+    if is_quantized:
+        validate_quantization(weights, result, block_key="blocks")
+
+    total_params = sum(v.size for v in weights.values())
+    print(f"  Total {component} parameters: {total_params / 1e9:.2f}B")
+    del weights
+    gc.collect()
+    mx.clear_cache()
+
+
+def _validate_vae(
+    model_dir: Path,
+    component: str,
+    result: ValidationResult,
+) -> None:
+    """Validate a VAE component (vae, vae_lightvae, vae_lightvae_v2)."""
+    print(f"\n== {component} Weights ==")
+    vae_path = model_dir / f"{component}.safetensors"
+    if not vae_path.exists():
+        return
+
+    weights = mx.load(str(vae_path))
+    keys = set(weights.keys())
+
+    prefix = f"{component}."
+    all_prefixed = all(k.startswith(prefix) for k in keys)
+    result.check(all_prefixed, f"All keys have '{prefix}' prefix ({len(keys)} keys)")
+
+    enc_keys = [k for k in keys if k.startswith(f"{component}.encoder.")]
+    dec_keys = [k for k in keys if k.startswith(f"{component}.decoder.")]
+    result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
+    result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
+
+    validate_conv_layout(weights, result, ndim=5)
+
+    total_params = sum(v.size for v in weights.values())
+    print(f"  Total {component} parameters: {total_params / 1e6:.1f}M")
+    del weights
+    gc.collect()
+    mx.clear_cache()
+
+
 def validate(args) -> None:
-    """Validate a converted Matrix-Game-3 model."""
+    """Validate a converted Matrix-Game-3.0 model."""
     model_dir = Path(args.model_dir)
     if not model_dir.exists():
         print(f"ERROR: {model_dir} does not exist")
@@ -713,15 +890,10 @@ def validate(args) -> None:
 
     # --- File structure ---
     print("\n== File Structure ==")
-    expected = [
-        "config.json",
-        "split_model.json",
-        "dit.safetensors",
-        "t5_encoder.safetensors",
-        "vae.safetensors",
-    ]
-    for fname in expected:
-        validate_file_exists(model_dir, fname, result)
+    for comp in COMPONENTS:
+        validate_file_exists(model_dir, f"{comp}.safetensors", result)
+    validate_file_exists(model_dir, "config.json", result)
+    validate_file_exists(model_dir, "split_model.json", result)
 
     # --- Config ---
     print("\n== Config Validation ==")
@@ -746,77 +918,9 @@ def validate(args) -> None:
             f"in_dim == 48 (got: {config.get('in_dim')})",
         )
 
-    # --- DiT weights ---
-    print("\n== DiT Weights ==")
-    dit_path = model_dir / "dit.safetensors"
-    if dit_path.exists():
-        weights = mx.load(str(dit_path))
-        keys = set(weights.keys())
-
-        # Check prefix
-        all_prefixed = all(k.startswith("dit.") for k in keys)
-        result.check(all_prefixed, f"All keys have 'dit.' prefix ({len(keys)} keys)")
-
-        # Check no un-sanitized Sequential keys remain
-        result.check(
-            not any(".ffn.0." in k or ".ffn.2." in k for k in keys),
-            "No un-sanitized ffn Sequential keys",
-        )
-        result.check(
-            not any("text_embedding.0." in k or "text_embedding.2." in k for k in keys),
-            "No un-sanitized text_embedding Sequential keys",
-        )
-        result.check(
-            not any("time_embedding.0." in k or "time_embedding.2." in k for k in keys),
-            "No un-sanitized time_embedding Sequential keys",
-        )
-
-        # Check patch_embedding is Linear (2D weight)
-        pe_key = "dit.patch_embedding.weight"
-        if pe_key in keys:
-            pe_shape = weights[pe_key].shape
-            result.check(
-                weights[pe_key].ndim == 2,
-                f"patch_embedding.weight is 2D Linear (shape: {pe_shape})",
-            )
-
-        # Block count
-        bare_keys = {k.removeprefix("dit.") for k in keys}
-        block_indices = count_layer_indices(bare_keys, block_key="blocks")
-        result.check(
-            len(block_indices) == 30,
-            f"30 transformer blocks (got {len(block_indices)})",
-        )
-
-        # Action model present in first 15 blocks
-        action_keys = [k for k in keys if "action_model" in k]
-        result.check(
-            len(action_keys) > 0,
-            f"Action model keys present ({len(action_keys)})",
-        )
-
-        # Camera injection layers
-        cam_keys = [k for k in keys if "cam_injector" in k or "cam_scale" in k or "cam_shift" in k]
-        result.check(
-            len(cam_keys) > 0,
-            f"Camera injection keys present ({len(cam_keys)})",
-        )
-
-        # Modulation parameters
-        mod_keys = [k for k in keys if "modulation" in k]
-        result.check(
-            len(mod_keys) > 0,
-            f"Modulation parameters present ({len(mod_keys)})",
-        )
-
-        if is_quantized:
-            validate_quantization(weights, result, block_key="blocks")
-
-        total_params = sum(v.size for v in weights.values())
-        print(f"  Total DiT parameters: {total_params / 1e9:.2f}B")
-        del weights
-        gc.collect()
-        mx.clear_cache()
+    # --- DiT variants ---
+    _validate_dit(model_dir, "dit", result, is_quantized)
+    _validate_dit(model_dir, "dit_distilled", result, is_quantized)
 
     # --- T5 weights ---
     print("\n== T5 Encoder Weights ==")
@@ -828,16 +932,9 @@ def validate(args) -> None:
         all_prefixed = all(k.startswith("t5_encoder.") for k in keys)
         result.check(all_prefixed, f"All keys have 't5_encoder.' prefix ({len(keys)} keys)")
 
-        # Check for key T5 components
         bare_keys = {k.removeprefix("t5_encoder.") for k in keys}
-        result.check(
-            "token_embedding.weight" in bare_keys,
-            "token_embedding present",
-        )
-        result.check(
-            "norm.weight" in bare_keys,
-            "Final norm present",
-        )
+        result.check("token_embedding.weight" in bare_keys, "token_embedding present")
+        result.check("norm.weight" in bare_keys, "Final norm present")
 
         block_indices = count_layer_indices(bare_keys, block_key="blocks")
         result.check(
@@ -851,30 +948,10 @@ def validate(args) -> None:
         gc.collect()
         mx.clear_cache()
 
-    # --- VAE weights ---
-    print("\n== VAE Weights ==")
-    vae_path = model_dir / "vae.safetensors"
-    if vae_path.exists():
-        weights = mx.load(str(vae_path))
-        keys = set(weights.keys())
-
-        all_prefixed = all(k.startswith("vae.") for k in keys)
-        result.check(all_prefixed, f"All keys have 'vae.' prefix ({len(keys)} keys)")
-
-        # Check encoder and decoder present
-        enc_keys = [k for k in keys if k.startswith("vae.encoder.")]
-        dec_keys = [k for k in keys if k.startswith("vae.decoder.")]
-        result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
-        result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
-
-        # Conv layout (channels-last): Conv3d weights should have I as last dim
-        validate_conv_layout(weights, result, ndim=5)
-
-        total_params = sum(v.size for v in weights.values())
-        print(f"  Total VAE parameters: {total_params / 1e6:.1f}M")
-        del weights
-        gc.collect()
-        mx.clear_cache()
+    # --- VAE variants ---
+    _validate_vae(model_dir, "vae", result)
+    _validate_vae(model_dir, "vae_lightvae", result)
+    _validate_vae(model_dir, "vae_lightvae_v2", result)
 
     result.summary()
     if not result.passed:
@@ -887,12 +964,12 @@ def validate(args) -> None:
 
 
 def add_convert_args(parser) -> None:
-    """Add Matrix-Game-3 convert arguments to a parser."""
+    """Add Matrix-Game-3.0 convert arguments to a parser."""
     parser.add_argument(
         "--dit-checkpoint",
         type=str,
         default=None,
-        help="Path to local DiT .safetensors checkpoint (skips download)",
+        help="Path to local base DiT .safetensors checkpoint (skips download)",
     )
     parser.add_argument(
         "--t5-checkpoint",
@@ -904,18 +981,18 @@ def add_convert_args(parser) -> None:
         "--vae-checkpoint",
         type=str,
         default=None,
-        help="Path to local VAE .pth checkpoint (skips download)",
+        help="Path to local Wan2.2 VAE .pth checkpoint (skips download)",
     )
     parser.add_argument(
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ./models/matrix-game-3-mlx[-q<bits>])",
+        help="Output directory (default: ./models/matrix-game-3.0-mlx[-q<bits>])",
     )
     parser.add_argument(
         "--quantize",
         action="store_true",
-        help="Quantize DiT after conversion",
+        help="Quantize both DiT variants after conversion",
     )
     parser.add_argument(
         "--bits",
@@ -943,7 +1020,7 @@ def add_convert_args(parser) -> None:
 
 
 def add_validate_args(parser) -> None:
-    """Add Matrix-Game-3 validate arguments to a parser."""
+    """Add Matrix-Game-3.0 validate arguments to a parser."""
     parser.add_argument(
         "model_dir",
         type=str,
@@ -952,7 +1029,7 @@ def add_validate_args(parser) -> None:
 
 
 def add_split_args(parser) -> None:
-    """Add Matrix-Game-3 split arguments to a parser."""
+    """Add Matrix-Game-3.0 split arguments to a parser."""
     parser.add_argument(
         "model_dir",
         type=str,
