@@ -215,9 +215,7 @@ def _normalize_vae_key(key: str) -> str | None:
                 tail
             )
         if len(parts) >= 7 and parts[3] == "downsampler" and parts[4] == "resample":
-            return f"encoder.downsamples.{parts[2]}.downsamples.2.resample.{parts[5]}." + ".".join(
-                parts[6:]
-            )
+            return f"encoder.downsamples.{parts[2]}.downsamples.2.{parts[5]}." + ".".join(parts[6:])
         if len(parts) >= 6 and parts[3] == "downsampler" and parts[4] == "time_conv":
             return f"encoder.downsamples.{parts[2]}.downsamples.2.time_conv." + ".".join(parts[5:])
 
@@ -244,9 +242,7 @@ def _normalize_vae_key(key: str) -> str | None:
             tail = ".".join(parts[5:])
             return f"decoder.upsamples.{parts[2]}.upsamples.{parts[4]}." + _map_resnet_tail(tail)
         if len(parts) >= 7 and parts[3] == "upsampler" and parts[4] == "resample":
-            return f"decoder.upsamples.{parts[2]}.upsamples.3.resample.{parts[5]}." + ".".join(
-                parts[6:]
-            )
+            return f"decoder.upsamples.{parts[2]}.upsamples.3.{parts[5]}." + ".".join(parts[6:])
         if len(parts) >= 6 and parts[3] == "upsampler" and parts[4] == "time_conv":
             return f"decoder.upsamples.{parts[2]}.upsamples.3.time_conv." + ".".join(parts[5:])
 
@@ -267,18 +263,19 @@ def sanitize_vae_key(key: str) -> str | None:
 def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
     """Transpose conv weights from PyTorch to MLX layout if needed.
 
-    Special case: the DiT patch_embedding is a Conv3d in PyTorch but a Linear
-    in our MLX port. The Conv3d weight (dim, in_dim, pt, ph, pw) must be
-    flattened and transposed to Linear format (in_dim*pt*ph*pw, dim).
+    Special cases:
+      - DiT patch_embedding: Conv3d -> Linear (reshape only, no transpose).
+        Conv3d (O, I, D, H, W) -> Linear (O, I*D*H*W) = (out_dims, in_dims).
+      - VAE: All 4D/5D weights are conv weights needing channels-last transpose.
     """
     if component == "dit":
         # patch_embedding Conv3d -> Linear conversion
         if "patch_embedding.weight" in key and "wancamctrl" not in key:
             if value.ndim == 5:
-                # Conv3d: (O, I, D, H, W) -> flatten to (O, I*D*H*W) -> transpose to (I*D*H*W, O)
+                # Conv3d: (O, I, D, H, W) -> reshape to (O, I*D*H*W)
+                # MLX nn.Linear stores weight as (out_dims, in_dims) = (O, I*D*H*W)
                 o, i, d, h, w = value.shape
                 value = value.reshape(o, i * d * h * w)
-                value = mx.transpose(value)
                 return value
         # DiT is all Linear (no conv to transpose)
         return value
@@ -288,9 +285,11 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
         return value
 
     if component == "vae":
-        # VAE has Conv3d layers that need transposition
-        is_conv = "conv" in key.lower() and "weight" in key
-        if is_conv and value.ndim >= 3:
+        # VAE has Conv3d and Conv2d layers that need transposition.
+        # After key sanitization, many conv weight keys no longer contain "conv"
+        # (e.g. "residual.2.weight", "shortcut.weight", "to_qkv.weight").
+        # Use ndim-based detection: 5D = Conv3d, 4D = Conv2d.
+        if key.endswith(".weight") and value.ndim >= 4:
             return transpose_conv(value)
         return value
 
@@ -449,7 +448,7 @@ def _convert_t5_pth(pth_path: str, output_dir: Path) -> int:
         new_key = sanitize_t5_key(key)
         if new_key is None:
             continue
-        weight = mx.array(value.float().numpy())
+        weight = mx.array(value.float().numpy()).astype(mx.bfloat16)
         t5_output[f"t5_encoder.{new_key}"] = weight
 
     count = len(t5_output)
