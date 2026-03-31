@@ -454,20 +454,29 @@ def convert(args) -> None:
         download_hf_files(REPO_ID, T5_FILES, download_dir)
         t5_path = str(download_dir / "models_t5_umt5-xxl-enc-bf16.pth")
 
-    print(f"\nLoading T5 weights lazily from {t5_path}...")
+    print(f"\nLoading T5 weights from {t5_path}...")
     t0 = time.monotonic()
-    t5_weights = mx.load(t5_path)
-    print(f"  {len(t5_weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
+    try:
+        import torch
+    except ImportError:
+        print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
+        raise SystemExit(1)
 
-    print(f"\nProcessing {len(t5_weights)} T5 keys...")
+    # SECURITY: weights_only=True restricts unpickling to tensor data only.
+    print("  (weights_only=True — safe deserialization mode)")
+    t5_raw = torch.load(t5_path, map_location="cpu", weights_only=True)
+    if isinstance(t5_raw, dict) and "state_dict" in t5_raw:
+        t5_raw = t5_raw["state_dict"]
+    print(f"  {len(t5_raw)} keys loaded in {time.monotonic() - t0:.1f}s")
+
+    print(f"\nProcessing {len(t5_raw)} T5 keys...")
     t0 = time.monotonic()
     t5_output: dict[str, mx.array] = {}
-    for key in t5_weights:
+    for key, value in t5_raw.items():
         new_key = sanitize_t5_key(key)
         if new_key is None:
             continue
-        weight = t5_weights[key]
-        _materialize(weight)
+        weight = mx.array(value.float().numpy())
         t5_output[f"t5_encoder.{new_key}"] = weight
 
     count = len(t5_output)
@@ -477,7 +486,7 @@ def convert(args) -> None:
     elapsed = time.monotonic() - t0
     print(f"  Done: {count} weights saved in {elapsed:.1f}s")
 
-    del t5_output, t5_weights
+    del t5_output, t5_raw
     gc.collect()
     mx.clear_cache()
 
@@ -495,19 +504,28 @@ def convert(args) -> None:
         download_hf_files(REPO_ID, VAE_FILES, download_dir)
         vae_path = str(download_dir / "Wan2.2_VAE.pth")
 
-    print(f"\nLoading VAE weights lazily from {vae_path}...")
+    print(f"\nLoading VAE weights from {vae_path}...")
     t0 = time.monotonic()
-    vae_weights_raw = mx.load(vae_path)
-    print(f"  {len(vae_weights_raw)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
+    try:
+        import torch
+    except ImportError:
+        print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
+        raise SystemExit(1)
 
-    print(f"\nProcessing {len(vae_weights_raw)} VAE keys...")
+    print("  (weights_only=True — safe deserialization mode)")
+    vae_raw = torch.load(vae_path, map_location="cpu", weights_only=True)
+    if isinstance(vae_raw, dict) and "state_dict" in vae_raw:
+        vae_raw = vae_raw["state_dict"]
+    print(f"  {len(vae_raw)} keys loaded in {time.monotonic() - t0:.1f}s")
+
+    print(f"\nProcessing {len(vae_raw)} VAE keys...")
     t0 = time.monotonic()
     vae_output: dict[str, mx.array] = {}
-    for key in vae_weights_raw:
+    for key, value in vae_raw.items():
         new_key = sanitize_vae_key(key)
         if new_key is None:
             continue
-        weight = vae_weights_raw[key]
+        weight = mx.array(value.float().numpy())
         weight = maybe_transpose(new_key, weight, "vae")
         _materialize(weight)
         vae_output[f"vae.{new_key}"] = weight
@@ -519,7 +537,7 @@ def convert(args) -> None:
     elapsed = time.monotonic() - t0
     print(f"  Done: {count} weights saved in {elapsed:.1f}s")
 
-    del vae_output, vae_weights_raw
+    del vae_output, vae_raw
     gc.collect()
     mx.clear_cache()
 
