@@ -291,6 +291,10 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
         # Use ndim-based detection: 5D = Conv3d, 4D = Conv2d.
         if key.endswith(".weight") and value.ndim >= 4:
             return transpose_conv(value)
+        # RMS_norm gamma: PyTorch stores (dim, 1, 1, 1) for channel-first broadcasting.
+        # MLX channels-last needs just (dim,). Squeeze trailing singleton dims.
+        if key.endswith(".gamma") and value.ndim > 1:
+            return value.reshape(-1)
         return value
 
     return value
