@@ -415,6 +415,9 @@ def _convert_dit(args, download_dir: Path, output_dir: Path, component: str, hf_
         weight = dit_weights[key]
         weight = maybe_transpose(new_key, weight, "dit")
         _materialize(weight)
+        # Store in bfloat16 (source distilled checkpoint is float32, base is already bf16)
+        if weight.dtype == mx.float32:
+            weight = weight.astype(mx.bfloat16)
         dit_output[f"{component}.{new_key}"] = weight
 
     count = len(dit_output)
