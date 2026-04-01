@@ -656,6 +656,7 @@ def convert(args) -> None:
         "format": "split",
         "components": COMPONENTS,
         "source": REPO_ID,
+        "links": ["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
     }
     with open(output_dir / "split_model.json", "w") as f:
         json.dump(split_info, f, indent=2)

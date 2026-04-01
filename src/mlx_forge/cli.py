@@ -297,8 +297,8 @@ def _run_upload(args) -> None:
         repo_id=repo_id,
         base_model=args.base_model,
         license_id=args.license,
-        usage_url=args.usage_url,
-        links=args.link,
+        usage_url=args.usage_url or split_info.get("usage_url"),
+        links=args.link or split_info.get("links"),
     )
     readme_path = model_dir / "README.md"
     with open(readme_path, "w") as f:
