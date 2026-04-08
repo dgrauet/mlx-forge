@@ -14,5 +14,5 @@ AVAILABLE_RECIPES = {
     "matrix-game-3.0": "mlx_forge.recipes.matrix_game_3_0",
     "mistral-small-3.1": "mlx_forge.recipes.mistral_small_31",
     "qwen-image-2512": "mlx_forge.recipes.qwen_image_2512",
-    "cogvideo-fun": "mlx_forge.recipes.cogvideo_fun",
+    "cogvideo-fun-v1.5-5b-inp": "mlx_forge.recipes.cogvideo_fun",
 }

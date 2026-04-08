@@ -8,10 +8,10 @@ config.json and safetensors files. Conv3d/Conv2d weights need PyTorch-to-MLX
 channels-last transposition; Linear weights pass through unchanged.
 
 Usage:
-    mlx-forge convert cogvideo-fun
-    mlx-forge convert cogvideo-fun --quantize --bits 8
-    mlx-forge convert cogvideo-fun --source /path/to/local/model
-    mlx-forge validate cogvideo-fun models/cogvideo-fun-mlx
+    mlx-forge convert cogvideo-fun-v1.5-5b-inp
+    mlx-forge convert cogvideo-fun-v1.5-5b-inp --quantize --bits 8
+    mlx-forge convert cogvideo-fun-v1.5-5b-inp --source /path/to/local/model
+    mlx-forge validate cogvideo-fun-v1.5-5b-inp models/cogvideo-fun-v1.5-5b-inp-mlx
 """
 
 from __future__ import annotations
@@ -340,7 +340,7 @@ def convert(args) -> None:
         output_dir = Path(args.output)
     else:
         suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"cogvideo-fun-mlx{suffix}"
+        output_dir = Path("models") / f"cogvideo-fun-v1.5-5b-inp-mlx{suffix}"
 
     if args.dry_run:
         _dry_run(args, output_dir)
@@ -350,7 +350,7 @@ def convert(args) -> None:
 
     # Determine source: local path or HF download
     local_source = Path(args.source) if args.source else None
-    download_dir = Path("models") / "cogvideo-fun-src"
+    download_dir = Path("models") / "cogvideo-fun-v1.5-5b-inp-src"
 
     if not local_source:
         # Download from HuggingFace
