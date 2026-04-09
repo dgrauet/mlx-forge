@@ -1,17 +1,26 @@
 """CogVideoX-Fun-V1.5-5b-InP conversion recipe.
 
 Converts the alibaba-pai/CogVideoX-Fun-V1.5-5b-InP PyTorch checkpoint to MLX split format.
-This is a video inpainting model with transformer and VAE components.
+This is a video inpainting model with transformer, text_encoder (T5-XXL), and VAE components.
 
-The model stores weights in transformer/ and vae/ subdirectories, each with
+The model stores weights in transformer/, text_encoder/, and vae/ subdirectories, each with
 config.json and safetensors files. Conv3d/Conv2d weights need PyTorch-to-MLX
 channels-last transposition; Linear weights pass through unchanged.
 
+Architecture:
+  - transformer   (~9.5 GB, 1 file)  — CogVideoXTransformer3DModel, 42 layers
+  - text_encoder  (~9.5 GB, 2 shards) — T5EncoderModel (t5-v1_1-xxl), 24 layers
+  - vae           (~400 MB, 1 file)   — AutoencoderKLCogVideoX
+
+Pipeline also includes:
+  - tokenizer/  — T5Tokenizer (spiece.model + configs)
+  - scheduler/  — CogVideoXDDIMScheduler config
+
 Usage:
-    mlx-forge convert cogvideo-fun-v1.5-5b-inp
-    mlx-forge convert cogvideo-fun-v1.5-5b-inp --quantize --bits 8
-    mlx-forge convert cogvideo-fun-v1.5-5b-inp --source /path/to/local/model
-    mlx-forge validate cogvideo-fun-v1.5-5b-inp models/cogvideo-fun-v1.5-5b-inp-mlx
+    mlx-forge convert cogvideox-fun-v1.5-5b-inp
+    mlx-forge convert cogvideox-fun-v1.5-5b-inp --quantize --bits 8
+    mlx-forge convert cogvideox-fun-v1.5-5b-inp --source /path/to/local/model
+    mlx-forge validate cogvideox-fun-v1.5-5b-inp models/cogvideox-fun-v1.5-5b-inp-mlx
 """
 
 from __future__ import annotations
@@ -46,18 +55,29 @@ from ..validate import (
 
 REPO_ID = "alibaba-pai/CogVideoX-Fun-V1.5-5b-InP"
 
-COMPONENTS = ["transformer", "vae"]
+COMPONENTS = ["transformer", "text_encoder", "vae"]
 
 # Approximate sizes in MB (fp16/bf16)
 _COMPONENT_SIZE_MB: dict[str, int] = {
     "transformer": 9_500,  # ~9.5 GB
+    "text_encoder": 9_500,  # ~9.5 GB (T5-XXL)
     "vae": 400,  # ~400 MB
 }
 
-# Source files on HuggingFace — transformer may be sharded
+_TEXT_ENCODER_SHARDS = 2
+
+# Source files on HuggingFace
 _HF_TRANSFORMER_FILES = [
     "transformer/config.json",
-    "transformer/diffusion_pytorch_model.safetensors.index.json",
+    "transformer/diffusion_pytorch_model.safetensors",
+]
+
+_HF_TEXT_ENCODER_FILES = [
+    "text_encoder/config.json",
+    "text_encoder/model.safetensors.index.json",
+] + [
+    f"text_encoder/model-{i:05d}-of-{_TEXT_ENCODER_SHARDS:05d}.safetensors"
+    for i in range(1, _TEXT_ENCODER_SHARDS + 1)
 ]
 
 _HF_VAE_FILES = [
@@ -65,13 +85,26 @@ _HF_VAE_FILES = [
     "vae/diffusion_pytorch_model.safetensors",
 ]
 
-# The transformer checkpoint may be split into multiple shards.
-# We discover shard filenames dynamically from the index file.
+_HF_CONFIG_FILES = [
+    "configuration.json",
+    "model_index.json",
+    "scheduler/scheduler_config.json",
+    "tokenizer/added_tokens.json",
+    "tokenizer/tokenizer_config.json",
+    "tokenizer/special_tokens_map.json",
+    "tokenizer/spiece.model",
+]
+
+_ALL_HF_FILES = _HF_TRANSFORMER_FILES + _HF_TEXT_ENCODER_FILES + _HF_VAE_FILES + _HF_CONFIG_FILES
 
 COMPONENT_PREFIX = {
     "transformer": "transformer",
+    "text_encoder": "text_encoder",
     "vae": "vae",
 }
+
+# Components that should NOT be quantized (conv-heavy).
+_SKIP_QUANTIZE_COMPONENTS = {"vae"}
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +116,14 @@ def sanitize_transformer_key(key: str) -> str | None:
     """Convert a PyTorch transformer key to MLX format.
 
     CogVideoX-Fun transformer keys are already clean — no prefix stripping needed.
-    The safetensors files within transformer/ have bare keys.
+    """
+    return key
+
+
+def sanitize_text_encoder_key(key: str) -> str | None:
+    """Convert a PyTorch text encoder key to MLX format.
+
+    T5 encoder keys are already clean — no prefix stripping needed.
     """
     return key
 
@@ -92,7 +132,6 @@ def sanitize_vae_key(key: str) -> str | None:
     """Convert a PyTorch VAE key to MLX format.
 
     CogVideoX-Fun VAE keys are already clean — no prefix stripping needed.
-    The safetensors files within vae/ have bare keys.
     """
     return key
 
@@ -127,8 +166,8 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
 # ---------------------------------------------------------------------------
 
 
-def should_quantize(key: str, weight: mx.array) -> bool:
-    """Determine if a weight should be quantized.
+def should_quantize_transformer(key: str, weight: mx.array) -> bool:
+    """Determine if a transformer weight should be quantized.
 
     Only quantize Linear .weight matrices in transformer blocks.
     Exclude sensitive layers that harm quality when quantized.
@@ -163,36 +202,31 @@ def should_quantize(key: str, weight: mx.array) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# Shard discovery
-# ---------------------------------------------------------------------------
+def should_quantize_text_encoder(key: str, weight: mx.array) -> bool:
+    """Determine if a text encoder weight should be quantized.
 
+    Only quantize 2D Linear weights in encoder blocks.
+    Exclude embeddings, norms, and relative attention bias.
+    """
+    if weight.ndim != 2 or not key.endswith(".weight"):
+        return False
 
-def _discover_transformer_shards(download_dir: Path) -> list[str]:
-    """Read the transformer index file to discover shard filenames."""
-    index_path = download_dir / "transformer" / "diffusion_pytorch_model.safetensors.index.json"
-    if index_path.exists():
-        with open(index_path) as f:
-            index = json.load(f)
-        return sorted(set(index["weight_map"].values()))
-    # Fallback: single file
-    single = download_dir / "transformer" / "diffusion_pytorch_model.safetensors"
-    if single.exists():
-        return ["diffusion_pytorch_model.safetensors"]
-    return []
+    bare_key = key.replace("text_encoder.", "", 1)
 
+    # Exclude shared embedding
+    if bare_key == "shared.weight":
+        return False
 
-def _get_transformer_hf_files(download_dir: Path) -> list[str]:
-    """Get the full list of transformer files to download, including shards."""
-    # First download the index to discover shards
-    index_path = download_dir / "transformer" / "diffusion_pytorch_model.safetensors.index.json"
-    if index_path.exists():
-        with open(index_path) as f:
-            index = json.load(f)
-        shards = sorted(set(index["weight_map"].values()))
-        return [f"transformer/{s}" for s in shards]
-    # If no index, assume single file
-    return ["transformer/diffusion_pytorch_model.safetensors"]
+    # Exclude layer norms
+    if "layer_norm" in bare_key:
+        return False
+
+    # Exclude relative attention bias (small, sensitivity-critical)
+    if "relative_attention_bias" in bare_key:
+        return False
+
+    # Quantize encoder block Linear weights (attention q/k/v/o, ffn wi_0/wi_1/wo)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +253,6 @@ def _convert_transformer(
     t0 = time.monotonic()
     weights = load_weights(
         tf_dir,
-        index_filename="diffusion_pytorch_model.safetensors.index.json",
         single_filename="diffusion_pytorch_model.safetensors",
     )
     print(f"  {len(weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
@@ -249,6 +282,51 @@ def _convert_transformer(
     return count
 
 
+def _convert_text_encoder(
+    download_dir: Path,
+    output_dir: Path,
+    local_source: Path | None = None,
+) -> int:
+    """Convert the text encoder (T5-XXL) component. Returns weight count."""
+    print("\n" + "=" * 60)
+    print("Converting text_encoder (T5-XXL)")
+    print("=" * 60)
+
+    if local_source:
+        te_dir = local_source / "text_encoder"
+    else:
+        te_dir = download_dir / "text_encoder"
+
+    print(f"\nLoading text_encoder weights from {te_dir}...")
+    t0 = time.monotonic()
+    weights = load_weights(te_dir)  # uses default model.safetensors.index.json
+    print(f"  {len(weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
+
+    print(f"\nProcessing {len(weights)} text_encoder keys...")
+    t0 = time.monotonic()
+    te_output: dict[str, mx.array] = {}
+    for key in weights:
+        new_key = sanitize_text_encoder_key(key)
+        if new_key is None:
+            continue
+        weight = weights[key]
+        # T5 encoder has no conv layers — all weights pass through unchanged
+        _materialize(weight)
+        te_output[f"text_encoder.{new_key}"] = weight
+
+    count = len(te_output)
+    out_file = "text_encoder.safetensors"
+    print(f"  Saving {count} weights to {out_file}...")
+    mx.save_safetensors(str(output_dir / out_file), te_output)
+    elapsed = time.monotonic() - t0
+    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
+
+    del te_output, weights
+    gc.collect()
+    mx.clear_cache()
+    return count
+
+
 def _convert_vae(
     download_dir: Path,
     output_dir: Path,
@@ -268,7 +346,6 @@ def _convert_vae(
     t0 = time.monotonic()
     weights = load_weights(
         vae_dir,
-        index_filename="diffusion_pytorch_model.safetensors.index.json",
         single_filename="diffusion_pytorch_model.safetensors",
     )
     print(f"  {len(weights)} keys loaded (lazy) in {time.monotonic() - t0:.1f}s")
@@ -312,19 +389,12 @@ def _build_config(download_dir: Path, local_source: Path | None = None) -> dict:
         "source": REPO_ID,
     }
 
-    # Read transformer config
-    tf_config_path = source_dir / "transformer" / "config.json"
-    if tf_config_path.exists():
-        with open(tf_config_path) as f:
-            tf_cfg = json.load(f)
-        config["transformer"] = tf_cfg
-
-    # Read VAE config
-    vae_config_path = source_dir / "vae" / "config.json"
-    if vae_config_path.exists():
-        with open(vae_config_path) as f:
-            vae_cfg = json.load(f)
-        config["vae"] = vae_cfg
+    # Read per-component configs
+    for comp in COMPONENTS:
+        comp_config_path = source_dir / comp / "config.json"
+        if comp_config_path.exists():
+            with open(comp_config_path) as f:
+                config[comp] = json.load(f)
 
     return config
 
@@ -340,7 +410,7 @@ def convert(args) -> None:
         output_dir = Path(args.output)
     else:
         suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"cogvideo-fun-v1.5-5b-inp-mlx{suffix}"
+        output_dir = Path("models") / f"cogvideox-fun-v1.5-5b-inp-mlx{suffix}"
 
     if args.dry_run:
         _dry_run(args, output_dir)
@@ -350,22 +420,12 @@ def convert(args) -> None:
 
     # Determine source: local path or HF download
     local_source = Path(args.source) if args.source else None
-    download_dir = Path("models") / "cogvideo-fun-v1.5-5b-inp-src"
+    download_dir = Path("models") / "cogvideox-fun-v1.5-5b-inp-src"
 
     if not local_source:
-        # Download from HuggingFace
+        # Download all files from HuggingFace
         print(f"\nDownloading from {REPO_ID}...")
-
-        # First download index + config files
-        download_hf_files(REPO_ID, _HF_TRANSFORMER_FILES, download_dir)
-
-        # Discover and download transformer shards
-        shard_files = _get_transformer_hf_files(download_dir)
-        if shard_files:
-            download_hf_files(REPO_ID, shard_files, download_dir)
-
-        # Download VAE files
-        download_hf_files(REPO_ID, _HF_VAE_FILES, download_dir)
+        download_hf_files(REPO_ID, _ALL_HF_FILES, download_dir)
 
     total_weights = 0
 
@@ -375,12 +435,17 @@ def convert(args) -> None:
     total_weights += _convert_transformer(download_dir, output_dir, local_source)
 
     # -----------------------------------------------------------------------
-    # 2. VAE
+    # 2. Text Encoder (T5-XXL)
+    # -----------------------------------------------------------------------
+    total_weights += _convert_text_encoder(download_dir, output_dir, local_source)
+
+    # -----------------------------------------------------------------------
+    # 3. VAE
     # -----------------------------------------------------------------------
     total_weights += _convert_vae(download_dir, output_dir, local_source)
 
     # -----------------------------------------------------------------------
-    # 3. Copy config files
+    # 4. Copy config files
     # -----------------------------------------------------------------------
     source_dir = local_source if local_source else download_dir
 
@@ -389,13 +454,25 @@ def convert(args) -> None:
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
 
-    # Copy component configs for reference
-    for comp in ("transformer", "vae"):
+    # Copy per-component configs for reference
+    for comp in COMPONENTS:
         src_cfg = source_dir / comp / "config.json"
         if src_cfg.exists():
             dst_cfg = output_dir / f"{comp}_config.json"
             shutil.copy2(str(src_cfg), str(dst_cfg))
             print(f"  Copied {comp}/config.json -> {dst_cfg.name}")
+
+    # Copy pipeline config files (tokenizer, scheduler, model_index)
+    for config_file in _HF_CONFIG_FILES:
+        src = source_dir / config_file
+        if src.exists():
+            if "/" in config_file:
+                prefix = config_file.split("/")[0]
+                dest = output_dir / f"{prefix}_{Path(config_file).name}"
+            else:
+                dest = output_dir / Path(config_file).name
+            shutil.copy2(str(src), str(dest))
+            print(f"  Copied {config_file} -> {dest.name}")
 
     # Split model manifest
     split_info: dict = {
@@ -403,15 +480,16 @@ def convert(args) -> None:
         "components": COMPONENTS,
         "source": REPO_ID,
         "notes": {
-            "inpainting": "Transformer patch_embed.proj.weight has 48 input channels "
-            "(16 latent + 16 masked latent + 16 mask) for inpainting support.",
+            "inpainting": "Transformer patch_embed.proj is a Linear with in_dim=264 "
+            "(in_channels=33 [16 latent + 16 masked + 1 mask] * patch_volume=8).",
+            "text_encoder": "T5-v1.1-XXL encoder (24 layers, d_model=4096).",
         },
     }
     with open(output_dir / "split_model.json", "w") as f:
         json.dump(split_info, f, indent=2)
 
     # -----------------------------------------------------------------------
-    # 4. Optional quantization (transformer only)
+    # 5. Optional quantization (transformer + text_encoder, skip vae)
     # -----------------------------------------------------------------------
     if args.quantize:
         quantize_component(
@@ -419,8 +497,25 @@ def convert(args) -> None:
             "transformer",
             bits=args.bits,
             group_size=args.group_size,
-            should_quantize=should_quantize,
+            should_quantize=should_quantize_transformer,
         )
+        quantize_component(
+            output_dir,
+            "text_encoder",
+            bits=args.bits,
+            group_size=args.group_size,
+            should_quantize=should_quantize_text_encoder,
+        )
+
+        qconfig = {
+            "quantization": {
+                "bits": args.bits,
+                "group_size": args.group_size,
+                "skip_components": sorted(_SKIP_QUANTIZE_COMPONENTS),
+            }
+        }
+        with open(output_dir / "quantize_config.json", "w") as f:
+            json.dump(qconfig, f, indent=2)
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
@@ -450,25 +545,35 @@ def _dry_run(args, output_dir: Path) -> None:
     source_label = args.source if args.source else f"{REPO_ID} (HuggingFace)"
     print(f"\nSource:     {source_label}")
     print(f"Output dir: {output_dir}")
-    print("\nOutput files:")
+    print(f"Files to download: {len(_ALL_HF_FILES)}")
+    print("\nComponents:")
 
     total_mb = 0.0
     for comp in COMPONENTS:
         size_mb = _COMPONENT_SIZE_MB[comp]
-        if args.quantize and comp == "transformer":
+        skip_q = comp in _SKIP_QUANTIZE_COMPONENTS
+        if args.quantize and not skip_q:
             ratio = 16 / args.bits
             size_mb = size_mb / ratio
             print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (int{args.bits})")
+        elif args.quantize and skip_q:
+            print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (fp16, skip quantize)")
         else:
             print(f"  {comp}.safetensors: ~{fmt_size(size_mb)} (fp16)")
         total_mb += size_mb
 
-    print("  config.json, split_model.json")
-    print("  transformer_config.json, vae_config.json")
+    print("\nPipeline files:")
+    print("  config.json, split_model.json, configuration.json")
+    print("  transformer_config.json, text_encoder_config.json, vae_config.json")
+    print("  model_index.json")
+    print("  scheduler_scheduler_config.json")
+    print("  tokenizer_added_tokens.json, tokenizer_tokenizer_config.json")
+    print("  tokenizer_special_tokens_map.json, tokenizer_spiece.model")
 
     if args.quantize:
         print(f"\nQuantization: int{args.bits}, group_size={args.group_size}")
-        print("  Target: transformer block Linear weights only")
+        print("  Target: transformer + text_encoder (Linear weights only)")
+        print("  Skipped: vae (conv-heavy)")
 
     print(f"\nEstimated output size: ~{fmt_size(total_mb)}")
 
@@ -502,6 +607,7 @@ def validate(args) -> None:
         validate_file_exists(model_dir, f"{comp}.safetensors", result)
     validate_file_exists(model_dir, "config.json", result)
     validate_file_exists(model_dir, "split_model.json", result)
+    validate_file_exists(model_dir, "model_index.json", result)
 
     # --- Config ---
     print("\n== Config Validation ==")
@@ -524,23 +630,27 @@ def validate(args) -> None:
         all_prefixed = all(k.startswith("transformer.") for k in keys)
         result.check(all_prefixed, f"All keys have 'transformer.' prefix ({len(keys)} keys)")
 
-        # Check inpainting patch_embed has expanded input channels
+        # Check inpainting patch_embed has correct input dimension
+        # CogVideoX-Fun V1.5 uses a Linear patch_embed (not Conv3d):
+        #   input_dim = in_channels(33) * patch_size_t(2) * patch_size(2) * patch_size(2) = 264
+        #   in_channels = 16 latent + 16 masked latent + 1 mask = 33
         pe_key = "transformer.patch_embed.proj.weight"
         if pe_key in keys:
             pe_shape = weights[pe_key].shape
-            # After Conv3d transpose: (O, kD, kH, kW, I) where I=48 for inpainting
-            if weights[pe_key].ndim == 5:
+            expected_in_dim = 33 * 2 * 2 * 2  # 264
+            if weights[pe_key].ndim == 2:
+                in_dim = pe_shape[1]
+                result.check(
+                    in_dim == expected_in_dim,
+                    f"patch_embed input dim == {expected_in_dim} for inpainting"
+                    f" (got {in_dim}, shape {pe_shape})",
+                )
+            elif weights[pe_key].ndim == 5:
                 in_channels = pe_shape[-1]  # channels-last after transpose
                 result.check(
-                    in_channels == 48,
-                    f"patch_embed input channels == 48 for inpainting (got {in_channels},"
-                    f" shape {pe_shape})",
-                )
-            else:
-                result.check(
-                    False,
-                    f"patch_embed.proj.weight expected 5D Conv3d (got {weights[pe_key].ndim}D,"
-                    f" shape {pe_shape})",
+                    in_channels == 33,
+                    f"patch_embed input channels == 33 for inpainting"
+                    f" (got {in_channels}, shape {pe_shape})",
                 )
 
         # Verify Conv3d weights are in channels-last layout
@@ -564,6 +674,41 @@ def validate(args) -> None:
 
         total_params = sum(v.size for v in weights.values())
         print(f"  Total transformer parameters: {total_params / 1e9:.2f}B")
+        del weights
+        gc.collect()
+        mx.clear_cache()
+
+    # --- Text Encoder ---
+    print("\n== Text Encoder Weights ==")
+    te_path = model_dir / "text_encoder.safetensors"
+    if te_path.exists():
+        weights = mx.load(str(te_path))
+        keys = set(weights.keys())
+
+        all_prefixed = all(k.startswith("text_encoder.") for k in keys)
+        result.check(all_prefixed, f"All keys have 'text_encoder.' prefix ({len(keys)} keys)")
+
+        # Check encoder blocks (T5-XXL has 24 layers)
+        bare_keys = {k.removeprefix("text_encoder.") for k in keys}
+        block_indices = count_layer_indices(bare_keys, block_key="encoder.block")
+        result.check(
+            len(block_indices) == 24,
+            f"24 T5 encoder blocks (got {len(block_indices)})",
+        )
+
+        # Check shared embedding
+        shared_key = "text_encoder.shared.weight"
+        result.check(shared_key in keys, "shared embedding present")
+
+        # Check final layer norm
+        final_norm_key = "text_encoder.encoder.final_layer_norm.weight"
+        result.check(final_norm_key in keys, "encoder.final_layer_norm present")
+
+        if is_quantized:
+            validate_quantization(weights, result, block_key="encoder.block")
+
+        total_params = sum(v.size for v in weights.values())
+        print(f"  Total text_encoder parameters: {total_params / 1e9:.2f}B")
         del weights
         gc.collect()
         mx.clear_cache()
@@ -611,18 +756,18 @@ def add_convert_args(parser) -> None:
         type=str,
         default=None,
         help="Path to local model directory (skips HF download). "
-        "Must contain transformer/ and vae/ subdirectories.",
+        "Must contain transformer/, text_encoder/, and vae/ subdirectories.",
     )
     parser.add_argument(
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ./models/cogvideo-fun-mlx[-q<bits>])",
+        help="Output directory (default: ./models/cogvideox-fun-v1.5-5b-inp-mlx[-q<bits>])",
     )
     parser.add_argument(
         "--quantize",
         action="store_true",
-        help="Quantize transformer after conversion",
+        help="Quantize transformer and text_encoder after conversion",
     )
     parser.add_argument(
         "--bits",
