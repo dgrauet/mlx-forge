@@ -499,19 +499,26 @@ def convert(args) -> None:
             group_size=args.group_size,
             should_quantize=should_quantize_transformer,
         )
-        quantize_component(
-            output_dir,
-            "text_encoder",
-            bits=args.bits,
-            group_size=args.group_size,
-            should_quantize=should_quantize_text_encoder,
-        )
+
+        skip = set(_SKIP_QUANTIZE_COMPONENTS)
+        if args.bits <= 4:
+            # T5 text encoder degrades too much at 4-bit (24 layers of error accumulation)
+            print(f"\n  Skipping text_encoder quantization at {args.bits}-bit")
+            skip.add("text_encoder")
+        else:
+            quantize_component(
+                output_dir,
+                "text_encoder",
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=should_quantize_text_encoder,
+            )
 
         qconfig = {
             "quantization": {
                 "bits": args.bits,
                 "group_size": args.group_size,
-                "skip_components": sorted(_SKIP_QUANTIZE_COMPONENTS),
+                "skip_components": sorted(skip),
             }
         }
         with open(output_dir / "quantize_config.json", "w") as f:
