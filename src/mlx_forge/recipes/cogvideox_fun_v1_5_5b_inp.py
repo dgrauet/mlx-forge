@@ -566,11 +566,15 @@ def validate(args) -> None:
 
     # Check quantization
     is_quantized = (model_dir / "quantize_config.json").exists()
+    skip_quantize: set[str] = set()
     if is_quantized:
         with open(model_dir / "quantize_config.json") as f:
             qconfig = json.load(f)
         bits = qconfig.get("quantization", {}).get("bits", "?")
+        skip_quantize = set(qconfig.get("quantization", {}).get("skip_components", []))
         print(f"Model is quantized: int{bits}")
+        if skip_quantize:
+            print(f"  Skipped components: {', '.join(sorted(skip_quantize))}")
 
     # --- File structure ---
     print("\n== File Structure ==")
@@ -675,8 +679,10 @@ def validate(args) -> None:
         final_norm_key = "text_encoder.encoder.final_layer_norm.weight"
         result.check(final_norm_key in keys, "encoder.final_layer_norm present")
 
-        if is_quantized:
+        if is_quantized and "text_encoder" not in skip_quantize:
             validate_quantization(weights, result, block_key="encoder.block")
+        elif is_quantized:
+            print("  (text_encoder kept in bf16 — skipping quantization checks)")
 
         total_params = sum(v.size for v in weights.values())
         print(f"  Total text_encoder parameters: {total_params / 1e9:.2f}B")
