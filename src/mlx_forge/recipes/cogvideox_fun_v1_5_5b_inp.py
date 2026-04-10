@@ -202,33 +202,6 @@ def should_quantize_transformer(key: str, weight: mx.array) -> bool:
     return True
 
 
-def should_quantize_text_encoder(key: str, weight: mx.array) -> bool:
-    """Determine if a text encoder weight should be quantized.
-
-    Only quantize 2D Linear weights in encoder blocks.
-    Exclude embeddings, norms, and relative attention bias.
-    """
-    if weight.ndim != 2 or not key.endswith(".weight"):
-        return False
-
-    bare_key = key.replace("text_encoder.", "", 1)
-
-    # Exclude shared embedding
-    if bare_key == "shared.weight":
-        return False
-
-    # Exclude layer norms
-    if "layer_norm" in bare_key:
-        return False
-
-    # Exclude relative attention bias (small, sensitivity-critical)
-    if "relative_attention_bias" in bare_key:
-        return False
-
-    # Quantize encoder block Linear weights (attention q/k/v/o, ffn wi_0/wi_1/wo)
-    return True
-
-
 # ---------------------------------------------------------------------------
 # Component conversion helpers
 # ---------------------------------------------------------------------------
@@ -501,18 +474,9 @@ def convert(args) -> None:
         )
 
         skip = set(_SKIP_QUANTIZE_COMPONENTS)
-        if args.bits <= 4:
-            # T5 text encoder degrades too much at 4-bit (24 layers of error accumulation)
-            print(f"\n  Skipping text_encoder quantization at {args.bits}-bit")
-            skip.add("text_encoder")
-        else:
-            quantize_component(
-                output_dir,
-                "text_encoder",
-                bits=args.bits,
-                group_size=args.group_size,
-                should_quantize=should_quantize_text_encoder,
-            )
+        # T5 text encoder stays in bf16 — quantization degrades quality
+        # (24 layers of accumulated error, especially at 4-bit)
+        skip.add("text_encoder")
 
         qconfig = {
             "quantization": {
