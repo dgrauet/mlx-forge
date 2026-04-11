@@ -16,9 +16,9 @@ Architecture:
     (CogVideoX-Fun V1.5 uses Linear patch_embed, not Conv3d)
 
 Usage:
-    mlx-forge convert void-model --source /path/to/weights/
-    mlx-forge convert void-model --source /path/to/weights/ --quantize --bits 8
-    mlx-forge convert void-model --source /path/to/weights/ --quantize --bits 4
+    mlx-forge convert void-model
+    mlx-forge convert void-model --quantize --bits 8
+    mlx-forge convert void-model --source /path/to/local/weights/
     mlx-forge validate void-model /path/to/output/
 """
 
@@ -32,9 +32,12 @@ from pathlib import Path
 import mlx.core as mx
 
 from ..convert import (
+    download_hf_files,
     fmt_size,
 )
 from ..quantize import _materialize
+
+REPO_ID = "netflix/void-model"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -160,14 +163,16 @@ def _convert_pass(
 
 def convert(args) -> None:
     """Convert VOID transformer weights to MLX format."""
-    if not args.source:
-        print("ERROR: --source is required (path to directory containing void_pass1/2.safetensors)")
-        raise SystemExit(1)
-
-    source_dir = Path(args.source)
-    if not source_dir.is_dir():
-        print(f"ERROR: {source_dir} is not a directory")
-        raise SystemExit(1)
+    if args.source:
+        source_dir = Path(args.source)
+        if not source_dir.is_dir():
+            print(f"ERROR: {source_dir} is not a directory")
+            raise SystemExit(1)
+    else:
+        # Download from HuggingFace
+        source_dir = Path("models") / "void-model-src"
+        print(f"\nDownloading from {REPO_ID}...")
+        download_hf_files(REPO_ID, PASS_FILES, source_dir)
 
     if args.output:
         output_dir = Path(args.output)
@@ -278,7 +283,8 @@ def _dry_run(args, output_dir: Path) -> None:
     print("DRY RUN -- no files will be written")
     print("=" * 60)
 
-    print(f"\nSource:     {args.source}")
+    source_label = args.source if args.source else f"{REPO_ID} (HuggingFace)"
+    print(f"\nSource:     {source_label}")
     print(f"Output dir: {output_dir}")
     print("\nPass files:")
 
