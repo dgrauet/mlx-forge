@@ -191,6 +191,8 @@ Use `transpose_conv()` from `transpose.py`. Detection: `key.endswith(".weight") 
 
 ### 3.5 Convert function
 
+**Default source = HuggingFace.** When the user runs `mlx-forge convert {recipe}` without `--source`, the recipe MUST auto-download from the official HuggingFace repository defined in `REPO_ID`. The `--source` flag is only for users who already have the weights locally. Never require `--source` — always provide a download fallback.
+
 Follow this structure:
 
 1. Parse output directory
