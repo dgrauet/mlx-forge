@@ -378,7 +378,8 @@ def validate(args) -> None:
     # 4. Validate VAE weights
     vae_weights = dict(mx.load(str(model_dir / "vae.safetensors")))
     vae_keys = list(vae_weights.keys())
-    result.check(any("fourier_embedder" in k for k in vae_keys), "VAE has fourier_embedder")
+    # Note: fourier_embedder.frequencies is a buffer computed from config, not a learned weight.
+    # It won't appear in the checkpoint — this is expected.
     result.check(any("geo_decoder" in k for k in vae_keys), "VAE has geo_decoder")
     result.check(any("transformer" in k for k in vae_keys), "VAE has transformer layers")
     del vae_weights
