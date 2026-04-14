@@ -3,12 +3,24 @@
 import mlx.core as mx
 
 from mlx_forge.recipes.hunyuan3d_21 import (
-    classify_key,
-    sanitize_dit_key,
-    sanitize_image_encoder_key,
-    sanitize_vae_key,
-    should_quantize,
+    SHAPE_CKPT_SECTIONS as _SECTIONS,
 )
+from mlx_forge.recipes.hunyuan3d_21 import (
+    sanitize_dit_key,
+)
+from mlx_forge.recipes.hunyuan3d_21 import (
+    sanitize_shape_image_encoder_key as sanitize_image_encoder_key,
+)
+from mlx_forge.recipes.hunyuan3d_21 import (
+    sanitize_shape_vae_key as sanitize_vae_key,
+)
+from mlx_forge.recipes.hunyuan3d_21 import (
+    shape_should_quantize as should_quantize,
+)
+
+
+def classify_key(section: str, key: str):
+    return _SECTIONS.get(section)
 
 
 class TestClassifyKey:
