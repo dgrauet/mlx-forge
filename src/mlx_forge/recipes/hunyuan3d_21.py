@@ -606,6 +606,7 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
 
     split_model = {
         "model_type": "hunyuan3d-2.1",
+        "source": "tencent/Hunyuan3D-2.1",
         "components": {name: f"{name}.safetensors" for name in config["components"]},
     }
     if args.quantize:
