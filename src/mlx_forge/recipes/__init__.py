@@ -18,4 +18,5 @@ AVAILABLE_RECIPES = {
     "void-model": "mlx_forge.recipes.void_model",
     "hunyuan3d-2.1": "mlx_forge.recipes.hunyuan3d_21",
     "ernie-image": "mlx_forge.recipes.ernie_image",
+    "ernie-image-pe": "mlx_forge.recipes.ernie_image_pe",
 }

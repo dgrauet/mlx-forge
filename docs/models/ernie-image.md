@@ -199,3 +199,31 @@ The `validate` command verifies:
 ## Downstream inference
 
 Converted checkpoints are consumed by [`ernie-image-mlx`](https://github.com/dgrauet/ernie-image-mlx) — a pure MLX implementation of the `ErnieImagePipeline` for Apple Silicon. End-to-end tested against diffusers (fp32 parity: DiT 3.1e-6, VAE encoder 1.7e-6, decoder 6.7e-6).
+
+## Prompt Enhancer (separate recipe)
+
+Baidu ships a 3B `Ministral3ForCausalLM` prompt enhancer in `pe/` alongside each ERNIE-Image variant. It expands short user prompts into rich Chinese visual descriptions before the text encoder — `use_pe=True` by default in the reference pipeline. The PE weights are byte-identical across Turbo and SFT, so publishing them once as a standalone repo avoids ~7 GB of duplication per image variant.
+
+```bash
+# Convert the PE (reuses the turbo-src checkpoint if already downloaded)
+mlx-forge convert ernie-image-pe --quantize --bits 4   # 1.8 GB output, default bits
+mlx-forge convert ernie-image-pe                       # fp16, 6.5 GB
+mlx-forge validate ernie-image-pe models/ernie-image-pe-mlx-q4
+```
+
+Output layout (ready to upload as `dgrauet/ernie-image-pe-mlx[-q4]`):
+
+```
+models/ernie-image-pe-mlx-q4/
+├── pe.safetensors             # Ministral3 CausalLM weights (block Linears + embed_tokens quantized)
+├── pe_config.json             # copy of pe/config.json
+├── chat_template.jinja        # Chinese system prompt baked in by Baidu
+├── tokenizer.json             # Mistral chat tokenizer (with [INST], [SYSTEM_PROMPT], …)
+├── tokenizer_config.json
+├── generation_config.json
+└── quantize_config.json       # only with --quantize
+```
+
+Key translations: none. The HF checkpoint for `Ministral3ForCausalLM` already uses `model.layers.*` / `model.embed_tokens.*` / `model.norm.*`, which matches mlx-lm's `ministral3.Model` one-to-one. `tie_word_embeddings=True` — the recipe drops the redundant `lm_head.weight` (~768 MB fp16) at conversion time since mlx-lm computes it on the fly via `embed_tokens.as_linear(...)`.
+
+Quantization scope: block Linears + `embed_tokens`. At `bits=4` the PE drops from 7 GB → 1.8 GB with no measurable quality loss on the short-prompt-expansion task.

@@ -20,6 +20,8 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Stable |
 | [Mistral Small 3.1](https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503) (24B VLM) | `mistral-small-3.1` | Stable |
 | [Qwen-Image](https://huggingface.co/Qwen/Qwen-Image-2512) (57B text-to-image DiT) | `qwen-image-2512` | Stable |
+| [ERNIE-Image](https://huggingface.co/baidu/ERNIE-Image) (8B text-to-image DiT) | `ernie-image` | Stable |
+| [ERNIE-Image Prompt Enhancer](https://huggingface.co/baidu/ERNIE-Image-Turbo/tree/main/pe) (3B Ministral3 CausalLM) | `ernie-image-pe` | Stable |
 
 ## Installation
 
@@ -201,6 +203,7 @@ Each recipe has its own detailed guide with architecture, key mapping, known got
 - [Fish S2 Pro](docs/models/fish-s2-pro.md) — 5B TTS (Dual-AR + DAC codec)
 - [Mistral Small 3.1](docs/models/mistral-small-3.1.md) — 24B VLM (Pixtral vision + dense LLM)
 - [Qwen-Image](docs/models/qwen-image-2512.md) — 57B text-to-image MMDiT (Flux-style)
+- [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
 
 ## License
 
