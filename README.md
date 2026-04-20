@@ -2,7 +2,7 @@
 
 Convert, quantize, split, validate, and upload ML models for [Apple MLX](https://github.com/ml-explore/mlx) on Apple Silicon.
 
-> **Tip:** if you use Claude Code for MLX ports, the [`porting-pytorch-to-mlx`](https://github.com/dgrauet/claude-skill-mlx-porting) skill wraps the end-to-end porting workflow (scaffolding, parity testing, attention patterns, pitfalls) and delegates weight conversion to `mlx-forge`.
+> **Tip:** if you use Claude Code for MLX ports, the [`mlx-porting`](https://github.com/dgrauet/claude-skill-mlx-porting) skill wraps the end-to-end porting workflow (scaffolding, parity testing, attention patterns, pitfalls) and delegates weight conversion to `mlx-forge`.
 
 ## Features
 
