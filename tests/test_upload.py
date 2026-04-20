@@ -157,3 +157,42 @@ class TestGenerateModelCard:
             license_id="mit",
         )
         assert "license: mit" in card
+
+    def test_cli_snippet_emits_bash_block(self, tmp_path):
+        snippet = "pip install tool\ntool generate -p 'hello'"
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="user/m",
+            cli_snippet=snippet,
+        )
+        assert "## Usage" in card
+        assert "```bash" in card
+        assert "pip install tool" in card
+        assert "tool generate -p 'hello'" in card
+        # The fence must close so downstream markdown renderers don't swallow the rest.
+        assert card.count("```") >= 2
+
+    def test_cli_snippet_and_usage_url_both_render(self, tmp_path):
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="user/m",
+            usage_url="https://github.com/org/proj",
+            cli_snippet="proj run",
+        )
+        # Both elements must appear under the same Usage heading — one project link,
+        # one bash example. Without this the card silently drops one of the two.
+        assert "[proj](https://github.com/org/proj)" in card
+        assert "```bash\nproj run\n```" in card
+
+    def test_no_usage_section_when_neither_present(self, tmp_path):
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="user/m",
+        )
+        assert "## Usage" not in card

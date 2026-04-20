@@ -98,6 +98,7 @@ def generate_model_card(
     license_id: str = "other",
     usage_url: str | None = None,
     links: list[str] | None = None,
+    cli_snippet: str | None = None,
 ) -> str:
     """Generate a HuggingFace model card with YAML frontmatter.
 
@@ -161,12 +162,18 @@ def generate_model_card(
         lines.append("")
 
     # Usage
-    if usage_url:
+    if usage_url or cli_snippet:
         lines.append("## Usage")
         lines.append("")
-        project_name = usage_url.rstrip("/").split("/")[-1]
-        lines.append(f"These weights can be used with [{project_name}]({usage_url}).")
-        lines.append("")
+        if usage_url:
+            project_name = usage_url.rstrip("/").split("/")[-1]
+            lines.append(f"These weights can be used with [{project_name}]({usage_url}).")
+            lines.append("")
+        if cli_snippet:
+            lines.append("```bash")
+            lines.append(cli_snippet.rstrip())
+            lines.append("```")
+            lines.append("")
 
     # Related projects
     if links:
@@ -202,6 +209,7 @@ def upload_model(
     commit_message: str = "Upload MLX model via mlx-forge",
     private: bool = False,
     collection_title: str | None = None,
+    card_only: bool = False,
 ) -> str:
     """Upload a model directory to HuggingFace Hub.
 
@@ -236,15 +244,30 @@ def upload_model(
         print(f"ERROR: Network error creating repo: {e}")
         raise SystemExit(1)
 
-    # Upload files
-    print(f"Uploading {model_dir} -> {repo_id}...")
+    # Upload files. In --card-only mode we push ONLY the model card — this
+    # avoids re-hashing multi-GB safetensors when the weights are unchanged
+    # and only the README needs refreshing (e.g. appending a CLI example).
     try:
-        api.upload_folder(
-            repo_id=repo_id,
-            folder_path=str(model_dir),
-            allow_patterns=["*.safetensors", "*.json", "README.md"],
-            commit_message=commit_message,
-        )
+        if card_only:
+            readme_path = model_dir / "README.md"
+            if not readme_path.exists():
+                print(f"ERROR: {readme_path} not found — generate the card first.")
+                raise SystemExit(1)
+            print(f"Uploading {readme_path.name} -> {repo_id}...")
+            api.upload_file(
+                path_or_fileobj=str(readme_path),
+                path_in_repo="README.md",
+                repo_id=repo_id,
+                commit_message=commit_message,
+            )
+        else:
+            print(f"Uploading {model_dir} -> {repo_id}...")
+            api.upload_folder(
+                repo_id=repo_id,
+                folder_path=str(model_dir),
+                allow_patterns=["*.safetensors", "*.json", "README.md"],
+                commit_message=commit_message,
+            )
     except HfHubHTTPError as e:
         print(f"ERROR: Upload failed: {e}")
         raise SystemExit(1)

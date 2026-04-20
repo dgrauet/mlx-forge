@@ -173,6 +173,23 @@ def main() -> None:
         metavar="'Label: URL'",
         help="Related project link for model card (repeatable, format: 'Label: URL')",
     )
+    upload_parser.add_argument(
+        "--cli-snippet",
+        type=str,
+        default=None,
+        help=(
+            "Bash snippet to embed in the model card's Usage section as a code block. "
+            "Use this to show how to install and run the downstream inference CLI."
+        ),
+    )
+    upload_parser.add_argument(
+        "--card-only",
+        action="store_true",
+        help=(
+            "Push ONLY the regenerated model card (README.md). Skips the weights upload "
+            "entirely — use this to refresh card content without re-hashing safetensors."
+        ),
+    )
 
     # Two-pass parsing: first get the command and recipe, then add recipe-specific args
     args, remaining = parser.parse_known_args()
@@ -299,6 +316,7 @@ def _run_upload(args) -> None:
         license_id=args.license,
         usage_url=args.usage_url or split_info.get("usage_url"),
         links=args.link or split_info.get("links"),
+        cli_snippet=args.cli_snippet,
     )
     readme_path = model_dir / "README.md"
     with open(readme_path, "w") as f:
@@ -313,6 +331,7 @@ def _run_upload(args) -> None:
         commit_message=args.commit_message,
         private=args.private,
         collection_title=args.collection,
+        card_only=args.card_only,
     )
     print(f"\nDone! {url}")
 
