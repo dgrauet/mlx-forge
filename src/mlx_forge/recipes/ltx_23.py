@@ -94,12 +94,14 @@ TEMPORAL_UPSCALER_COMPONENT = {
 
 LORA_FILES = {
     "distilled-384": "ltx-2.3-22b-distilled-lora-384.safetensors",
+    "distilled-384-1.1": "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
 }
 
 _LORA_SIZE_MB = 7250  # ~7.25 GB
 
 VARIANT_FILENAMES = {
     "distilled": "transformer-distilled.safetensors",
+    "distilled-1.1": "transformer-distilled-1.1.safetensors",
     "dev": "transformer-dev.safetensors",
 }
 
@@ -1301,8 +1303,8 @@ def add_convert_args(parser) -> None:
         type=str,
         nargs="*",
         default=["distilled", "dev"],
-        choices=["distilled", "dev"],
-        help="Transformer variant(s) to convert (default: both)",
+        choices=["distilled", "distilled-1.1", "dev"],
+        help="Transformer variant(s) to convert (default: distilled + dev)",
     )
     parser.add_argument(
         "--output",
