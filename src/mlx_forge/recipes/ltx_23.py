@@ -972,6 +972,16 @@ def validate(args) -> None:
     print(f"Validating: {model_dir}")
     result = ValidationResult()
 
+    # Read manifest early to detect delta mode
+    split_path = model_dir / "split_model.json"
+    split_info: dict = {}
+    if split_path.exists():
+        with open(split_path) as f:
+            split_info = json.load(f)
+    delta = bool(split_info.get("delta", False))
+    if delta:
+        print("\n[INFO] Delta mode (skipping shared component checks)")
+
     # Check quantization
     is_quantized = (model_dir / "quantize_config.json").exists()
     if is_quantized:
@@ -982,17 +992,19 @@ def validate(args) -> None:
 
     # File structure
     print("\n== File Structure ==")
-    expected = [
-        "config.json",
-        "split_model.json",
-        "connector.safetensors",
-        "vae_decoder.safetensors",
-        "vae_encoder.safetensors",
-        "audio_vae.safetensors",
-        "vocoder.safetensors",
-    ]
-    for fname in expected:
+    always_expected = ["config.json", "split_model.json"]
+    for fname in always_expected:
         validate_file_exists(model_dir, fname, result)
+    if not delta:
+        shared_expected = [
+            "connector.safetensors",
+            "vae_decoder.safetensors",
+            "vae_encoder.safetensors",
+            "audio_vae.safetensors",
+            "vocoder.safetensors",
+        ]
+        for fname in shared_expected:
+            validate_file_exists(model_dir, fname, result)
 
     # Check at least one transformer variant exists
     found_variants: list[str] = []
@@ -1068,87 +1080,91 @@ def validate(args) -> None:
             is_quantized=is_quantized,
         )
 
-    # Connector
-    print("\n== Connector Weights ==")
-    conn_path = model_dir / "connector.safetensors"
-    if conn_path.exists():
-        weights = mx.load(str(conn_path))
-        keys = set(weights.keys())
-        result.check(
-            any("video_embeddings_connector" in k for k in keys), "Video connector keys present"
-        )
-        result.check(
-            any("audio_embeddings_connector" in k for k in keys), "Audio connector keys present"
-        )
-        result.check(
-            any("text_embedding_projection" in k for k in keys),
-            "Text projection keys present",
-            warn_only=True,
-        )
-        del weights
-        gc.collect()
-        mx.clear_cache()
-
-    # VAE decoder/encoder
-    for component in ["vae_decoder", "vae_encoder"]:
-        print(f"\n== {component} Weights ==")
-        vae_path = model_dir / f"{component}.safetensors"
-        if vae_path.exists():
-            weights = mx.load(str(vae_path))
-            validate_no_pytorch_prefix(weights, "vae.", result)
-            stats_keys = [k for k in weights if "per_channel_statistics" in k]
+    if not delta:
+        # Connector
+        print("\n== Connector Weights ==")
+        conn_path = model_dir / "connector.safetensors"
+        if conn_path.exists():
+            weights = mx.load(str(conn_path))
+            keys = set(weights.keys())
             result.check(
-                len(stats_keys) >= 2,
-                f"Per-channel statistics present ({len(stats_keys)})",
+                any("video_embeddings_connector" in k for k in keys), "Video connector keys present"
             )
-            validate_conv_layout(weights, result, ndim=5)
+            result.check(
+                any("audio_embeddings_connector" in k for k in keys),
+                "Audio connector keys present",
+            )
+            result.check(
+                any("text_embedding_projection" in k for k in keys),
+                "Text projection keys present",
+                warn_only=True,
+            )
             del weights
             gc.collect()
             mx.clear_cache()
 
-    # Audio VAE
-    print("\n== Audio VAE Weights ==")
-    avae_path = model_dir / "audio_vae.safetensors"
-    if avae_path.exists():
-        weights = mx.load(str(avae_path))
-        # Check prefix structure: all keys should start with audio_vae.
-        all_prefixed = all(k.startswith("audio_vae.") for k in weights)
-        result.check(all_prefixed, f"All keys have 'audio_vae.' prefix ({len(weights)} keys)")
-        # Check decoder and encoder keys present
-        dec_keys = [k for k in weights if k.startswith("audio_vae.decoder.")]
-        enc_keys = [k for k in weights if k.startswith("audio_vae.encoder.")]
-        stats_keys = [k for k in weights if "per_channel_statistics" in k]
-        result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
-        result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
-        result.check(len(stats_keys) >= 2, f"Per-channel statistics present ({len(stats_keys)})")
-        # Check Conv2d layout (4D weights should be OHWI)
-        validate_conv_layout(weights, result, ndim=4)
-        del weights
-        gc.collect()
-        mx.clear_cache()
-
-    # Vocoder
-    print("\n== Vocoder Weights ==")
-    voc_path = model_dir / "vocoder.safetensors"
-    if voc_path.exists():
-        weights = mx.load(str(voc_path))
-        has_prefix = all(k.startswith("vocoder.") for k in weights)
-        result.check(has_prefix, f"All keys have 'vocoder.' prefix ({len(weights)} keys)")
-        conv1d = [(k, v) for k, v in weights.items() if "weight" in k and v.ndim == 3]
-        result.check(len(conv1d) > 0, f"Conv1d weights present ({len(conv1d)})")
-        # ConvTranspose1d (ups) should be in MLX layout (O, K, I), not PyTorch (I, O, K)
-        for k, v in weights.items():
-            if "ups" in k and "weight" in k and v.ndim == 3:
-                # In MLX layout, dim0 (O) should be smaller than dim2 (I) would be wrong;
-                # specifically for this vocoder: ups go from high channels to low,
-                # so shape should be (O, K, I) where O < I (e.g. 768, 11, 1536)
+        # VAE decoder/encoder
+        for component in ["vae_decoder", "vae_encoder"]:
+            print(f"\n== {component} Weights ==")
+            vae_path = model_dir / f"{component}.safetensors"
+            if vae_path.exists():
+                weights = mx.load(str(vae_path))
+                validate_no_pytorch_prefix(weights, "vae.", result)
+                stats_keys = [k for k in weights if "per_channel_statistics" in k]
                 result.check(
-                    v.shape[0] < v.shape[2],
-                    f"{k}: MLX layout (O,K,I)={v.shape} — O < I",
+                    len(stats_keys) >= 2,
+                    f"Per-channel statistics present ({len(stats_keys)})",
                 )
-        del weights
-        gc.collect()
-        mx.clear_cache()
+                validate_conv_layout(weights, result, ndim=5)
+                del weights
+                gc.collect()
+                mx.clear_cache()
+
+        # Audio VAE
+        print("\n== Audio VAE Weights ==")
+        avae_path = model_dir / "audio_vae.safetensors"
+        if avae_path.exists():
+            weights = mx.load(str(avae_path))
+            # Check prefix structure: all keys should start with audio_vae.
+            all_prefixed = all(k.startswith("audio_vae.") for k in weights)
+            result.check(all_prefixed, f"All keys have 'audio_vae.' prefix ({len(weights)} keys)")
+            # Check decoder and encoder keys present
+            dec_keys = [k for k in weights if k.startswith("audio_vae.decoder.")]
+            enc_keys = [k for k in weights if k.startswith("audio_vae.encoder.")]
+            stats_keys = [k for k in weights if "per_channel_statistics" in k]
+            result.check(len(dec_keys) > 0, f"Decoder keys present ({len(dec_keys)})")
+            result.check(len(enc_keys) > 0, f"Encoder keys present ({len(enc_keys)})")
+            result.check(
+                len(stats_keys) >= 2, f"Per-channel statistics present ({len(stats_keys)})"
+            )
+            # Check Conv2d layout (4D weights should be OHWI)
+            validate_conv_layout(weights, result, ndim=4)
+            del weights
+            gc.collect()
+            mx.clear_cache()
+
+        # Vocoder
+        print("\n== Vocoder Weights ==")
+        voc_path = model_dir / "vocoder.safetensors"
+        if voc_path.exists():
+            weights = mx.load(str(voc_path))
+            has_prefix = all(k.startswith("vocoder.") for k in weights)
+            result.check(has_prefix, f"All keys have 'vocoder.' prefix ({len(weights)} keys)")
+            conv1d = [(k, v) for k, v in weights.items() if "weight" in k and v.ndim == 3]
+            result.check(len(conv1d) > 0, f"Conv1d weights present ({len(conv1d)})")
+            # ConvTranspose1d (ups) should be in MLX layout (O, K, I), not PyTorch (I, O, K)
+            for k, v in weights.items():
+                if "ups" in k and "weight" in k and v.ndim == 3:
+                    # In MLX layout, dim0 (O) should be smaller than dim2 (I) would be wrong;
+                    # specifically for this vocoder: ups go from high channels to low,
+                    # so shape should be (O, K, I) where O < I (e.g. 768, 11, 1536)
+                    result.check(
+                        v.shape[0] < v.shape[2],
+                        f"{k}: MLX layout (O,K,I)={v.shape} — O < I",
+                    )
+            del weights
+            gc.collect()
+            mx.clear_cache()
 
     # Upscalers (optional)
     for upscaler_name in _upscaler_names:

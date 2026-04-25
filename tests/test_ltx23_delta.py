@@ -90,3 +90,70 @@ class TestSkipSharedConvertEffect:
 
         split = json.loads((tmp_path / "split_model.json").read_text())
         assert "delta" not in split or split["delta"] is False
+
+
+class TestValidateDeltaMode:
+    def _write_minimal_split(self, dir: Path, *, delta: bool, variants: list[str]) -> None:
+        split = {
+            "format": "split",
+            "model_version": "2.3.0",
+            "components": [],
+            "transformer_variants": variants,
+            "lora": [],
+            "source": "Lightricks/LTX-2.3",
+        }
+        if delta:
+            split["delta"] = True
+        (dir / "split_model.json").write_text(json.dumps(split))
+
+    def _write_minimal_config(self, dir: Path) -> None:
+        cfg = {
+            "model_version": "2.3.0",
+            "is_v2": True,
+            "apply_gated_attention": True,
+            "caption_channels": None,
+            "num_layers": 48,
+            "num_attention_heads": 32,
+            "attention_head_dim": 128,
+            "connector_positional_embedding_max_pos": [4096],
+            "connector_rope_type": "SPLIT",
+            "variants": {"distilled-1.1": {"cross_attention_adaln": True}},
+        }
+        (dir / "config.json").write_text(json.dumps(cfg))
+
+    def test_delta_skips_shared_checks(self, tmp_path, capsys):
+        """validate with delta:true must not run shared-component file checks."""
+        from mlx_forge.recipes import ltx_23
+
+        self._write_minimal_split(tmp_path, delta=True, variants=["distilled-1.1"])
+        self._write_minimal_config(tmp_path)
+
+        # No shared component files. No transformer file either; just check
+        # that the FAIL is about the transformer, not about connector/vae/etc.
+        ns = argparse.Namespace(model_dir=str(tmp_path), source=None)
+        try:
+            ltx_23.validate(ns)
+        except SystemExit:
+            pass
+        out = capsys.readouterr().out
+        assert "Delta mode" in out
+        # Shared component file-existence checks must be skipped:
+        assert "connector.safetensors exists" not in out
+        assert "vae_decoder.safetensors exists" not in out
+
+    def test_normal_mode_still_strict(self, tmp_path, capsys):
+        """validate without delta key must still run shared-component checks."""
+        from mlx_forge.recipes import ltx_23
+
+        self._write_minimal_split(tmp_path, delta=False, variants=["distilled-1.1"])
+        self._write_minimal_config(tmp_path)
+
+        ns = argparse.Namespace(model_dir=str(tmp_path), source=None)
+        try:
+            ltx_23.validate(ns)
+        except SystemExit:
+            pass
+        out = capsys.readouterr().out
+        assert "Delta mode" not in out
+        # Strict mode: connector check ran (file is missing → check FAIL appears in output)
+        assert "connector.safetensors" in out
