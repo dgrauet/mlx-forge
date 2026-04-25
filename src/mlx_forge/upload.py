@@ -266,9 +266,11 @@ def upload_model(
 
             if remote_files:
                 transformer_variants = sorted(
-                    f.removeprefix("transformer-").removesuffix(".safetensors")
+                    v
                     for f in remote_files
                     if f.startswith("transformer-") and f.endswith(".safetensors")
+                    for v in [f.removeprefix("transformer-").removesuffix(".safetensors")]
+                    if v
                 )
                 lora_files = sorted(
                     f for f in remote_files if "lora" in f and f.endswith(".safetensors")

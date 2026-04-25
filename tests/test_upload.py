@@ -381,3 +381,38 @@ class TestCardOnlyRemoteRefresh:
         assert "distilled" in readme_text
         assert "dev" in readme_text
         assert "distilled-1.1" in readme_text
+
+    def test_card_only_falls_back_on_network_error(self, tmp_path):
+        """When api.model_info raises a network error, fall back to local split_info."""
+        from huggingface_hub.errors import HfHubHTTPError
+
+        from mlx_forge.upload import upload_model
+
+        # Local has TWO variants; remote will fail to respond
+        (tmp_path / "transformer-distilled.safetensors").write_bytes(b"x")
+        (tmp_path / "transformer-dev.safetensors").write_bytes(b"y")
+        (tmp_path / "split_model.json").write_text(
+            json.dumps(
+                {
+                    "source": "Lightricks/LTX-2.3",
+                    "transformer_variants": ["distilled", "dev"],
+                }
+            )
+        )
+        (tmp_path / "config.json").write_text(json.dumps({"model_version": "2.3.0"}))
+
+        api = MagicMock()
+        api.model_info.side_effect = HfHubHTTPError("503 Service Unavailable", response=MagicMock())
+        api.create_repo.return_value = "https://huggingface.co/test/repo"
+
+        # Should NOT raise; falls back to local split_info
+        upload_model(tmp_path, api=api, repo_id="test/repo", card_only=True)
+
+        readme_call = next(
+            c for c in api.upload_file.call_args_list if c.kwargs["path_in_repo"] == "README.md"
+        )
+        readme_path = readme_call.kwargs["path_or_fileobj"]
+        readme_text = Path(readme_path).read_text()
+        # Local variants are present in the card
+        assert "distilled" in readme_text
+        assert "dev" in readme_text
