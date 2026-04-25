@@ -281,3 +281,15 @@ class TestAddOnlyBehavior:
         api.upload_file.assert_not_called()
         out = capsys.readouterr().out
         assert "Nothing to upload" in out
+
+    def test_refuses_when_model_dir_missing(self, tmp_path, capsys):
+        from mlx_forge.upload import upload_model
+
+        api = self._make_api(remote_files=[], repo_exists=True)
+        missing = tmp_path / "does-not-exist"
+
+        with pytest.raises(SystemExit):
+            upload_model(missing, api=api, repo_id="test/repo", add_only=True)
+        api.upload_file.assert_not_called()
+        out = capsys.readouterr().out
+        assert "does not exist" in out

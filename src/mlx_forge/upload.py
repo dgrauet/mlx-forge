@@ -243,6 +243,9 @@ def upload_model(
             raise SystemExit(1)
 
         remote = {s.rfilename for s in info.siblings}
+        if not model_dir.is_dir():
+            print(f"ERROR: model directory does not exist: {model_dir}")
+            raise SystemExit(1)
         candidates = sorted(
             p for p in model_dir.iterdir() if p.is_file() and p.suffix in (".safetensors", ".json")
         )
