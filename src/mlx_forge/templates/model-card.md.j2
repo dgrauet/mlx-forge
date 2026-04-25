@@ -57,6 +57,13 @@ These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ u
 {% endif -%}
 {% endfor %}
 {% endif -%}
+{% if lora_files -%}
+## LoRAs
+
+{% for f in lora_files -%}
+- `{{ f }}`
+{% endfor %}
+{% endif -%}
 {% if model_files -%}
 ## Files
 

@@ -343,3 +343,41 @@ class TestAddOnlyBehavior:
         api.upload_file.assert_not_called()
         out = capsys.readouterr().out
         assert "does not exist" in out
+
+
+class TestCardOnlyRemoteRefresh:
+    def test_card_only_uses_remote_variants(self, tmp_path):
+        from mlx_forge.upload import upload_model
+
+        # Local dir has only one variant (delta convert leftover)
+        (tmp_path / "transformer-distilled-1.1.safetensors").write_bytes(b"x")
+        (tmp_path / "split_model.json").write_text(
+            json.dumps({"source": "Lightricks/LTX-2.3", "transformer_variants": ["distilled-1.1"]})
+        )
+        (tmp_path / "config.json").write_text(json.dumps({"model_version": "2.3.0"}))
+
+        # Remote has all three transformer variants
+        api = MagicMock()
+        info = MagicMock()
+        info.siblings = [
+            MagicMock(rfilename="transformer-distilled.safetensors"),
+            MagicMock(rfilename="transformer-dev.safetensors"),
+            MagicMock(rfilename="transformer-distilled-1.1.safetensors"),
+            MagicMock(rfilename="ltx-2.3-22b-distilled-lora-384.safetensors"),
+            MagicMock(rfilename="ltx-2.3-22b-distilled-lora-384-1.1.safetensors"),
+            MagicMock(rfilename="config.json"),
+        ]
+        api.model_info.return_value = info
+        api.create_repo.return_value = "https://huggingface.co/test/repo"
+
+        upload_model(tmp_path, api=api, repo_id="test/repo", card_only=True)
+
+        readme_call = next(
+            c for c in api.upload_file.call_args_list if c.kwargs["path_in_repo"] == "README.md"
+        )
+        readme_path = readme_call.kwargs["path_or_fileobj"]
+        readme_text = Path(readme_path).read_text()
+        # All three transformer variants must appear in the card
+        assert "distilled" in readme_text
+        assert "dev" in readme_text
+        assert "distilled-1.1" in readme_text

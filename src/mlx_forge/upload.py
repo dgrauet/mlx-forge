@@ -257,10 +257,41 @@ def upload_model(
     # and only the README needs refreshing (e.g. appending a CLI example).
     try:
         if card_only:
+            # Derive transformer variants and LoRA files from remote (idempotent refresh)
+            try:
+                info = api.model_info(repo_id)
+                remote_files = [s.rfilename for s in info.siblings]
+            except (HfHubHTTPError, OSError, ConnectionError):
+                remote_files = []  # fall through with local data only
+
+            if remote_files:
+                transformer_variants = sorted(
+                    f.removeprefix("transformer-").removesuffix(".safetensors")
+                    for f in remote_files
+                    if f.startswith("transformer-") and f.endswith(".safetensors")
+                )
+                lora_files = sorted(
+                    f for f in remote_files if "lora" in f and f.endswith(".safetensors")
+                )
+                print(f"Detected variants on remote: {', '.join(transformer_variants) or '(none)'}")
+                print(f"Detected LoRAs on remote: {', '.join(lora_files) or '(none)'}")
+            else:
+                transformer_variants = None  # generate_model_card falls back to split_info
+                lora_files = None
+
+            # Regenerate README with remote-derived lists
+            split_info, config_data = load_model_metadata(model_dir)
+            readme_text = generate_model_card(
+                model_dir,
+                split_info=split_info,
+                config=config_data,
+                repo_id=repo_id,
+                transformer_variants=transformer_variants,
+                lora_files=lora_files,
+            )
             readme_path = model_dir / "README.md"
-            if not readme_path.exists():
-                print(f"ERROR: {readme_path} not found — generate the card first.")
-                raise SystemExit(1)
+            readme_path.write_text(readme_text)
+
             print(f"Uploading {readme_path.name} -> {repo_id}...")
             api.upload_file(
                 path_or_fileobj=str(readme_path),
