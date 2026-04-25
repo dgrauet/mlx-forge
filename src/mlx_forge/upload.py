@@ -99,8 +99,10 @@ def generate_model_card(
     usage_url: str | None = None,
     links: list[str] | None = None,
     cli_snippet: str | None = None,
+    transformer_variants: list[str] | None = None,
+    lora_files: list[str] | None = None,
 ) -> str:
-    """Generate a HuggingFace model card with YAML frontmatter.
+    """Render the model card from ``templates/model-card.md.j2``.
 
     Args:
         model_dir: Path to converted model directory.
@@ -111,94 +113,54 @@ def generate_model_card(
         license_id: SPDX license identifier.
         usage_url: Optional URL to an inference project that uses these weights.
         links: Optional list of related project links in "Label: URL" format.
+        cli_snippet: Optional bash snippet to include in the Usage section.
+        transformer_variants: Override for transformer variant list (default: read from split_info).
+        lora_files: Optional list of LoRA file names to include in the card.
 
     Returns:
         Model card content as a string.
     """
+    from importlib.resources import files
+
+    from jinja2 import Environment
+
     source = split_info.get("source", "")
-    transformer_variants = split_info.get("transformer_variants", [])
+    if base_model is None:
+        base_model = source or None
+    if transformer_variants is None:
+        transformer_variants = list(split_info.get("transformer_variants", []) or [])
+
     quantized = split_info.get("quantized", False)
     bits = split_info.get("quantization_bits")
     model_version = config.get("model_version")
 
-    if base_model is None:
-        base_model = source or None
+    # Build file listing from local dir (only files that exist)
+    model_files = []
+    if model_dir.exists():
+        for p in sorted(model_dir.iterdir()):
+            if p.is_file() and p.suffix in (".safetensors", ".json"):
+                model_files.append(
+                    type("F", (), {"name": p.name, "size_str": format_bytes(p.stat().st_size)})()
+                )
 
-    # YAML frontmatter
-    lines = ["---"]
-    lines.append("library_name: mlx")
-    lines.append(f"license: {license_id}")
-    if base_model:
-        lines.append(f"base_model: {base_model}")
-    lines.append("tags:")
-    for tag in ["mlx", "mlx-forge", "apple-silicon", "safetensors"]:
-        lines.append(f"  - {tag}")
-    lines.append("---")
-    lines.append("")
+    template_text = files("mlx_forge.templates").joinpath("model-card.md.j2").read_text()
+    env = Environment(trim_blocks=True, lstrip_blocks=True, keep_trailing_newline=True)
+    template = env.from_string(template_text)
 
-    # Body
-    lines.append(f"# {repo_id}")
-    lines.append("")
-    if base_model:
-        lines.append(
-            f"MLX format conversion of [{base_model}](https://huggingface.co/{base_model})."
-        )
-    else:
-        lines.append("MLX format model.")
-    lines.append("")
-    lines.append("Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge).")
-    lines.append("")
-
-    # Details
-    details = []
-    if transformer_variants:
-        details.append(f"- **Transformer variants:** {', '.join(transformer_variants)}")
-    if model_version:
-        details.append(f"- **Model version:** {model_version}")
-    if quantized and bits:
-        details.append(f"- **Quantization:** int{bits}")
-    if details:
-        lines.extend(details)
-        lines.append("")
-
-    # Usage
-    if usage_url or cli_snippet:
-        lines.append("## Usage")
-        lines.append("")
-        if usage_url:
-            project_name = usage_url.rstrip("/").split("/")[-1]
-            lines.append(f"These weights can be used with [{project_name}]({usage_url}).")
-            lines.append("")
-        if cli_snippet:
-            lines.append("```bash")
-            lines.append(cli_snippet.rstrip())
-            lines.append("```")
-            lines.append("")
-
-    # Related projects
-    if links:
-        lines.append("## Related Projects")
-        lines.append("")
-        for link in links:
-            if ": " in link:
-                label, url = link.split(": ", 1)
-                lines.append(f"- **{label}:** {url}")
-            else:
-                lines.append(f"- {link}")
-        lines.append("")
-
-    # File listing
-    model_files = sorted(
-        p for p in model_dir.iterdir() if p.is_file() and p.suffix in (".safetensors", ".json")
+    return template.render(
+        repo_id=repo_id,
+        base_model=base_model,
+        license_id=license_id,
+        transformer_variants=transformer_variants,
+        lora_files=lora_files or [],
+        model_version=model_version,
+        quantized=quantized,
+        bits=bits,
+        usage_url=usage_url,
+        cli_snippet=cli_snippet,
+        links=links or [],
+        model_files=model_files,
     )
-    if model_files:
-        lines.append("## Files")
-        lines.append("")
-        for p in model_files:
-            lines.append(f"- `{p.name}` ({format_bytes(p.stat().st_size)})")
-        lines.append("")
-
-    return "\n".join(lines)
 
 
 def upload_model(

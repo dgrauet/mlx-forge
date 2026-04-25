@@ -200,6 +200,56 @@ class TestGenerateModelCard:
         assert "## Usage" not in card
 
 
+class TestModelCardTemplate:
+    def test_renders_minimal_card(self):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            Path("/tmp/dummy"),
+            split_info={"source": "Org/Model", "transformer_variants": ["dev"]},
+            config={"model_version": "2.3.0"},
+            repo_id="user/model-mlx",
+        )
+        assert "library_name: mlx" in card
+        assert "user/model-mlx" in card
+        assert "[Org/Model](https://huggingface.co/Org/Model)" in card
+        assert "Transformer variants:" in card
+        assert "dev" in card
+
+    def test_renders_quantized(self):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            Path("/tmp/dummy"),
+            split_info={
+                "source": "Org/Model",
+                "transformer_variants": ["dev"],
+                "quantized": True,
+                "quantization_bits": 8,
+            },
+            config={"model_version": "2.3.0"},
+            repo_id="user/model-mlx-q8",
+        )
+        assert "Quantization:" in card
+        assert "int8" in card
+
+    def test_omits_optional_sections(self):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            Path("/tmp/dummy"),
+            split_info={"source": "Org/Model"},
+            config={},
+            repo_id="user/model-mlx",
+        )
+        # No transformer_variants → no Transformer variants line
+        assert "Transformer variants:" not in card
+        # No usage_url and no cli_snippet → no Usage section
+        assert "## Usage" not in card
+        # No links → no Related Projects section
+        assert "## Related Projects" not in card
+
+
 class TestAddOnlyArgparse:
     def test_default_is_false(self):
         from mlx_forge.cli import build_parser

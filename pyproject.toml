@@ -29,6 +29,7 @@ dependencies = [
     "numpy>=1.26.0",
     "tqdm>=4.66.0",
     "hf-xet>=1.3.2",
+    "jinja2>=3.1.0",
 ]
 
 [project.urls]
@@ -55,6 +56,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlx_forge"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/mlx_forge/templates/model-card.md.j2" = "mlx_forge/templates/model-card.md.j2"
 
 [tool.ruff]
 line-length = 100
