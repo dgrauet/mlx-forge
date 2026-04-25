@@ -751,13 +751,14 @@ def convert(args) -> None:
     variant_adaln: dict[str, bool] = {}
     config = None
 
+    skip_shared = getattr(args, "skip_shared", False)
     for i, variant in enumerate(variants):
         print(f"\n{'=' * 60}")
         print(f"Converting variant: {variant} ({i + 1}/{len(variants)})")
         print("=" * 60)
 
         cfg, cross_attn_adaln, count = _convert_variant(
-            args, variant, output_dir, is_first=(i == 0)
+            args, variant, output_dir, is_first=(i == 0 and not skip_shared)
         )
         total_weights += count
         variant_adaln[variant] = cross_attn_adaln
@@ -779,43 +780,44 @@ def convert(args) -> None:
     upscaler_components = []
     download_dir = Path("models") / "ltx-2.3-src"
 
-    for i, scale in enumerate(args.spatial_upscaler):
-        comp_name = SPATIAL_UPSCALER_COMPONENT[scale]
-        filename = SPATIAL_UPSCALER_FILES[scale]
-        if (output_dir / f"{comp_name}.safetensors").exists():
-            print(f"\n[{comp_name}] Already exists, skipping")
+    if not skip_shared:
+        for i, scale in enumerate(args.spatial_upscaler):
+            comp_name = SPATIAL_UPSCALER_COMPONENT[scale]
+            filename = SPATIAL_UPSCALER_FILES[scale]
+            if (output_dir / f"{comp_name}.safetensors").exists():
+                print(f"\n[{comp_name}] Already exists, skipping")
+                upscaler_components.append(comp_name)
+                continue
+            if i < len(args.spatial_upscaler_checkpoint):
+                upscaler_path = args.spatial_upscaler_checkpoint[i]
+            else:
+                print(f"\nDownloading spatial upscaler {scale} ({filename})...")
+                download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
+                upscaler_path = str(download_dir / filename)
+            t0 = time.monotonic()
+            count = convert_upscaler(upscaler_path, output_dir, comp_name)
+            total_weights += count
             upscaler_components.append(comp_name)
-            continue
-        if i < len(args.spatial_upscaler_checkpoint):
-            upscaler_path = args.spatial_upscaler_checkpoint[i]
-        else:
-            print(f"\nDownloading spatial upscaler {scale} ({filename})...")
-            download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
-            upscaler_path = str(download_dir / filename)
-        t0 = time.monotonic()
-        count = convert_upscaler(upscaler_path, output_dir, comp_name)
-        total_weights += count
-        upscaler_components.append(comp_name)
-        print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+            print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
-    for i, scale in enumerate(args.temporal_upscaler):
-        comp_name = TEMPORAL_UPSCALER_COMPONENT[scale]
-        filename = TEMPORAL_UPSCALER_FILES[scale]
-        if (output_dir / f"{comp_name}.safetensors").exists():
-            print(f"\n[{comp_name}] Already exists, skipping")
+        for i, scale in enumerate(args.temporal_upscaler):
+            comp_name = TEMPORAL_UPSCALER_COMPONENT[scale]
+            filename = TEMPORAL_UPSCALER_FILES[scale]
+            if (output_dir / f"{comp_name}.safetensors").exists():
+                print(f"\n[{comp_name}] Already exists, skipping")
+                upscaler_components.append(comp_name)
+                continue
+            if i < len(args.temporal_upscaler_checkpoint):
+                upscaler_path = args.temporal_upscaler_checkpoint[i]
+            else:
+                print(f"\nDownloading temporal upscaler {scale} ({filename})...")
+                download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
+                upscaler_path = str(download_dir / filename)
+            t0 = time.monotonic()
+            count = convert_upscaler(upscaler_path, output_dir, comp_name)
+            total_weights += count
             upscaler_components.append(comp_name)
-            continue
-        if i < len(args.temporal_upscaler_checkpoint):
-            upscaler_path = args.temporal_upscaler_checkpoint[i]
-        else:
-            print(f"\nDownloading temporal upscaler {scale} ({filename})...")
-            download_hf_files("Lightricks/LTX-2.3", [filename], download_dir)
-            upscaler_path = str(download_dir / filename)
-        t0 = time.monotonic()
-        count = convert_upscaler(upscaler_path, output_dir, comp_name)
-        total_weights += count
-        upscaler_components.append(comp_name)
-        print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+            print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
     # Sync LoRA files (no conversion, just download and copy)
     lora_synced: list[str] = []
@@ -838,11 +840,14 @@ def convert(args) -> None:
         print(f"  Synced {filename} ({dest.stat().st_size / (1024**2):.0f} MB)")
 
     # Create split_model.json
-    shared_components = [c for c in COMPONENTS if c != "transformer"] + upscaler_components
+    if skip_shared:
+        components: list[str] = []
+    else:
+        components = [c for c in COMPONENTS if c != "transformer"] + upscaler_components
     split_info: dict = {
         "format": "split",
         "model_version": config["model_version"],
-        "components": shared_components,
+        "components": components,
         "transformer_variants": list(variant_adaln.keys()),
         "lora": lora_synced,
         "source": "Lightricks/LTX-2.3",
@@ -851,6 +856,8 @@ def convert(args) -> None:
             " — upsample layers [6,5,2,2,2] (240x) and mel_stft parameters.",
         },
     }
+    if skip_shared:
+        split_info["delta"] = True
     with open(output_dir / "split_model.json", "w") as f:
         json.dump(split_info, f, indent=2)
 
