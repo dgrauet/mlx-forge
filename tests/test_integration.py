@@ -714,3 +714,102 @@ class TestQuantizationIntegration:
         # Should be kept as-is (not quantized) because 100 % 64 != 0
         assert "layers.0.attention.wqkv.weight" in quantized
         assert "layers.0.attention.wqkv.scales" not in quantized
+
+
+# ---------------------------------------------------------------------------
+# Delta workflow end-to-end integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestDeltaWorkflowEndToEnd:
+    """Wire test: convert delta → validate → upload --add-only → upload --card-only."""
+
+    def test_delta_workflow_glue(self, tmp_path, capsys):
+        import argparse
+        import json
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from mlx_forge.recipes import ltx_23
+        from mlx_forge.upload import upload_model
+
+        # Stage 1: simulate convert --skip-shared output (don't actually run convert —
+        # T1/T2 already test that). Just write the artifacts a delta convert would produce.
+        # Write a minimal valid safetensors file (validate calls mx.load on it).
+        mx.save_safetensors(
+            str(tmp_path / "transformer-distilled-1.1.safetensors"),
+            {"transformer.transformer_blocks.0.attn1.to_gate_logits.weight": mx.zeros((4, 4))},
+        )
+        (tmp_path / "split_model.json").write_text(
+            json.dumps(
+                {
+                    "format": "split",
+                    "model_version": "2.3.0",
+                    "components": [],
+                    "transformer_variants": ["distilled-1.1"],
+                    "lora": [],
+                    "source": "Lightricks/LTX-2.3",
+                    "delta": True,
+                }
+            )
+        )
+        (tmp_path / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_version": "2.3.0",
+                    "is_v2": True,
+                    "apply_gated_attention": True,
+                    "caption_channels": None,
+                    "num_layers": 48,
+                    "num_attention_heads": 32,
+                    "attention_head_dim": 128,
+                    "connector_positional_embedding_max_pos": [4096],
+                    "connector_rope_type": "SPLIT",
+                    "variants": {"distilled-1.1": {"cross_attention_adaln": True}},
+                }
+            )
+        )
+
+        # Stage 2: validate auto-detects delta
+        ns = argparse.Namespace(model_dir=str(tmp_path), source=None)
+        try:
+            ltx_23.validate(ns)
+        except SystemExit:
+            pass
+        out = capsys.readouterr().out
+        assert "Delta mode" in out
+
+        # Stage 3: upload --add-only with mocked api — only new files get uploaded
+        api = MagicMock()
+        info = MagicMock()
+        info.siblings = [
+            MagicMock(rfilename="config.json"),
+            MagicMock(rfilename="transformer-distilled.safetensors"),
+        ]
+        api.model_info.return_value = info
+
+        upload_model(tmp_path, api=api, repo_id="user/repo", add_only=True)
+
+        uploaded = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert "transformer-distilled-1.1.safetensors" in uploaded
+        assert "config.json" not in uploaded  # already on remote
+
+        # Stage 4: upload --card-only refreshes card with remote-derived variants
+        api2 = MagicMock()
+        info2 = MagicMock()
+        info2.siblings = [
+            MagicMock(rfilename="transformer-distilled.safetensors"),
+            MagicMock(rfilename="transformer-distilled-1.1.safetensors"),
+        ]
+        api2.model_info.return_value = info2
+        api2.create_repo.return_value = "https://huggingface.co/user/repo"
+
+        upload_model(tmp_path, api=api2, repo_id="user/repo", card_only=True)
+
+        readme_call = next(
+            c for c in api2.upload_file.call_args_list if c.kwargs["path_in_repo"] == "README.md"
+        )
+        readme_text = Path(readme_call.kwargs["path_or_fileobj"]).read_text()
+        # Both remote variants must appear in the regenerated card
+        assert "distilled" in readme_text
+        assert "distilled-1.1" in readme_text
