@@ -1326,6 +1326,16 @@ def add_convert_args(parser) -> None:
         action="store_true",
         help="Preview conversion plan without downloading or writing anything",
     )
+    parser.add_argument(
+        "--skip-shared",
+        action="store_true",
+        help=(
+            "Delta mode: convert only the requested transformer variant(s) and LoRAs. "
+            "Skips connector, vae_*, audio_vae, vocoder, vae_shared_stats, and upscalers. "
+            "Marks split_model.json with 'delta': true. "
+            "Use when adding a variant to an existing repo."
+        ),
+    )
     # Upscalers
     parser.add_argument(
         "--spatial-upscaler",
