@@ -210,6 +210,7 @@ def upload_model(
     private: bool = False,
     collection_title: str | None = None,
     card_only: bool = False,
+    add_only: bool = False,
 ) -> str:
     """Upload a model directory to HuggingFace Hub.
 
@@ -220,6 +221,9 @@ def upload_model(
         commit_message: Commit message for the upload.
         private: Whether to create a private repo.
         collection_title: If set, create/add to this collection.
+        card_only: If True, push only the model card (README.md).
+        add_only: If True, skip files already present on the remote repo
+            (delta upload). Refuses to run if the repo does not exist yet.
 
     Returns:
         The repo URL.

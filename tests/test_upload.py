@@ -196,3 +196,19 @@ class TestGenerateModelCard:
             repo_id="user/m",
         )
         assert "## Usage" not in card
+
+
+class TestAddOnlyArgparse:
+    def test_default_is_false(self):
+        from mlx_forge.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["upload", "models/foo"])
+        assert args.add_only is False
+
+    def test_flag_sets_true(self):
+        from mlx_forge.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["upload", "models/foo", "--add-only"])
+        assert args.add_only is True
