@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import mlx.core as mx
+import pytest
+from huggingface_hub.errors import RepositoryNotFoundError
 
 from mlx_forge.upload import derive_repo_id, generate_model_card, load_model_metadata
 
@@ -212,3 +214,70 @@ class TestAddOnlyArgparse:
         parser = build_parser()
         args = parser.parse_args(["upload", "models/foo", "--add-only"])
         assert args.add_only is True
+
+
+class TestAddOnlyBehavior:
+    def _setup_dir(self, tmp_path):
+        # Three safetensors files locally
+        (tmp_path / "transformer-distilled-1.1.safetensors").write_bytes(b"x" * 100)
+        (tmp_path / "ltx-2.3-22b-distilled-lora-384-1.1.safetensors").write_bytes(b"y" * 50)
+        (tmp_path / "vae_decoder.safetensors").write_bytes(b"z" * 200)
+        (tmp_path / "split_model.json").write_text("{}")
+
+    def _make_api(self, remote_files: list[str], repo_exists: bool = True) -> MagicMock:
+        api = MagicMock()
+        if repo_exists:
+            info = MagicMock()
+            info.siblings = [MagicMock(rfilename=f) for f in remote_files]
+            api.model_info.return_value = info
+        else:
+            api.model_info.side_effect = RepositoryNotFoundError("not found", response=MagicMock())
+        api.create_repo.return_value = "https://huggingface.co/test/repo"
+        return api
+
+    def test_uploads_only_new_files(self, tmp_path):
+        from mlx_forge.upload import upload_model
+
+        self._setup_dir(tmp_path)
+        # Remote already has vae_decoder; transformer + lora are new
+        api = self._make_api(
+            remote_files=["vae_decoder.safetensors", "config.json"],
+            repo_exists=True,
+        )
+
+        upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+
+        uploaded = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert "transformer-distilled-1.1.safetensors" in uploaded
+        assert "ltx-2.3-22b-distilled-lora-384-1.1.safetensors" in uploaded
+        assert "vae_decoder.safetensors" not in uploaded
+
+    def test_refuses_when_repo_not_found(self, tmp_path, capsys):
+        from mlx_forge.upload import upload_model
+
+        self._setup_dir(tmp_path)
+        api = self._make_api(remote_files=[], repo_exists=False)
+
+        with pytest.raises(SystemExit):
+            upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+        api.upload_file.assert_not_called()
+
+    def test_nothing_to_upload_exits_cleanly(self, tmp_path, capsys):
+        from mlx_forge.upload import upload_model
+
+        self._setup_dir(tmp_path)
+        api = self._make_api(
+            remote_files=[
+                "transformer-distilled-1.1.safetensors",
+                "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+                "vae_decoder.safetensors",
+                "split_model.json",
+            ],
+            repo_exists=True,
+        )
+
+        upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+
+        api.upload_file.assert_not_called()
+        out = capsys.readouterr().out
+        assert "Nothing to upload" in out

@@ -14,7 +14,7 @@ from pathlib import Path
 os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
 from huggingface_hub import HfApi
-from huggingface_hub.errors import HfHubHTTPError
+from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
 from .quantize import format_bytes
 
@@ -228,6 +228,45 @@ def upload_model(
     Returns:
         The repo URL.
     """
+    if add_only:
+        # Verify the repo exists (refuse if not — this mode is incremental)
+        try:
+            info = api.model_info(repo_id)
+        except RepositoryNotFoundError:
+            print(
+                f"ERROR: --add-only refuses to run on non-existent repo '{repo_id}'. "
+                "Use a normal upload to create the repo first."
+            )
+            raise SystemExit(1)
+        except (HfHubHTTPError, OSError, ConnectionError) as e:
+            print(f"ERROR: Could not query repo '{repo_id}': {e}")
+            raise SystemExit(1)
+
+        remote = {s.rfilename for s in info.siblings}
+        candidates = sorted(
+            p for p in model_dir.iterdir() if p.is_file() and p.suffix in (".safetensors", ".json")
+        )
+        new_files = [p for p in candidates if p.name not in remote]
+
+        if not new_files:
+            print(f"Nothing to upload (all {len(candidates)} files already on remote)")
+            return f"https://huggingface.co/{repo_id}"
+
+        skipped = [p.name for p in candidates if p.name in remote]
+        if skipped:
+            print(f"Skipped (on remote): {', '.join(skipped)}")
+
+        for p in new_files:
+            msg = f"{commit_message}: {p.name}" if len(new_files) > 1 else commit_message
+            print(f"Uploading: {p.name}")
+            api.upload_file(
+                path_or_fileobj=str(p),
+                path_in_repo=p.name,
+                repo_id=repo_id,
+                commit_message=msg,
+            )
+        return f"https://huggingface.co/{repo_id}"
+
     # Create repo
     print(f"Creating repo: {repo_id}")
     try:
