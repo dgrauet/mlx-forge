@@ -330,3 +330,39 @@ Before finishing, verify against this checklist:
 - [ ] Dry run with `--quantize` shows correct quantization plan
 
 Present this checklist to the user with pass/fail status.
+
+## Model card template
+
+The HuggingFace model card uploaded with `mlx-forge upload` is rendered from a
+single Jinja2 template:
+
+**Path:** `src/mlx_forge/templates/model-card.md.j2`
+
+**Available variables (rendered context):**
+
+| Variable | Type | Source |
+|----------|------|--------|
+| `repo_id` | str | Derived or explicit (`--repo-id`) |
+| `base_model` | str \| None | `split_info["source"]` or explicit (`--base-model`) |
+| `license_id` | str | `--license` (default: `other`) |
+| `transformer_variants` | list[str] | Remote-derived in `--card-only` mode, else `split_info` |
+| `lora_files` | list[str] | Remote-derived in `--card-only` mode, else `[]` |
+| `model_version` | str \| None | `config["model_version"]` |
+| `quantized` | bool | `split_info["quantized"]` |
+| `bits` | int \| None | `split_info["quantization_bits"]` |
+| `usage_url` | str \| None | `--usage-url` |
+| `cli_snippet` | str \| None | `--cli-snippet` |
+| `links` | list[str] | `--link` (repeatable, "Label: URL") |
+| `model_files` | list of `{name, size_str}` | Listed from local model_dir |
+
+**Conditional sections** (`{% if %}`): frontmatter `base_model`, transformer
+variants line, model version line, quantization line, Usage section, Related
+Projects section, LoRAs section, Files section.
+
+**Customizing:** edit the template file directly. No per-recipe override
+exists in v1 (deferred — see `docs/superpowers/specs/2026-04-25-delta-workflow-improvements-design.md`).
+Verify changes by running the upload tests:
+
+```bash
+uv run pytest tests/test_upload.py::TestModelCardTemplate -v
+```

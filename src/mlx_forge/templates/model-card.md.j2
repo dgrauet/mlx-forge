@@ -1,0 +1,73 @@
+---
+library_name: mlx
+license: {{ license_id }}
+{% if base_model -%}
+base_model: {{ base_model }}
+{% endif -%}
+tags:
+  - mlx
+  - mlx-forge
+  - apple-silicon
+  - safetensors
+---
+
+# {{ repo_id }}
+
+{% if base_model -%}
+MLX format conversion of [{{ base_model }}](https://huggingface.co/{{ base_model }}).
+{% else -%}
+MLX format model.
+{% endif %}
+
+Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge).
+
+{% if transformer_variants or model_version or (quantized and bits) -%}
+{% if transformer_variants -%}
+- **Transformer variants:** {{ transformer_variants | join(", ") }}
+{% endif -%}
+{% if model_version -%}
+- **Model version:** {{ model_version }}
+{% endif -%}
+{% if quantized and bits -%}
+- **Quantization:** int{{ bits }}
+{% endif %}
+{% endif -%}
+{% if usage_url or cli_snippet -%}
+## Usage
+
+{% if usage_url -%}
+These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ usage_url }}).
+
+{% endif -%}
+{% if cli_snippet -%}
+```bash
+{{ cli_snippet.rstrip() }}
+```
+
+{% endif -%}
+{% endif -%}
+{% if links -%}
+## Related Projects
+
+{% for link in links -%}
+{% if ": " in link -%}
+- **{{ link.split(": ", 1)[0] }}:** {{ link.split(": ", 1)[1] }}
+{% else -%}
+- {{ link }}
+{% endif -%}
+{% endfor %}
+{% endif -%}
+{% if lora_files -%}
+## LoRAs
+
+{% for f in lora_files -%}
+- `{{ f }}`
+{% endfor %}
+{% endif -%}
+{% if model_files -%}
+## Files
+
+{% for f in model_files -%}
+- `{{ f.name }}` ({{ f.size_str }})
+{% endfor %}
+{% endif -%}

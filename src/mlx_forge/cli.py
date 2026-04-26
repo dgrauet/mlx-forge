@@ -27,7 +27,12 @@ def _get_recipe(name: str):
     return importlib.import_module(AVAILABLE_RECIPES[name])
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return the top-level argument parser.
+
+    Returns:
+        Configured ArgumentParser with all subparsers registered.
+    """
     parser = argparse.ArgumentParser(
         prog="mlx-forge",
         description=("Convert, quantize, split, validate, and upload ML models for Apple MLX"),
@@ -182,7 +187,8 @@ def main() -> None:
             "Use this to show how to install and run the downstream inference CLI."
         ),
     )
-    upload_parser.add_argument(
+    mode_group = upload_parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--card-only",
         action="store_true",
         help=(
@@ -190,6 +196,21 @@ def main() -> None:
             "entirely — use this to refresh card content without re-hashing safetensors."
         ),
     )
+    mode_group.add_argument(
+        "--add-only",
+        action="store_true",
+        help=(
+            "Delta upload: skip files whose names already exist on the remote repo. "
+            "Useful after `convert --skip-shared` to push only the new variant. "
+            "Refuses to run if the repo doesn't exist."
+        ),
+    )
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
 
     # Two-pass parsing: first get the command and recipe, then add recipe-specific args
     args, remaining = parser.parse_known_args()
@@ -332,6 +353,7 @@ def _run_upload(args) -> None:
         private=args.private,
         collection_title=args.collection,
         card_only=args.card_only,
+        add_only=args.add_only,
     )
     print(f"\nDone! {url}")
 

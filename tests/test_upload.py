@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import mlx.core as mx
+import pytest
+from huggingface_hub.errors import RepositoryNotFoundError
 
 from mlx_forge.upload import derive_repo_id, generate_model_card, load_model_metadata
 
@@ -196,3 +198,244 @@ class TestGenerateModelCard:
             repo_id="user/m",
         )
         assert "## Usage" not in card
+
+
+class TestModelCardTemplate:
+    def test_renders_minimal_card(self):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            Path("/tmp/dummy"),
+            split_info={"source": "Org/Model", "transformer_variants": ["dev"]},
+            config={"model_version": "2.3.0"},
+            repo_id="user/model-mlx",
+        )
+        assert "library_name: mlx" in card
+        assert "user/model-mlx" in card
+        assert "[Org/Model](https://huggingface.co/Org/Model)" in card
+        assert "Transformer variants:" in card
+        assert "dev" in card
+
+    def test_renders_quantized(self):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            Path("/tmp/dummy"),
+            split_info={
+                "source": "Org/Model",
+                "transformer_variants": ["dev"],
+                "quantized": True,
+                "quantization_bits": 8,
+            },
+            config={"model_version": "2.3.0"},
+            repo_id="user/model-mlx-q8",
+        )
+        assert "Quantization:" in card
+        assert "int8" in card
+
+    def test_omits_optional_sections(self):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            Path("/tmp/dummy"),
+            split_info={"source": "Org/Model"},
+            config={},
+            repo_id="user/model-mlx",
+        )
+        # No transformer_variants → no Transformer variants line
+        assert "Transformer variants:" not in card
+        # No usage_url and no cli_snippet → no Usage section
+        assert "## Usage" not in card
+        # No links → no Related Projects section
+        assert "## Related Projects" not in card
+
+
+class TestAddOnlyArgparse:
+    def test_default_is_false(self):
+        from mlx_forge.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["upload", "models/foo"])
+        assert args.add_only is False
+
+    def test_flag_sets_true(self):
+        from mlx_forge.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["upload", "models/foo", "--add-only"])
+        assert args.add_only is True
+
+
+class TestAddOnlyBehavior:
+    def _setup_dir(self, tmp_path):
+        # Three safetensors files locally
+        (tmp_path / "transformer-distilled-1.1.safetensors").write_bytes(b"x" * 100)
+        (tmp_path / "ltx-2.3-22b-distilled-lora-384-1.1.safetensors").write_bytes(b"y" * 50)
+        (tmp_path / "vae_decoder.safetensors").write_bytes(b"z" * 200)
+        (tmp_path / "split_model.json").write_text("{}")
+
+    def _make_api(self, remote_files: list[str], repo_exists: bool = True) -> MagicMock:
+        api = MagicMock()
+        if repo_exists:
+            info = MagicMock()
+            info.siblings = [MagicMock(rfilename=f) for f in remote_files]
+            api.model_info.return_value = info
+        else:
+            api.model_info.side_effect = RepositoryNotFoundError("not found", response=MagicMock())
+        api.create_repo.return_value = "https://huggingface.co/test/repo"
+        return api
+
+    def test_uploads_only_new_files(self, tmp_path):
+        from mlx_forge.upload import upload_model
+
+        self._setup_dir(tmp_path)
+        # Remote already has vae_decoder; transformer + lora are new
+        api = self._make_api(
+            remote_files=["vae_decoder.safetensors", "config.json"],
+            repo_exists=True,
+        )
+
+        upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+
+        uploaded = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert "transformer-distilled-1.1.safetensors" in uploaded
+        assert "ltx-2.3-22b-distilled-lora-384-1.1.safetensors" in uploaded
+        assert "vae_decoder.safetensors" not in uploaded
+
+    def test_refuses_when_repo_not_found(self, tmp_path, capsys):
+        from mlx_forge.upload import upload_model
+
+        self._setup_dir(tmp_path)
+        api = self._make_api(remote_files=[], repo_exists=False)
+
+        with pytest.raises(SystemExit):
+            upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+        api.upload_file.assert_not_called()
+
+    def test_nothing_to_upload_exits_cleanly(self, tmp_path, capsys):
+        from mlx_forge.upload import upload_model
+
+        self._setup_dir(tmp_path)
+        api = self._make_api(
+            remote_files=[
+                "transformer-distilled-1.1.safetensors",
+                "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+                "vae_decoder.safetensors",
+                "split_model.json",
+            ],
+            repo_exists=True,
+        )
+
+        upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+
+        api.upload_file.assert_not_called()
+        out = capsys.readouterr().out
+        assert "Nothing to upload" in out
+
+    def test_refuses_when_model_dir_missing(self, tmp_path, capsys):
+        from mlx_forge.upload import upload_model
+
+        api = self._make_api(remote_files=[], repo_exists=True)
+        missing = tmp_path / "does-not-exist"
+
+        with pytest.raises(SystemExit):
+            upload_model(missing, api=api, repo_id="test/repo", add_only=True)
+        api.upload_file.assert_not_called()
+        out = capsys.readouterr().out
+        assert "does not exist" in out
+
+    def test_includes_readme_when_absent_on_remote(self, tmp_path):
+        from mlx_forge.upload import upload_model
+
+        # Local has only a README.md (and split_model.json)
+        (tmp_path / "README.md").write_text("# Card")
+        (tmp_path / "split_model.json").write_text("{}")
+
+        api = self._make_api(remote_files=["split_model.json"], repo_exists=True)
+        upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+
+        uploaded = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert "README.md" in uploaded
+
+
+class TestUploadModeMutex:
+    def test_card_only_and_add_only_are_mutually_exclusive(self):
+        from mlx_forge.cli import build_parser
+
+        parser = build_parser()
+        # argparse calls SystemExit on conflicting mutex group args
+        with pytest.raises(SystemExit):
+            parser.parse_args(["upload", "models/foo", "--card-only", "--add-only"])
+
+
+class TestCardOnlyRemoteRefresh:
+    def test_card_only_uses_remote_variants(self, tmp_path):
+        from mlx_forge.upload import upload_model
+
+        # Local dir has only one variant (delta convert leftover)
+        (tmp_path / "transformer-distilled-1.1.safetensors").write_bytes(b"x")
+        (tmp_path / "split_model.json").write_text(
+            json.dumps({"source": "Lightricks/LTX-2.3", "transformer_variants": ["distilled-1.1"]})
+        )
+        (tmp_path / "config.json").write_text(json.dumps({"model_version": "2.3.0"}))
+
+        # Remote has all three transformer variants
+        api = MagicMock()
+        info = MagicMock()
+        info.siblings = [
+            MagicMock(rfilename="transformer-distilled.safetensors"),
+            MagicMock(rfilename="transformer-dev.safetensors"),
+            MagicMock(rfilename="transformer-distilled-1.1.safetensors"),
+            MagicMock(rfilename="ltx-2.3-22b-distilled-lora-384.safetensors"),
+            MagicMock(rfilename="ltx-2.3-22b-distilled-lora-384-1.1.safetensors"),
+            MagicMock(rfilename="config.json"),
+        ]
+        api.model_info.return_value = info
+        api.create_repo.return_value = "https://huggingface.co/test/repo"
+
+        upload_model(tmp_path, api=api, repo_id="test/repo", card_only=True)
+
+        readme_call = next(
+            c for c in api.upload_file.call_args_list if c.kwargs["path_in_repo"] == "README.md"
+        )
+        readme_path = readme_call.kwargs["path_or_fileobj"]
+        readme_text = Path(readme_path).read_text()
+        # All three transformer variants must appear in the card
+        assert "distilled" in readme_text
+        assert "dev" in readme_text
+        assert "distilled-1.1" in readme_text
+
+    def test_card_only_falls_back_on_network_error(self, tmp_path):
+        """When api.model_info raises a network error, fall back to local split_info."""
+        from huggingface_hub.errors import HfHubHTTPError
+
+        from mlx_forge.upload import upload_model
+
+        # Local has TWO variants; remote will fail to respond
+        (tmp_path / "transformer-distilled.safetensors").write_bytes(b"x")
+        (tmp_path / "transformer-dev.safetensors").write_bytes(b"y")
+        (tmp_path / "split_model.json").write_text(
+            json.dumps(
+                {
+                    "source": "Lightricks/LTX-2.3",
+                    "transformer_variants": ["distilled", "dev"],
+                }
+            )
+        )
+        (tmp_path / "config.json").write_text(json.dumps({"model_version": "2.3.0"}))
+
+        api = MagicMock()
+        api.model_info.side_effect = HfHubHTTPError("503 Service Unavailable", response=MagicMock())
+        api.create_repo.return_value = "https://huggingface.co/test/repo"
+
+        # Should NOT raise; falls back to local split_info
+        upload_model(tmp_path, api=api, repo_id="test/repo", card_only=True)
+
+        readme_call = next(
+            c for c in api.upload_file.call_args_list if c.kwargs["path_in_repo"] == "README.md"
+        )
+        readme_path = readme_call.kwargs["path_or_fileobj"]
+        readme_text = Path(readme_path).read_text()
+        # Local variants are present in the card
+        assert "distilled" in readme_text
+        assert "dev" in readme_text
