@@ -61,3 +61,42 @@ src/mlx_forge/
 - Type hints on all functions
 - Google-style docstrings
 - ruff for formatting/linting (line-length 100)
+
+## Delta workflow (adding a variant to an existing repo)
+
+When upstream publishes a new transformer variant or LoRA for a model that's
+already converted and uploaded, use the delta workflow instead of regenerating
+the full model:
+
+1. **Convert delta** — only the new transformer + LoRAs:
+   ```bash
+   mlx-forge convert <recipe> --variant <new> --skip-shared --output models/<name>-delta
+   ```
+   Skips connector, vae_*, audio_vae, vocoder, vae_shared_stats, and upscalers.
+   Writes `split_model.json` with `"delta": true`.
+
+2. **Validate** — auto-detects delta mode:
+   ```bash
+   mlx-forge validate <recipe> models/<name>-delta
+   ```
+   Logs `[INFO] Delta mode (skipping shared component checks)` and verifies
+   only the components present.
+
+3. **Upload delta** — skip files already on remote:
+   ```bash
+   mlx-forge upload models/<name>-delta --repo-id <user/repo> --add-only
+   ```
+   Refuses if the repo doesn't exist (use a normal upload first to create it).
+   Each new file gets its own commit (more resilient against transient HF
+   upload hangs we've observed).
+
+4. **Refresh card** — derive variants from remote, regenerate README:
+   ```bash
+   mlx-forge upload models/<name>-delta --repo-id <user/repo> --card-only
+   ```
+   Idempotent. Re-running always produces a card matching the current remote
+   state, regardless of what the local model_dir contains.
+
+Currently the only recipe that supports `--skip-shared` is `ltx-2.3`. Other
+recipes can opt in by mirroring the LTX-2.3 implementation pattern (see
+`src/mlx_forge/recipes/ltx_23.py`, search for `skip_shared`).
