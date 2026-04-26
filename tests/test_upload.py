@@ -344,6 +344,29 @@ class TestAddOnlyBehavior:
         out = capsys.readouterr().out
         assert "does not exist" in out
 
+    def test_includes_readme_when_absent_on_remote(self, tmp_path):
+        from mlx_forge.upload import upload_model
+
+        # Local has only a README.md (and split_model.json)
+        (tmp_path / "README.md").write_text("# Card")
+        (tmp_path / "split_model.json").write_text("{}")
+
+        api = self._make_api(remote_files=["split_model.json"], repo_exists=True)
+        upload_model(tmp_path, api=api, repo_id="test/repo", add_only=True)
+
+        uploaded = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert "README.md" in uploaded
+
+
+class TestUploadModeMutex:
+    def test_card_only_and_add_only_are_mutually_exclusive(self):
+        from mlx_forge.cli import build_parser
+
+        parser = build_parser()
+        # argparse calls SystemExit on conflicting mutex group args
+        with pytest.raises(SystemExit):
+            parser.parse_args(["upload", "models/foo", "--card-only", "--add-only"])
+
 
 class TestCardOnlyRemoteRefresh:
     def test_card_only_uses_remote_variants(self, tmp_path):

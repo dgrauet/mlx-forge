@@ -74,7 +74,7 @@ class TestSkipSharedConvertEffect:
 
         split = json.loads((tmp_path / "split_model.json").read_text())
         assert split["delta"] is True
-        assert split["components"] == []  # no shared components in delta mode
+        assert split["components"] == ["transformer-distilled-1.1"]
         assert split["transformer_variants"] == ["distilled-1.1"]
 
     def test_normal_mode_no_delta_flag(self, tmp_path):
@@ -157,3 +157,21 @@ class TestValidateDeltaMode:
         assert "Delta mode" not in out
         # Strict mode: connector check ran (file is missing → check FAIL appears in output)
         assert "connector.safetensors" in out
+
+    def test_delta_mode_fails_when_transformer_missing(self, tmp_path, capsys):
+        """Delta mode + declared transformer variant but file missing → FAIL with message."""
+        from mlx_forge.recipes import ltx_23
+
+        self._write_minimal_split(tmp_path, delta=True, variants=["distilled-1.1"])
+        self._write_minimal_config(tmp_path)
+        # No transformer file — should FAIL with a message naming the missing file
+
+        ns = argparse.Namespace(model_dir=str(tmp_path), source=None)
+        try:
+            ltx_23.validate(ns)
+        except SystemExit:
+            pass
+        out = capsys.readouterr().out
+        # The validation must mention the specific missing transformer file
+        assert "Delta mode" in out  # delta mode entered
+        assert "transformer-distilled-1.1.safetensors" in out  # missing file mentioned somewhere

@@ -209,7 +209,9 @@ def upload_model(
             print(f"ERROR: model directory does not exist: {model_dir}")
             raise SystemExit(1)
         candidates = sorted(
-            p for p in model_dir.iterdir() if p.is_file() and p.suffix in (".safetensors", ".json")
+            p
+            for p in model_dir.iterdir()
+            if p.is_file() and (p.suffix in (".safetensors", ".json") or p.name == "README.md")
         )
         new_files = [p for p in candidates if p.name not in remote]
 

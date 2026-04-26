@@ -841,7 +841,7 @@ def convert(args) -> None:
 
     # Create split_model.json
     if skip_shared:
-        components: list[str] = []
+        components: list[str] = sorted(f"transformer-{v}" for v in variant_adaln.keys())
     else:
         components = [c for c in COMPONENTS if c != "transformer"] + upscaler_components
     split_info: dict = {

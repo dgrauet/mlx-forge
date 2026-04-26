@@ -187,7 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Use this to show how to install and run the downstream inference CLI."
         ),
     )
-    upload_parser.add_argument(
+    mode_group = upload_parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--card-only",
         action="store_true",
         help=(
@@ -195,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
             "entirely — use this to refresh card content without re-hashing safetensors."
         ),
     )
-    upload_parser.add_argument(
+    mode_group.add_argument(
         "--add-only",
         action="store_true",
         help=(
