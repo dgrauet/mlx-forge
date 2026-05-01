@@ -18,10 +18,8 @@ jobs:
       - run: uvx ruff format --check src/ tests/
 
   type:
-    # Non-blocking baseline: 203 ty diagnostics at adoption (2026-05-01).
-    # Remove `continue-on-error: true` once the baseline is resolved.
+    # ty check is now blocking — baseline cleared 2026-05-01 (5 → 0).
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

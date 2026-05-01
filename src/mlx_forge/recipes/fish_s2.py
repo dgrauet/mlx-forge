@@ -261,7 +261,7 @@ def convert(args) -> None:
     if codec_path.exists():
         print(f"  Loading codec weights from {CODEC_FILE}...")
         try:
-            import torch
+            import torch  # ty: ignore[unresolved-import]
         except ImportError:
             print(
                 "ERROR: torch is required to load codec.pth\n"

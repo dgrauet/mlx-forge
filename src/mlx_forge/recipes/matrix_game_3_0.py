@@ -439,7 +439,7 @@ def _convert_t5_pth(pth_path: str, output_dir: Path) -> int:
     print(f"\nLoading T5 weights from {pth_path}...")
     t0 = time.monotonic()
     try:
-        import torch
+        import torch  # ty: ignore[unresolved-import]
     except ImportError:
         print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
         raise SystemExit(1)
@@ -493,7 +493,7 @@ def _convert_vae_pth(pth_path: str, output_path: Path, prefix: str) -> int:
     print(f"\nLoading VAE weights from {pth_path}...")
     t0 = time.monotonic()
     try:
-        import torch
+        import torch  # ty: ignore[unresolved-import]
     except ImportError:
         print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
         raise SystemExit(1)

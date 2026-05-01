@@ -330,7 +330,7 @@ def _convert_shape(args, output_dir: Path) -> None:
         ckpt_path = dl_dir / SHAPE_CKPT_SUBPATH
 
     print(f"Loading checkpoint from {ckpt_path}...")
-    import torch
+    import torch  # ty: ignore[unresolved-import]
 
     ckpt = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
 
@@ -383,7 +383,7 @@ def _convert_shape(args, output_dir: Path) -> None:
 
 def _load_torch_bin(path: Path) -> dict[str, mx.array]:
     """Load a PyTorch .bin checkpoint as MLX arrays."""
-    import torch
+    import torch  # ty: ignore[unresolved-import]
 
     state = torch.load(str(path), map_location="cpu", weights_only=True)
     return {k: mx.array(v.float().numpy()) for k, v in state.items()}
