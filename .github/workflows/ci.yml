@@ -17,6 +17,19 @@ jobs:
       - run: uvx ruff check src/ tests/
       - run: uvx ruff format --check src/ tests/
 
+  type:
+    # Non-blocking baseline: 203 ty diagnostics at adoption (2026-05-01).
+    # Remove `continue-on-error: true` once the baseline is resolved.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run ty check
+
   test:
     runs-on: macos-latest
     strategy:
@@ -31,7 +44,7 @@ jobs:
 
   smoke-test:
     runs-on: macos-latest
-    needs: [lint, test]
+    needs: [lint, type, test]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
