@@ -18,7 +18,6 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 |-------|--------|--------|
 | [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx-2.3` | Stable |
 | [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Stable |
-| [Qwen-Image](https://huggingface.co/Qwen/Qwen-Image-2512) (57B text-to-image DiT) | `qwen-image-2512` | Stable |
 | [ERNIE-Image](https://huggingface.co/baidu/ERNIE-Image) (8B text-to-image DiT) | `ernie-image` | Stable |
 | [ERNIE-Image Prompt Enhancer](https://huggingface.co/baidu/ERNIE-Image-Turbo/tree/main/pe) (3B Ministral3 CausalLM) | `ernie-image-pe` | Stable |
 
@@ -50,7 +49,7 @@ pip install 'mlx-forge[torch]'
 # Convert a model (downloads checkpoint from HuggingFace)
 mlx-forge convert ltx-2.3
 mlx-forge convert fish-s2-pro
-mlx-forge convert qwen-image-2512
+mlx-forge convert ernie-image
 
 # Convert with int8 quantization
 mlx-forge convert ltx-2.3 --quantize --bits 8
@@ -69,7 +68,7 @@ See model-specific options in [docs/models/](docs/models/).
 ```bash
 mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
 mlx-forge validate fish-s2-pro models/fish-s2-pro-mlx
-mlx-forge validate qwen-image-2512 models/qwen-image-2512-mlx
+mlx-forge validate ernie-image models/ernie-image-mlx
 ```
 
 ### Split (legacy unified models)
@@ -86,7 +85,7 @@ mlx-forge upload models/ltx-2.3-mlx-distilled
 
 # Upload to a specific repo or organization
 mlx-forge upload models/fish-s2-pro-mlx --repo-id myuser/my-model
-mlx-forge upload models/qwen-image-2512-mlx --namespace my-org
+mlx-forge upload models/ernie-image-mlx --namespace my-org
 
 # Upload and add to a collection
 mlx-forge upload ./my-model --collection "MLX Forge Models"
@@ -118,7 +117,7 @@ mlx_forge/
 └── recipes/
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
     ├── fish_s2.py   # Fish S2 Pro: Dual-AR TTS + DAC codec
-    └── qwen_image_2512.py  # Qwen-Image: text-to-image MMDiT
+    └── ernie_image.py  # ERNIE-Image: 8B single-stream text-to-image DiT
 ```
 
 Generic tools live at the top level. Model-specific logic lives in **recipes**. Adding support for a new model means creating a new recipe file.
@@ -159,7 +158,7 @@ Then register it in `recipes/__init__.py`:
 AVAILABLE_RECIPES = {
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
     "fish-s2-pro": "mlx_forge.recipes.fish_s2",
-    "qwen-image-2512": "mlx_forge.recipes.qwen_image",
+    "ernie-image": "mlx_forge.recipes.ernie_image",
     "my-model": "mlx_forge.recipes.my_model",
 }
 ```
@@ -196,7 +195,6 @@ Each recipe has its own detailed guide with architecture, key mapping, known got
 
 - [LTX-2.3](docs/models/ltx-2.3.md) — 22B video DiT (6 components, Conv3d/Conv1d transposition)
 - [Fish S2 Pro](docs/models/fish-s2-pro.md) — 5B TTS (Dual-AR + DAC codec)
-- [Qwen-Image](docs/models/qwen-image-2512.md) — 57B text-to-image MMDiT (Flux-style)
 - [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
 
 ## License

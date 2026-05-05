@@ -3,7 +3,7 @@
 ## Project Overview
 
 CLI tool to convert, quantize, split, and validate ML models for Apple MLX on Apple Silicon.
-Generic framework with model-specific "recipes" (9 supported as of v0.1.0).
+Generic framework with model-specific "recipes" (8 supported).
 
 ## Quick Start
 
@@ -38,7 +38,6 @@ src/mlx_forge/
     ├── __init__.py             # Recipe registry (AVAILABLE_RECIPES)
     ├── ltx_23.py                # LTX-2.3: 22B video DiT
     ├── fish_s2.py               # Fish S2 Pro: Dual-AR TTS + DAC codec
-    ├── qwen_image_2512.py       # Qwen-Image: text-to-image MMDiT (Flux-style)
     ├── matrix_game_3_0.py       # Matrix-Game 3.0: interactive world model
     ├── cogvideox_fun_v1_5_5b_inp.py  # CogVideoX-Fun 1.5 5B (image-to-video)
     ├── hunyuan3d_21.py          # Hunyuan3D 2.1
