@@ -1,4 +1,4 @@
-# ADR-0000 : Adopt suzerain
+# ADR-0000 : Adopt intendant
 
 - **Statut** : accepted
 - **Date** : 2026-04-30
@@ -6,9 +6,9 @@
 
 ## Contexte
 
-Ce repo adopte [suzerain](https://github.com/dgrauet/suzerain) comme framework
+Ce repo adopte [intendant](https://github.com/dgrauet/intendant) comme framework
 de gouvernance — handbook, audit (palier 2), scaffolder (palier 3). Le fichier
-`.suzerain.toml` à la racine du repo déclare la stack, le mode de conformité
+`.intendant.toml` à la racine du repo déclare la stack, le mode de conformité
 appliqué, et les exemptions justifiées.
 
 ## Décision
@@ -19,9 +19,9 @@ appliqué, et les exemptions justifiées.
 
 ## Conséquences
 
-- L'auditeur (palier 2 de suzerain) pourra rouler sur ce repo et rapporter
+- L'auditeur (palier 2 d'intendant) pourra rouler sur ce repo et rapporter
   les écarts vs le baseline.
-- Les exemptions doivent être listées dans `.suzerain.toml` avec une raison.
+- Les exemptions doivent être listées dans `.intendant.toml` avec une raison.
 
 ## Alternatives considérées
 
@@ -32,7 +32,7 @@ appliqué, et les exemptions justifiées.
 
 ## Porte de sortie / révision
 
-- Si suzerain ne suit plus l'évolution des outils, basculer en `mode = advisory`
+- Si intendant ne suit plus l'évolution des outils, basculer en `mode = advisory`
   permanent et reprendre les standards à la main.
 - Si un baseline `v2` casse trop de règles : geler à `version = "1"` et planifier
   une migration ciblée.
