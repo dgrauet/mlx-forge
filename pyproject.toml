@@ -1,6 +1,6 @@
 [project]
 name = "mlx-forge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Convert, quantize, split, and validate ML models for Apple MLX"
 requires-python = ">=3.11"
 license = "Apache-2.0"
