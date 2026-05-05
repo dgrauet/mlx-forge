@@ -109,7 +109,6 @@ Rules:
 ```
 ltx_23.py                       ← LTX-2.3
 matrix_game_3_0.py              ← Matrix-Game-3.0
-mistral_small_31.py             ← Mistral-Small-3.1
 qwen_image_2512.py              ← Qwen-Image-2512
 cogvideox_fun_v1_5_5b_inp.py    ← CogVideoX-Fun-V1.5-5b-InP
 ```

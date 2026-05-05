@@ -3,7 +3,16 @@
 ## Project Overview
 
 CLI tool to convert, quantize, split, and validate ML models for Apple MLX on Apple Silicon.
-Generic framework with model-specific "recipes". First recipe: LTX-2.3 (22B video DiT).
+Generic framework with model-specific "recipes" (9 supported as of v0.1.0).
+
+## Quick Start
+
+```bash
+uv sync                                        # install
+mlx-forge convert <recipe>                     # convert (downloads from HF)
+mlx-forge convert <recipe> --quantize --bits 8 # convert + quantize
+mlx-forge --help                               # list recipes & commands
+```
 
 ## Tech Stack
 
@@ -24,12 +33,18 @@ src/mlx_forge/
 ├── split.py         # Split unified safetensors into components
 ├── validate.py      # Validation framework (pass/fail/warn)
 ├── upload.py        # HuggingFace Hub upload + model card generation
+├── templates/       # Model card Jinja templates
 └── recipes/         # Model-specific conversion logic
-    ├── __init__.py   # Recipe registry
-    ├── ltx_23.py     # LTX-2.3 recipe
-    ├── fish_s2.py    # Fish S2 Pro: Dual-AR TTS + DAC codec
-    ├── mistral_small_31.py  # Mistral Small 3.1: 24B VLM (Pixtral + dense LLM)
-    └── qwen_image_2512.py # Qwen-Image: text-to-image MMDiT (Flux-style)
+    ├── __init__.py             # Recipe registry (AVAILABLE_RECIPES)
+    ├── ltx_23.py                # LTX-2.3: 22B video DiT
+    ├── fish_s2.py               # Fish S2 Pro: Dual-AR TTS + DAC codec
+    ├── qwen_image_2512.py       # Qwen-Image: text-to-image MMDiT (Flux-style)
+    ├── matrix_game_3_0.py       # Matrix-Game 3.0: interactive world model
+    ├── cogvideox_fun_v1_5_5b_inp.py  # CogVideoX-Fun 1.5 5B (image-to-video)
+    ├── hunyuan3d_21.py          # Hunyuan3D 2.1
+    ├── ernie_image.py           # ERNIE-Image (SFT + Turbo)
+    ├── ernie_image_pe.py        # ERNIE-Image PE variant
+    └── void_model.py            # Test/scaffold recipe
 ```
 
 ## Adding a New Recipe
@@ -61,6 +76,17 @@ src/mlx_forge/
 - Type hints on all functions
 - Google-style docstrings
 - ruff for formatting/linting (line-length 100)
+
+## Dev workflow
+
+```bash
+uv run pytest         # tests
+uv run ruff check     # lint
+uv run ruff format    # format
+uv run ty check       # type check (strict)
+```
+
+`main` is branch-protected: changes go through PRs. CI runs lint, type, test (3.11/3.12/3.13), commitlint, and a smoke-test job.
 
 ## Delta workflow (adding a variant to an existing repo)
 
