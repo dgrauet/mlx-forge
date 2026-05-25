@@ -17,4 +17,5 @@ AVAILABLE_RECIPES = {
     "hunyuan3d-2.1": "mlx_forge.recipes.hunyuan3d_21",
     "ernie-image": "mlx_forge.recipes.ernie_image",
     "ernie-image-pe": "mlx_forge.recipes.ernie_image_pe",
+    "vjepa2-vit-l-rope": "mlx_forge.recipes.vjepa2_vit_l_rope",
 }
