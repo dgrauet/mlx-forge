@@ -61,14 +61,25 @@ TORCH_HUB_CHECKPOINT_URL: str | None = None
 COMPONENT_NAME = "encoder"
 OUTPUT_FILENAME = f"{COMPONENT_NAME}.safetensors"
 
-#: The only weight key whose layout differs (Conv2d image / Conv3d video).
-CONV_WEIGHT_KEYS = ("patch_embed.proj.weight",)
+#: Conv weight keys whose layout differs (Conv2d image / Conv3d video). The
+#: released ViT-L 2.1 encoder has TWO (img_temporal_dim_size=1): the tubelet
+#: patch embed and the single-frame image patch embed. Both are Conv3d here.
+CONV_WEIGHT_KEYS = ("patch_embed.proj.weight", "patch_embed_img.proj.weight")
 
-#: Expected key count at the ViT-L RoPE config (sanity check during validate).
-EXPECTED_KEY_COUNT = 300
+#: Expected key count at the released ViT-L RoPE config (with patch_embed_img;
+#: sanity check during validate). 300 core + 2 for the second patch embed.
+EXPECTED_KEY_COUNT = 302
 
-#: Container keys Meta checkpoints commonly nest the encoder under.
-_CONTAINER_KEYS = ("encoder", "target_encoder", "model", "state_dict")
+#: Keys that are legitimately all-zero in the released checkpoint, so they must
+#: NOT trip the materialization-bug guard. ViT-L 2.1 uses n_output_distillation=1
+#: -> only norms_block[3] is trained; norms_block.{0,1,2} stay at LayerNorm init
+#: (bias all-zero, weight all-ones). Verified against the source ema_encoder.
+KNOWN_ZERO_KEYS = frozenset({"norms_block.0.bias", "norms_block.1.bias", "norms_block.2.bias"})
+
+#: Container keys Meta checkpoints commonly nest the encoder under. "ema_encoder"
+#: is the canonical released (EMA) encoder and MUST take precedence over the
+#: online "encoder" — upstream loads checkpoint_key="ema_encoder" for ViT-L 2.1.
+_CONTAINER_KEYS = ("ema_encoder", "encoder", "target_encoder", "model", "state_dict")
 
 #: Parameter-name prefixes commonly wrapped onto every key.
 _KNOWN_PREFIXES = ("module.", "encoder.", "target_encoder.", "backbone.")
@@ -139,8 +150,13 @@ def _to_mx(value: Any) -> mx.array:
 
 
 def transform_weight(new_key: str, weight: mx.array) -> mx.array:
-    """Apply the conv layout transpose to the one key that needs it."""
-    if new_key in CONV_WEIGHT_KEYS and weight.ndim in (4, 5):
+    """Transpose conv (patch-embed) weights PyTorch->MLX; Linear projs (ndim 2) untouched.
+
+    Matches any ``*.proj.weight`` with conv rank (ndim 4/5) so both the tubelet
+    patch embed and the single-frame ``patch_embed_img`` are handled; attention
+    ``proj.weight`` is a Linear (ndim 2) and is left alone.
+    """
+    if new_key.endswith(".proj.weight") and weight.ndim in (4, 5):
         return transpose_conv(weight)
     return weight
 
@@ -244,10 +260,16 @@ def convert(args) -> None:
         "mlp_ratio": 4,
         "use_rope": True,
         "layernorm_eps": 1e-6,
+        "num_frames": 64,
+        "tubelet_size": 2,
+        "img_size": 384,
+        "img_temporal_dim_size": 1,
+        "interpolate_rope": True,
         "components": [COMPONENT_NAME],
         "notes": {
-            "conv_transpose": "patch_embed.proj.weight transposed PyTorch->MLX (O,I,*K)->(O,*K,I).",
+            "conv_transpose": "both patch-embed convs transposed (O,I,*K)->(O,*K,I).",
             "modality_embeds": "img_mod_embed / video_mod_embed carried over.",
+            "checkpoint_key": "ema_encoder (EMA), keys stripped of module./backbone.",
         },
     }
     with open(output_dir / "config.json", "w") as f:
@@ -367,14 +389,14 @@ def validate(args) -> None:
             f"expected {EXPECTED_KEY_COUNT} base keys (got {len(base_keys)})",
         )
 
-        # Conv weight must be channels-last: last axis == in_chans (3).
-        pe = "patch_embed.proj.weight"
-        if pe in keys:
-            shape = tuple(weights[pe].shape)
-            result.check(
-                weights[pe].ndim in (4, 5) and shape[-1] == 3,
-                f"patch_embed.proj.weight channels-last (in_chans last); shape {shape}",
-            )
+        # Conv weights must be channels-last: last axis == in_chans (3).
+        for pe in CONV_WEIGHT_KEYS:
+            if pe in keys:
+                shape = tuple(weights[pe].shape)
+                result.check(
+                    weights[pe].ndim in (4, 5) and shape[-1] == 3,
+                    f"{pe} channels-last (in_chans last); shape {shape}",
+                )
 
         # Modality embeds present.
         for me in ("img_mod_embed", "video_mod_embed"):
@@ -384,11 +406,16 @@ def validate(args) -> None:
         n_blocks = len(count_layer_indices(keys, block_key="blocks"))
         result.check(n_blocks == 24, f"24 transformer blocks (got {n_blocks})")
 
-        # No all-zero tensors (catches the materialization bug).
-        zero_keys = [k for k in base_keys if float(mx.abs(weights[k]).sum().item()) == 0.0]
+        # No all-zero tensors (catches the materialization bug), excluding the
+        # known untrained LayerNorm biases (see KNOWN_ZERO_KEYS).
+        zero_keys = [
+            k
+            for k in base_keys
+            if k not in KNOWN_ZERO_KEYS and float(mx.abs(weights[k]).sum().item()) == 0.0
+        ]
         result.check(
             len(zero_keys) == 0,
-            f"no all-zero tensors (found {len(zero_keys)}: {zero_keys[:3]})",
+            f"no unexpected all-zero tensors (found {len(zero_keys)}: {zero_keys[:3]})",
         )
 
         if is_quantized:
