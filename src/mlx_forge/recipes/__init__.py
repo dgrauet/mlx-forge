@@ -18,4 +18,5 @@ AVAILABLE_RECIPES = {
     "ernie-image": "mlx_forge.recipes.ernie_image",
     "ernie-image-pe": "mlx_forge.recipes.ernie_image_pe",
     "vjepa2-vit-l-rope": "mlx_forge.recipes.vjepa2_vit_l_rope",
+    "vjepa2-vitl": "mlx_forge.recipes.vjepa2_vitl",
 }
