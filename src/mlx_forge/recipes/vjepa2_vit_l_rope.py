@@ -52,10 +52,12 @@ import mlx.core as mx
 from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
 
-# TODO(integrator): fill in the canonical Meta torch.hub checkpoint URL / name
-# for the ViT-L RoPE V-JEPA 2.1 encoder once verified. As of writing it is not
-# published on the HF Hub, so --source is required.
-TORCH_HUB_CHECKPOINT_URL: str | None = None
+# Canonical Meta CDN checkpoint for the ViT-L RoPE V-JEPA 2.1 encoder (the
+# state_dict has ema_encoder + predictor; we take ema_encoder). Not on the HF
+# Hub. Resolved from src/hub/backbones.py (VJEPA_BASE_URL + ARCH_NAME_MAP).
+TORCH_HUB_CHECKPOINT_URL: str | None = (
+    "https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitl_dist_vitG_384.pt"
+)
 
 #: Output component / filename. Single-component encoder.
 COMPONENT_NAME = "encoder"
