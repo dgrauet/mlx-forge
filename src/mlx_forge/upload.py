@@ -69,7 +69,7 @@ def derive_repo_id(
 
     # Converted model dirs are named "<model>-mlx[-q{bits}]". Strip that suffix
     # to recover the base name (so rebuilding repo_name below doesn't double it,
-    # e.g. vjepa2-vitl-mlx -> vjepa2-vitl-mlx-mlx), but REMEMBER any bits encoded
+    # e.g. vjepa-2.0-vitl-mlx -> vjepa-2.0-vitl-mlx-mlx), but REMEMBER any bits encoded
     # in the dir name: some recipes (e.g. vjepa2) record quantization only in the
     # dir name + a separate quantize_config.json, not in split_model.json. No-op
     # for source-derived names (they carry no -mlx suffix).

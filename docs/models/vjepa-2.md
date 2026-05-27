@@ -5,9 +5,9 @@ self-supervised video/image world model — a ViT encoder trained with a JEPA
 objective plus a latent **predictor** (world model). Two recipes cover the ViT-L
 slice of the two released lines:
 
-- **`vjepa2-vit-l-rope`** — V-JEPA **2.1** ViT-L (distilled from ViT-G @384). One
+- **`vjepa-2.1-vitl`** — V-JEPA **2.1** ViT-L (distilled from ViT-G @384). One
   checkpoint holds the **encoder + predictor**.
-- **`vjepa2-vitl`** — V-JEPA **2.0** ViT-L. One checkpoint holds the **encoder +
+- **`vjepa-2.0-vitl`** — V-JEPA **2.0** ViT-L. One checkpoint holds the **encoder +
   predictor**; three separate checkpoints hold the **attentive-probe classifiers**
   (Something-Something v2, Diving-48, Epic-Kitchens-100).
 
@@ -38,27 +38,27 @@ Source checkpoint URLs (download manually):
 pip install 'mlx-forge[torch]'   # torch is needed to read the .pt checkpoints
 
 # --- V-JEPA 2.1 ViT-L (encoder + predictor) ---
-mlx-forge convert vjepa2-vit-l-rope --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt
-mlx-forge validate vjepa2-vit-l-rope models/vjepa-2.1-vitl-mlx
+mlx-forge convert vjepa-2.1-vitl --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt
+mlx-forge validate vjepa-2.1-vitl models/vjepa-2.1-vitl-mlx
 
 # --- V-JEPA 2.0 ViT-L (encoder + predictor + all three probes) ---
-mlx-forge convert vjepa2-vitl \
+mlx-forge convert vjepa-2.0-vitl \
     --source          ~/weights/vitl.pt \
     --ssv2-source     ~/weights/ssv2-vitl-16x2x3.pt \
     --diving48-source ~/weights/diving48-vitl-256.pt \
     --ek100-source    ~/weights/ek100-vitl-256.pt
-mlx-forge validate vjepa2-vitl models/vjepa-2.0-vitl-mlx
+mlx-forge validate vjepa-2.0-vitl models/vjepa-2.0-vitl-mlx
 
 # V-JEPA 2.0 encoder + predictor only (no probes)
-mlx-forge convert vjepa2-vitl --source ~/weights/vitl.pt
+mlx-forge convert vjepa-2.0-vitl --source ~/weights/vitl.pt
 
 # Preview without writing
-mlx-forge convert vjepa2-vit-l-rope --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt --dry-run
+mlx-forge convert vjepa-2.1-vitl --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt --dry-run
 ```
 
 ## CLI Options
 
-### Convert — `vjepa2-vit-l-rope` (2.1)
+### Convert — `vjepa-2.1-vitl` (2.1)
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -69,7 +69,7 @@ mlx-forge convert vjepa2-vit-l-rope --source ~/weights/vjepa2_1_vitl_dist_vitG_3
 | `--group-size` | `64` | Quantization group size |
 | `--dry-run` | off | Preview conversion plan without writing |
 
-### Convert — `vjepa2-vitl` (2.0)
+### Convert — `vjepa-2.0-vitl` (2.0)
 
 | Flag | Default | Description |
 |------|---------|-------------|

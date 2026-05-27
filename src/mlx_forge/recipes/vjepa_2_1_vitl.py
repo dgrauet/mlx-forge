@@ -40,9 +40,9 @@ Checkpoint format note:
 
 Usage::
 
-    mlx-forge convert vjepa2-vit-l-rope --source /path/to/vitl_rope.pt
-    mlx-forge convert vjepa2-vit-l-rope --source /path/to/vitl_rope.pt --quantize --bits 8
-    mlx-forge validate vjepa2-vit-l-rope /path/to/output/
+    mlx-forge convert vjepa-2.1-vitl --source /path/to/vitl_rope.pt
+    mlx-forge convert vjepa-2.1-vitl --source /path/to/vitl_rope.pt --quantize --bits 8
+    mlx-forge validate vjepa-2.1-vitl /path/to/output/
 """
 
 from __future__ import annotations
@@ -350,7 +350,7 @@ def convert(args) -> None:
     # Metadata
     # ================================================================== #
     config = {
-        "model_type": "vjepa2-vit-l-rope",
+        "model_type": "vjepa-2.1-vitl",
         "source": "facebookresearch/vjepa2 (app/vjepa_2_1)",
         "variant": "vit-l-rope",
         "architecture": "VisionTransformer",
