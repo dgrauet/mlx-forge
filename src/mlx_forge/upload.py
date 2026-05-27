@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 # Enable high-performance mode for hf-xet (saturates network bandwidth)
@@ -65,6 +66,11 @@ def derive_repo_id(
         model_name = source.split("/")[-1].lower()
     else:
         model_name = source.lower() or model_dir.name
+
+    # Converted model dirs are named "<model>-mlx[-q{bits}]"; strip that suffix
+    # so rebuilding repo_name below doesn't double it (vjepa2-vitl-mlx would
+    # otherwise become vjepa2-vitl-mlx-mlx). No-op for source-derived names.
+    model_name = re.sub(r"-mlx(-q\d+)?$", "", model_name)
 
     quantized = split_info.get("quantized", False)
     bits = split_info.get("quantization_bits")

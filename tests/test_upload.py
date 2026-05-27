@@ -66,6 +66,17 @@ class TestDeriveRepoId:
         repo_id = derive_repo_id(split_info, Path("/tmp/my-model"), api=self._make_api())
         assert repo_id == "testuser/my-model-mlx"
 
+    def test_dir_name_already_has_mlx_suffix_not_doubled(self):
+        # Converted dirs end in "-mlx"; the derived repo must not become "-mlx-mlx".
+        split_info = {"source": ""}
+        repo_id = derive_repo_id(split_info, Path("/tmp/vjepa2-vitl-mlx"), api=self._make_api())
+        assert repo_id == "testuser/vjepa2-vitl-mlx"
+
+    def test_dir_name_with_mlx_q_suffix_not_doubled(self):
+        split_info = {"source": "", "quantized": True, "quantization_bits": 8}
+        repo_id = derive_repo_id(split_info, Path("/tmp/vjepa2-vitl-mlx-q8"), api=self._make_api())
+        assert repo_id == "testuser/vjepa2-vitl-mlx-q8"
+
     def test_whoami_failure_raises(self):
         api = MagicMock()
         api.whoami.side_effect = Exception("not logged in")
