@@ -1,11 +1,17 @@
-"""V-JEPA 2.0 ViT-L — encoder + all attentive probes conversion recipe.
+"""V-JEPA 2.0 ViT-L — encoder + predictor + all attentive probes conversion recipe.
 
-Architecture (1 required + up to 3 optional components, local .pt files):
+Architecture (2 always present + up to 3 optional components, local .pt files):
 
   encoder         (~814 MB, 292 keys)  — V-JEPA 2.0 ViT-L target encoder
                   24 transformer blocks, embed_dim=1024, num_heads=16, RoPE
                   Single PatchEmbed3D conv (5D weight → transpose to channels-last)
                   Single final `norm` LayerNorm — no per-block `norm` wrappers
+
+  predictor       (~88 MB, 160 keys)   — V-JEPA 2.0 world-model predictor
+                  12 transformer blocks, predictor_embed_dim=384, RoPE
+                  predictor_embed (1024→384), predictor_proj (384→1024), 10 mask_tokens
+                  Lives under `predictor` in the SAME vitl.pt as the encoder.
+                  No conv: mask_tokens are (1,1,384) embeddings, NOT transposed.
 
   ssv2_probe      (~134 MB, 51 keys)   — AttentiveClassifier, Something-Something v2
                   pooler.* (1 cross-attn block + 3 self-attn blocks)
@@ -26,12 +32,14 @@ Architecture (1 required + up to 3 optional components, local .pt files):
 Key sanitization:
   encoder:   strip `module.backbone.` prefix
              transpose patch_embed.proj.weight (O,I,D,H,W) → (O,D,H,W,I)
+  predictor: strip `module.backbone.` prefix  (no conv, no transpose)
   probes:    strip `module.` prefix  (no conv, no transpose)
 
-Quantization: encoder block Linears + pooler/blocks Linears.
-  Keep full precision: norms, biases, query_tokens, classifier heads (small).
+Quantization: encoder/predictor block Linears + pooler/blocks Linears.
+  Keep full precision: norms, biases, query_tokens, classifier heads (small),
+  predictor_embed / predictor_proj / mask_tokens.
 
-Usage (all probes):
+Usage (encoder + predictor + all probes):
     mlx-forge convert vjepa2-vitl \\
         --source          ~/Work/.vjepa2-weights/vitl.pt \\
         --ssv2-source     ~/Work/.vjepa2-weights/ssv2-vitl.pt \\
@@ -39,7 +47,7 @@ Usage (all probes):
         --ek100-source    ~/Work/.vjepa2-weights/ek100-vitl-256.pt \\
         --output          ~/Work/.vjepa2-weights/vjepa2-vitl-mlx
 
-Usage (encoder only):
+Usage (encoder + predictor only):
     mlx-forge convert vjepa2-vitl --source ~/Work/.vjepa2-weights/vitl.pt
 
 Validate:
@@ -71,8 +79,8 @@ from ..validate import (
 # Constants
 # ---------------------------------------------------------------------------
 
-# All possible components (encoder is always present)
-_ALL_COMPONENTS = ["encoder", "ssv2_probe", "diving48_probe", "ek100_probe"]
+# All possible components (encoder + predictor always present in vitl.pt)
+_ALL_COMPONENTS = ["encoder", "predictor", "ssv2_probe", "diving48_probe", "ek100_probe"]
 
 # Probe name → CLI dest attribute name (argparse converts hyphens to underscores)
 _PROBE_ARGS: dict[str, str] = {
@@ -90,6 +98,7 @@ _PROBE_OUTPUT: dict[str, str] = {
 
 _COMPONENT_SIZE_MB: dict[str, int] = {
     "encoder": 814,
+    "predictor": 88,
     "ssv2_probe": 134,
     "diving48_probe": 134,
     "ek100_probe": 148,
@@ -101,6 +110,11 @@ _ENCODER_EMBED_DIM = 1024
 _ENCODER_NUM_HEADS = 16
 _ENCODER_EXPECTED_KEYS = 292  # non-quantized base keys
 
+# Predictor architecture (V-JEPA 2.0 world model, stored in vitl.pt["predictor"])
+_PREDICTOR_DEPTH = 12
+_PREDICTOR_EMBED_DIM = 384
+_PREDICTOR_EXPECTED_KEYS = 160  # non-quantized base keys
+
 # Probe shared architecture
 _PROBE_SELF_ATTN_BLOCKS = 3
 
@@ -108,6 +122,17 @@ _PROBE_SELF_ATTN_BLOCKS = 3
 _ENCODER_SKIP_QUANT = (
     "patch_embed",  # single 5D conv — ndim check catches it anyway
     "norm",  # LayerNorm weight/bias
+    ".bias",
+)
+
+# Keys to stay full precision in the predictor
+_PREDICTOR_SKIP_QUANT = (
+    "predictor_embed",  # input projection 1024→384
+    "predictor_proj",  # output projection 384→1024
+    "predictor_norm",  # final LayerNorm
+    "mask_tokens",  # learnable (1,1,384) token embeddings, not Linear
+    "norm1",  # per-block LayerNorm
+    "norm2",
     ".bias",
 )
 
@@ -172,6 +197,15 @@ def _encoder_should_quantize(key: str, weight: mx.array) -> bool:
     return "blocks." in key
 
 
+def _predictor_should_quantize(key: str, weight: mx.array) -> bool:
+    """Quantize only Linear .weight matrices inside predictor_blocks.*."""
+    if weight.ndim != 2 or not key.endswith(".weight"):
+        return False
+    if any(s in key for s in _PREDICTOR_SKIP_QUANT):
+        return False
+    return "predictor_blocks." in key
+
+
 def _probe_should_quantize(key: str, weight: mx.array) -> bool:
     """Quantize only attention/MLP Linear .weight matrices in the pooler blocks."""
     if weight.ndim != 2 or not key.endswith(".weight"):
@@ -227,6 +261,28 @@ def _load_pt_encoder(source_path: Path) -> dict[str, mx.array]:
     return {k: mx.array(v.float().numpy()) for k, v in raw.items()}
 
 
+def _load_pt_predictor(source_path: Path) -> dict[str, mx.array] | None:
+    """Load the `predictor` state dict from the SAME vitl.pt as the encoder.
+
+    Returns None (with a warning) if the checkpoint has no `predictor` key, so a
+    non-standard checkpoint degrades to encoder-only instead of crashing.
+    Uses mmap so only the predictor's ~160 tensors are materialized, not the 5 GB.
+    """
+    try:
+        import torch  # ty: ignore[unresolved-import]
+    except ImportError:
+        raise SystemExit("torch is required to load .pt files: pip install torch")
+
+    print(f"  Loading predictor from {source_path.name} (torch.load, mmap)...")
+    ckpt = torch.load(str(source_path), map_location="cpu", mmap=True, weights_only=True)
+    if "predictor" not in ckpt:
+        print(f"  [WARN] no 'predictor' key in {source_path.name}; skipping predictor")
+        return None
+    raw: dict = dict(ckpt["predictor"])
+    print(f"  Loaded {len(raw)} raw keys")
+    return {k: mx.array(v.float().numpy()) for k, v in raw.items()}
+
+
 def _load_pt_probe(probe_path: Path) -> dict[str, mx.array]:
     """Load classifiers[0] from a V-JEPA 2.0 probe .pt checkpoint."""
     try:
@@ -268,6 +324,39 @@ def _process_encoder(source_path: Path, output_dir: Path) -> int:
 
     count = len(output)
     out_path = output_dir / "encoder.safetensors"
+    print(f"  Saving {count} weights → {out_path.name}...")
+    mx.save_safetensors(str(out_path), output)
+    print(f"  Done in {time.monotonic() - t0:.1f}s")
+
+    del output, raw
+    gc.collect()
+    mx.clear_cache()
+    return count
+
+
+def _process_predictor(source_path: Path, output_dir: Path) -> int:
+    """Convert predictor weights → predictor.safetensors. Returns key count (0 if absent).
+
+    Shares the `module.backbone.` sanitizer with the encoder. No conv transpose:
+    the only ndim>=3 tensors are mask_tokens (1,1,384) learnable embeddings.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"Processing predictor (~{fmt_size(_COMPONENT_SIZE_MB['predictor'])})")
+    t0 = time.monotonic()
+
+    raw = _load_pt_predictor(source_path)
+    if raw is None:
+        return 0
+
+    print(f"  Sanitizing {len(raw)} keys...")
+    output: dict[str, mx.array] = {}
+    for key, weight in raw.items():
+        new_key = _sanitize_encoder_key(key)  # strips `module.backbone.`
+        _materialize(weight)  # no transpose — predictor has no conv weights
+        output[f"predictor.{new_key}"] = weight
+
+    count = len(output)
+    out_path = output_dir / "predictor.safetensors"
     print(f"  Saving {count} weights → {out_path.name}...")
     mx.save_safetensors(str(out_path), output)
     print(f"  Done in {time.monotonic() - t0:.1f}s")
@@ -390,6 +479,10 @@ def convert(args) -> None:  # noqa: C901
     enc_count = _process_encoder(source_path, output_dir)
     total_weights = enc_count
 
+    # Convert predictor (from the SAME vitl.pt; skipped only if absent)
+    pred_count = _process_predictor(source_path, output_dir)
+    total_weights += pred_count
+
     # Convert each provided probe; accumulate heads info for config
     probe_info: dict[str, dict] = {}
     for probe_name, probe_path in probe_paths.items():
@@ -401,8 +494,11 @@ def convert(args) -> None:  # noqa: C901
             "key_count": probe_count,
         }
 
-    # Compute COMPONENTS list in insertion order (encoder first, then probes)
-    components = ["encoder"] + [info["component"] for info in probe_info.values()]
+    # Compute COMPONENTS list in insertion order (encoder, predictor, then probes)
+    components = ["encoder"]
+    if pred_count:
+        components.append("predictor")
+    components += [info["component"] for info in probe_info.values()]
 
     # Build config.json
     probes_cfg: dict[str, dict] = {}
@@ -425,6 +521,12 @@ def convert(args) -> None:  # noqa: C901
         "probes": probes_cfg,
         "components": components,
     }
+    if pred_count:
+        config["predictor"] = {
+            "embed_dim": _PREDICTOR_EMBED_DIM,
+            "depth": _PREDICTOR_DEPTH,
+            "use_rope": True,
+        }
     with open(output_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
@@ -440,6 +542,10 @@ def convert(args) -> None:  # noqa: C901
         _quantize_component(
             "encoder", _encoder_should_quantize, output_dir, args.bits, args.group_size
         )
+        if pred_count:
+            _quantize_component(
+                "predictor", _predictor_should_quantize, output_dir, args.bits, args.group_size
+            )
         for info in probe_info.values():
             _quantize_component(
                 info["component"], _probe_should_quantize, output_dir, args.bits, args.group_size
@@ -450,6 +556,7 @@ def convert(args) -> None:  # noqa: C901
                 "bits": args.bits,
                 "group_size": args.group_size,
                 "skip_keys_encoder": list(_ENCODER_SKIP_QUANT),
+                "skip_keys_predictor": list(_PREDICTOR_SKIP_QUANT),
                 "skip_keys_probe": list(_PROBE_SKIP_QUANT),
             }
         }
@@ -486,21 +593,25 @@ def _dry_run(
 
     print("\nComponents:")
     print(f"  encoder: ~{fmt_size(_COMPONENT_SIZE_MB['encoder'])}")
+    print(f"  predictor: ~{fmt_size(_COMPONENT_SIZE_MB['predictor'])} (from the same vitl.pt)")
     for probe_name in probe_paths:
         comp = _PROBE_OUTPUT[probe_name]
         print(f"  {comp}: ~{fmt_size(_COMPONENT_SIZE_MB.get(comp, 134))}")
 
     print("\nKey translations:")
-    print("  encoder: strip 'module.backbone.' prefix")
-    print("           transpose patch_embed.proj.weight (O,I,D,H,W) → (O,D,H,W,I)")
+    print("  encoder:   strip 'module.backbone.' prefix")
+    print("             transpose patch_embed.proj.weight (O,I,D,H,W) → (O,D,H,W,I)")
+    print("  predictor: strip 'module.backbone.' prefix (no conv, no transpose)")
     if probe_paths:
-        print("  probes:  strip 'module.' prefix (no conv, no transpose)")
-        print("           heads auto-detected from classifier weight shapes")
+        print("  probes:    strip 'module.' prefix (no conv, no transpose)")
+        print("             heads auto-detected from classifier weight shapes")
 
     if bits:
         print(f"\nQuantization: int{bits}, group_size={args.group_size}")
-        print("  encoder: blocks.*.attn/mlp Linear .weight (skip norms, patch_embed, biases)")
-        print("  probes:  pooler.* Linear .weight (skip heads, query_tokens, norms)")
+        print("  encoder:   blocks.*.attn/mlp Linear .weight (skip norms, patch_embed, biases)")
+        print("  predictor: predictor_blocks.*.attn/mlp Linear .weight")
+        print("             (skip predictor_embed/proj, mask_tokens, norms, biases)")
+        print("  probes:    pooler.* Linear .weight (skip heads, query_tokens, norms)")
 
     print("\n" + "=" * 60)
     print("No files downloaded or written (--dry-run)")
@@ -535,6 +646,8 @@ def validate(args) -> None:  # noqa: C901
     else:
         # Fallback: infer from files on disk
         components_present = ["encoder"]
+        if (model_dir / "predictor.safetensors").exists():
+            components_present.append("predictor")
         for probe_name, comp in _PROBE_OUTPUT.items():
             if (model_dir / f"{comp}.safetensors").exists():
                 components_present.append(comp)
@@ -610,13 +723,56 @@ def validate(args) -> None:  # noqa: C901
         gc.collect()
         mx.clear_cache()
 
+    # --- Predictor ---
+    if "predictor" in components_present:
+        print("\n== Predictor Weights ==")
+        pred_path = model_dir / "predictor.safetensors"
+        if pred_path.exists():
+            weights = load_safetensors(pred_path)
+            keys = set(weights.keys())
+            base_keys = {k for k in keys if not k.endswith((".scales", ".biases"))}
+            print(f"  Keys: {len(base_keys)} (base)")
+
+            validate_no_pytorch_prefix(weights, "module.", result)
+            validate_no_pytorch_prefix(weights, "backbone.", result)
+
+            result.check(
+                len(base_keys) == _PREDICTOR_EXPECTED_KEYS,
+                f"predictor key count == {_PREDICTOR_EXPECTED_KEYS} (got {len(base_keys)})",
+            )
+
+            block_indices = count_layer_indices(keys, block_key="predictor_blocks")
+            result.check(
+                len(block_indices) == _PREDICTOR_DEPTH,
+                f"predictor has {_PREDICTOR_DEPTH} blocks (got {len(block_indices)})",
+            )
+
+            for stem in ("predictor.predictor_embed.weight", "predictor.predictor_proj.weight"):
+                result.check(stem in keys, f"{stem} present")
+
+            # Predictor has no conv: assert nothing got conv-transposed.
+            result.check(
+                not any(weights[k].ndim >= 4 for k in base_keys),
+                "no >=4D tensors in predictor (mask_tokens stay (1,1,D), no conv transpose)",
+            )
+
+            if is_quantized:
+                validate_quantization(weights, result, block_key="predictor_blocks")
+
+            total_params = sum(v.size for v in weights.values())
+            print(f"  Total predictor parameters: {total_params / 1e6:.1f}M")
+
+            del weights
+            gc.collect()
+            mx.clear_cache()
+
     # --- Probes (generic, iterate over whatever is present) ---
     # Build a reverse map: comp_name → probe_name (for config lookup)
     comp_to_probe: dict[str, str] = {v: k for k, v in _PROBE_OUTPUT.items()}
 
     for comp_name in components_present:
-        if comp_name == "encoder":
-            continue
+        if comp_name in ("encoder", "predictor"):
+            continue  # validated in their dedicated blocks above
 
         probe_name = comp_to_probe.get(comp_name, comp_name)
         print(f"\n== {comp_name} Weights ==")
