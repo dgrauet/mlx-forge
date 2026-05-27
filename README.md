@@ -20,8 +20,8 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Stable |
 | [ERNIE-Image](https://huggingface.co/baidu/ERNIE-Image) (8B text-to-image DiT) | `ernie-image` | Stable |
 | [ERNIE-Image Prompt Enhancer](https://huggingface.co/baidu/ERNIE-Image-Turbo/tree/main/pe) (3B Ministral3 CausalLM) | `ernie-image-pe` | Stable |
-| [V-JEPA 2.1 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor, RoPE) | `vjepa2-vit-l-rope` | Stable |
-| [V-JEPA 2.0 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor + SSv2/Diving48/EK100 probes) | `vjepa2-vitl` | Stable |
+| [V-JEPA 2.1 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor, RoPE) | `vjepa-2.1-vitl` | Stable |
+| [V-JEPA 2.0 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor + SSv2/Diving48/EK100 probes) | `vjepa-2.0-vitl` | Stable |
 
 ## Installation
 
@@ -69,10 +69,10 @@ extra. Output dirs are versioned (`models/vjepa-2.X-vitl-mlx`):
 
 ```bash
 # V-JEPA 2.1 ViT-L (encoder + predictor) — single .pt
-mlx-forge convert vjepa2-vit-l-rope --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt
+mlx-forge convert vjepa-2.1-vitl --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt
 
 # V-JEPA 2.0 ViT-L (encoder + predictor + all three attentive probes)
-mlx-forge convert vjepa2-vitl \
+mlx-forge convert vjepa-2.0-vitl \
     --source ~/weights/vitl.pt \
     --ssv2-source ~/weights/ssv2-vitl.pt \
     --diving48-source ~/weights/diving48-vitl-256.pt \
@@ -218,7 +218,7 @@ Each recipe has its own detailed guide with architecture, key mapping, known got
 - [LTX-2.3](docs/models/ltx-2.3.md) — 22B video DiT (6 components, Conv3d/Conv1d transposition)
 - [Fish S2 Pro](docs/models/fish-s2-pro.md) — 5B TTS (Dual-AR + DAC codec)
 - [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
-- [V-JEPA 2](docs/models/vjepa-2.md) — Meta video world model: ViT-L encoder + predictor, RoPE (2.1 `vjepa2-vit-l-rope` / 2.0 `vjepa2-vitl` + attentive probes)
+- [V-JEPA 2](docs/models/vjepa-2.md) — Meta video world model: ViT-L encoder + predictor, RoPE (2.1 `vjepa-2.1-vitl` / 2.0 `vjepa-2.0-vitl` + attentive probes)
 
 ## License
 

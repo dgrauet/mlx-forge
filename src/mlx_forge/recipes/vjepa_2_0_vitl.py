@@ -40,7 +40,7 @@ Quantization: encoder/predictor block Linears + pooler/blocks Linears.
   predictor_embed / predictor_proj / mask_tokens.
 
 Usage (encoder + predictor + all probes):
-    mlx-forge convert vjepa2-vitl \\
+    mlx-forge convert vjepa-2.0-vitl \\
         --source          ~/Work/.vjepa2-weights/vitl.pt \\
         --ssv2-source     ~/Work/.vjepa2-weights/ssv2-vitl.pt \\
         --diving48-source ~/Work/.vjepa2-weights/diving48-vitl-256.pt \\
@@ -48,10 +48,10 @@ Usage (encoder + predictor + all probes):
         --output          ~/Work/.vjepa2-weights/vjepa-2.0-vitl-mlx
 
 Usage (encoder + predictor only):
-    mlx-forge convert vjepa2-vitl --source ~/Work/.vjepa2-weights/vitl.pt
+    mlx-forge convert vjepa-2.0-vitl --source ~/Work/.vjepa2-weights/vitl.pt
 
 Validate:
-    mlx-forge validate vjepa2-vitl ~/Work/.vjepa2-weights/vjepa-2.0-vitl-mlx
+    mlx-forge validate vjepa-2.0-vitl ~/Work/.vjepa2-weights/vjepa-2.0-vitl-mlx
 """
 
 from __future__ import annotations
@@ -509,7 +509,7 @@ def convert(args) -> None:  # noqa: C901
         }
 
     config: dict = {
-        "model_type": "vjepa2-vitl",
+        "model_type": "vjepa-2.0-vitl",
         "encoder": {
             "embed_dim": _ENCODER_EMBED_DIM,
             "depth": _ENCODER_DEPTH,
@@ -864,7 +864,7 @@ def validate(args) -> None:  # noqa: C901
 
 
 def add_convert_args(parser) -> None:
-    """Register convert arguments for the vjepa2-vitl recipe."""
+    """Register convert arguments for the vjepa-2.0-vitl recipe."""
     parser.add_argument(
         "--source",
         type=str,
@@ -924,7 +924,7 @@ def add_convert_args(parser) -> None:
 
 
 def add_validate_args(parser) -> None:
-    """Register validate arguments for the vjepa2-vitl recipe."""
+    """Register validate arguments for the vjepa-2.0-vitl recipe."""
     parser.add_argument("model_dir", type=str, help="Path to converted model directory")
 
 
@@ -934,5 +934,5 @@ def add_split_args(parser) -> None:
 
 
 def split(args) -> None:
-    print("vjepa2-vitl is already split by component during conversion.")
+    print("vjepa-2.0-vitl is already split by component during conversion.")
     print("No further splitting needed.")
