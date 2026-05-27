@@ -45,13 +45,13 @@ Usage (encoder + predictor + all probes):
         --ssv2-source     ~/Work/.vjepa2-weights/ssv2-vitl.pt \\
         --diving48-source ~/Work/.vjepa2-weights/diving48-vitl-256.pt \\
         --ek100-source    ~/Work/.vjepa2-weights/ek100-vitl-256.pt \\
-        --output          ~/Work/.vjepa2-weights/vjepa2-vitl-mlx
+        --output          ~/Work/.vjepa2-weights/vjepa-2.0-vitl-mlx
 
 Usage (encoder + predictor only):
     mlx-forge convert vjepa2-vitl --source ~/Work/.vjepa2-weights/vitl.pt
 
 Validate:
-    mlx-forge validate vjepa2-vitl ~/Work/.vjepa2-weights/vjepa2-vitl-mlx
+    mlx-forge validate vjepa2-vitl ~/Work/.vjepa2-weights/vjepa-2.0-vitl-mlx
 """
 
 from __future__ import annotations
@@ -466,7 +466,7 @@ def convert(args) -> None:  # noqa: C901
         output_dir = Path(args.output).expanduser()
     else:
         suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"vjepa2-vitl-mlx{suffix}"
+        output_dir = Path("models") / f"vjepa-2.0-vitl-mlx{suffix}"
 
     if args.dry_run:
         _dry_run(args, source_path, probe_paths, output_dir)
@@ -896,7 +896,7 @@ def add_convert_args(parser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: models/vjepa2-vitl-mlx[-q<bits>])",
+        help="Output directory (default: models/vjepa-2.0-vitl-mlx[-q<bits>])",
     )
     parser.add_argument(
         "--quantize",

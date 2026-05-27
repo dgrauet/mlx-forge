@@ -276,7 +276,7 @@ def convert(args) -> None:
         output_dir = Path(args.output)
     else:
         suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"vjepa2-vit-l-rope-mlx{suffix}"
+        output_dir = Path("models") / f"vjepa-2.1-vitl-mlx{suffix}"
 
     if args.dry_run:
         _dry_run(args, src_path, output_dir)
@@ -385,7 +385,7 @@ def convert(args) -> None:
 
     # split_model.json so `mlx-forge upload` can derive the repo card.
     split_info = {
-        "model_name": "vjepa2-vit-l-rope-mlx",
+        "model_name": "vjepa-2.1-vitl-mlx",
         "components": {
             ENCODER_COMPONENT: OUTPUT_FILENAME,
             PREDICTOR_COMPONENT: PREDICTOR_OUTPUT_FILENAME,
@@ -656,7 +656,7 @@ def add_convert_args(parser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output directory (default: ./models/vjepa2-vit-l-rope-mlx[-q<bits>])",
+        help="Output directory (default: ./models/vjepa-2.1-vitl-mlx[-q<bits>])",
     )
     parser.add_argument(
         "--quantize",
