@@ -218,6 +218,7 @@ Each recipe has its own detailed guide with architecture, key mapping, known got
 - [LTX-2.3](docs/models/ltx-2.3.md) — 22B video DiT (6 components, Conv3d/Conv1d transposition)
 - [Fish S2 Pro](docs/models/fish-s2-pro.md) — 5B TTS (Dual-AR + DAC codec)
 - [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
+- [V-JEPA 2](docs/models/vjepa-2.md) — Meta video world model: ViT-L encoder + predictor, RoPE (2.1 `vjepa2-vit-l-rope` / 2.0 `vjepa2-vitl` + attentive probes)
 
 ## License
 
