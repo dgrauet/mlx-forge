@@ -1,0 +1,41 @@
+name: relock-on-release-pr
+
+# release-please bumps pyproject version but not uv.lock; re-lock on its PR so
+# the committed lockfile matches the released version.
+on:
+  pull_request:
+    branches: [main]
+    paths: [pyproject.toml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: relock-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  relock:
+    if: startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.13
+      - name: Regenerate uv.lock
+        run: uv lock
+      - name: Commit and push if changed
+        run: |
+          if ! git diff --quiet uv.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add uv.lock
+            git commit -m "chore: sync uv.lock with release version"
+            git push
+          fi
