@@ -67,13 +67,23 @@ def derive_repo_id(
     else:
         model_name = source.lower() or model_dir.name
 
-    # Converted model dirs are named "<model>-mlx[-q{bits}]"; strip that suffix
-    # so rebuilding repo_name below doesn't double it (vjepa2-vitl-mlx would
-    # otherwise become vjepa2-vitl-mlx-mlx). No-op for source-derived names.
-    model_name = re.sub(r"-mlx(-q\d+)?$", "", model_name)
+    # Converted model dirs are named "<model>-mlx[-q{bits}]". Strip that suffix
+    # to recover the base name (so rebuilding repo_name below doesn't double it,
+    # e.g. vjepa2-vitl-mlx -> vjepa2-vitl-mlx-mlx), but REMEMBER any bits encoded
+    # in the dir name: some recipes (e.g. vjepa2) record quantization only in the
+    # dir name + a separate quantize_config.json, not in split_model.json. No-op
+    # for source-derived names (they carry no -mlx suffix).
+    dir_bits: int | None = None
+    suffix_match = re.search(r"-mlx(?:-q(\d+))?$", model_name)
+    if suffix_match:
+        if suffix_match.group(1):
+            dir_bits = int(suffix_match.group(1))
+        model_name = model_name[: suffix_match.start()]
 
     quantized = split_info.get("quantized", False)
-    bits = split_info.get("quantization_bits")
+    bits = split_info.get("quantization_bits") if quantized else None
+    if bits is None:
+        bits = dir_bits  # fall back to bits encoded in the dir name
 
     if namespace is None:
         try:
@@ -87,7 +97,7 @@ def derive_repo_id(
         namespace = user_info["name"]
 
     parts = [model_name, "mlx"]
-    if quantized and bits:
+    if bits:
         parts.append(f"q{bits}")
 
     repo_name = "-".join(parts)

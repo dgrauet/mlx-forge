@@ -72,8 +72,16 @@ class TestDeriveRepoId:
         repo_id = derive_repo_id(split_info, Path("/tmp/vjepa2-vitl-mlx"), api=self._make_api())
         assert repo_id == "testuser/vjepa2-vitl-mlx"
 
-    def test_dir_name_with_mlx_q_suffix_not_doubled(self):
+    def test_dir_name_q_suffix_kept_when_split_has_quant_flag(self):
         split_info = {"source": "", "quantized": True, "quantization_bits": 8}
+        repo_id = derive_repo_id(split_info, Path("/tmp/vjepa2-vitl-mlx-q8"), api=self._make_api())
+        assert repo_id == "testuser/vjepa2-vitl-mlx-q8"
+
+    def test_dir_name_q_suffix_kept_when_split_omits_quant_flag(self):
+        # Realistic vjepa2 case: quantization is recorded in quantize_config.json,
+        # NOT split_model.json, so the dir-name -q8 must survive (no q8 loss, and
+        # the quantized repo must not collide with the non-quantized one).
+        split_info = {"source": ""}
         repo_id = derive_repo_id(split_info, Path("/tmp/vjepa2-vitl-mlx-q8"), api=self._make_api())
         assert repo_id == "testuser/vjepa2-vitl-mlx-q8"
 
