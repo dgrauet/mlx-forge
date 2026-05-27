@@ -20,6 +20,8 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Stable |
 | [ERNIE-Image](https://huggingface.co/baidu/ERNIE-Image) (8B text-to-image DiT) | `ernie-image` | Stable |
 | [ERNIE-Image Prompt Enhancer](https://huggingface.co/baidu/ERNIE-Image-Turbo/tree/main/pe) (3B Ministral3 CausalLM) | `ernie-image-pe` | Stable |
+| [V-JEPA 2.1 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor, RoPE) | `vjepa2-vit-l-rope` | Stable |
+| [V-JEPA 2.0 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor + SSv2/Diving48/EK100 probes) | `vjepa2-vitl` | Stable |
 
 ## Installation
 
@@ -60,6 +62,26 @@ mlx-forge convert fish-s2-pro --dry-run
 # Convert from a local checkpoint
 mlx-forge convert ltx-2.3 --checkpoint /path/to/checkpoint.safetensors
 ```
+
+**V-JEPA 2** recipes are different: the weights are Meta torch-hub `.pt` files
+(not on HuggingFace), so they need an explicit local `--source` and the `[torch]`
+extra. Output dirs are versioned (`models/vjepa-2.X-vitl-mlx`):
+
+```bash
+# V-JEPA 2.1 ViT-L (encoder + predictor) — single .pt
+mlx-forge convert vjepa2-vit-l-rope --source ~/weights/vjepa2_1_vitl_dist_vitG_384.pt
+
+# V-JEPA 2.0 ViT-L (encoder + predictor + all three attentive probes)
+mlx-forge convert vjepa2-vitl \
+    --source ~/weights/vitl.pt \
+    --ssv2-source ~/weights/ssv2-vitl.pt \
+    --diving48-source ~/weights/diving48-vitl-256.pt \
+    --ek100-source ~/weights/ek100-vitl-256.pt
+```
+
+Converted MLX weights are published at
+[`dgrauet/vjepa-2.1-vitl-mlx`](https://huggingface.co/dgrauet/vjepa-2.1-vitl-mlx)
+and [`dgrauet/vjepa-2.0-vitl-mlx`](https://huggingface.co/dgrauet/vjepa-2.0-vitl-mlx).
 
 See model-specific options in [docs/models/](docs/models/).
 
