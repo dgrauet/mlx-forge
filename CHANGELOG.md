@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/dgrauet/mlx-forge/compare/v0.2.1...v0.3.0) (2026-05-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* the convert/validate recipe names change from `vjepa2-vitl` / `vjepa2-vit-l-rope` to `vjepa-2.0-vitl` / `vjepa-2.1-vitl`.
+
+### Documentation
+
+* add docs/models/vjepa-2.md model guide ([#17](https://github.com/dgrauet/mlx-forge/issues/17)) ([e5a7bb3](https://github.com/dgrauet/mlx-forge/commit/e5a7bb31a8d0e81ffdbdfab43ddb79baf856bb3d))
+* add the V-JEPA 2 recipes to the README ([#15](https://github.com/dgrauet/mlx-forge/issues/15)) ([f8cc8fc](https://github.com/dgrauet/mlx-forge/commit/f8cc8fcdbb90ee8213a8943938dde571833c7379))
+
+
+### Code Refactoring
+
+* rename V-JEPA 2 recipes to the versioned scheme ([#18](https://github.com/dgrauet/mlx-forge/issues/18)) ([2cd2bb5](https://github.com/dgrauet/mlx-forge/commit/2cd2bb50ddb11031173dfac5f74353c45f716b18))
+
 ## [0.2.1](https://github.com/dgrauet/mlx-forge/compare/v0.2.0...v0.2.1) (2026-05-27)
 
 
