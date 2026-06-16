@@ -9,6 +9,7 @@ Each recipe defines:
 """
 
 AVAILABLE_RECIPES = {
+    "ideogram-4": "mlx_forge.recipes.ideogram_4",
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
     "fish-s2-pro": "mlx_forge.recipes.fish_s2",
     "matrix-game-3.0": "mlx_forge.recipes.matrix_game_3_0",
