@@ -271,19 +271,28 @@ def _convert_component(
 
 
 def _copy_pipeline_files(source_dir: Path, output_dir: Path) -> None:
-    """Copy tokenizer, scheduler, and model_index files with directory prefix."""
+    """Copy tokenizer, scheduler, and model_index files.
+
+    Tokenizer files are written into a ``tokenizer/`` subdirectory with their
+    original names so downstream tools (e.g. mflux TokenizerLoader, Hugging
+    Face AutoTokenizer) can load them without extra path mapping.  All other
+    subdirectory files are written flat with a ``{prefix}_`` name.
+    """
     for config_file in _HF_CONFIG_FILES:
         src = source_dir / config_file
         if not src.exists():
             print(f"  WARNING: {config_file} not found, skipping")
             continue
-        if "/" in config_file:
+        if config_file.startswith("tokenizer/"):
+            dest = output_dir / config_file
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        elif "/" in config_file:
             prefix = config_file.split("/")[0]
             dest = output_dir / f"{prefix}_{Path(config_file).name}"
         else:
             dest = output_dir / Path(config_file).name
         shutil.copy2(str(src), str(dest))
-        print(f"  Copied {config_file} → {dest.name}")
+        print(f"  Copied {config_file} → {dest.relative_to(output_dir)}")
 
 
 # ---------------------------------------------------------------------------
