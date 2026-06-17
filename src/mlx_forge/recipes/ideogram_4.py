@@ -164,9 +164,19 @@ def sanitize_text_encoder_key(key: str) -> str | None:
     return suffix
 
 
-def sanitize_vae_key(key: str) -> str:
-    """VAE keys are already in the right format; return as-is."""
-    return key
+def sanitize_vae_key(key: str) -> str | None:
+    """Convert diffusers VAE attention structure to the flattened MLX layout.
+
+    - Drop BatchNorm step counters (``num_batches_tracked``); not a learnable
+      parameter and absent from the MLX module.
+    - Unwrap the diffusers attention-output ``nn.Sequential``: ``to_out.0.X``
+      becomes ``to_out.X`` (the MLX VAE models ``to_out`` as a single Linear,
+      so the ``.0.`` index would otherwise build a list where the module
+      expects a dict).
+    """
+    if key.endswith("num_batches_tracked"):
+        return None
+    return key.replace(".to_out.0.", ".to_out.")
 
 
 SANITIZERS = {
