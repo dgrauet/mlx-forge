@@ -194,11 +194,16 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
 
 
 def _should_quantize_transformer(key: str, weight: mx.array) -> bool:
-    """Quantize all 2D linear weights in transformer blocks and projections.
+    """Quantize 2D linear weights in transformer blocks and projections.
 
-    Norm weights are 1D so the ndim check naturally excludes them.
+    Norm weights are 1D so the ndim check naturally excludes them. Embedding
+    tables (embed_image_indicator) are 2D but are modelled downstream as a
+    plain nn.Embedding, not a quantized layer — and quantizing a 2-row table
+    is pointless — so they are skipped.
     """
-    return weight.ndim == 2 and key.endswith(".weight")
+    if not (weight.ndim == 2 and key.endswith(".weight")):
+        return False
+    return "embed_image_indicator" not in key
 
 
 def _should_quantize_text_encoder(key: str, weight: mx.array) -> bool:
