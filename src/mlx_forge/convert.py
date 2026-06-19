@@ -50,6 +50,12 @@ def _validate_path_within(filepath: Path, parent: Path) -> Path:
     Uses lexical normalization (os.path.normpath) rather than symlink resolution
     so that HuggingFace cache layouts — which store shard files as symlinks to
     ../../blobs/ — pass the check while ``../`` traversal attacks are still caught.
+
+    Threat-model note: this intentionally allows a symlink *inside* ``parent``
+    that points outside ``parent`` (required for HF-cache ``--source``
+    conversions). Do not "restore" ``Path.resolve()`` here to re-tighten the
+    check — it re-breaks HF-cache conversions. The lexical check still rejects
+    ``../`` traversal and absolute-path injection in the requested filepath.
     """
     norm = os.path.normpath(filepath)
     norm_parent = os.path.normpath(parent)
