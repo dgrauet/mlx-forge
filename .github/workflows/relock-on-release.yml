@@ -22,7 +22,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Push the uv.lock commit with the PAT (not GITHUB_TOKEN) so it
+          # re-triggers CI on the release PR instead of leaving it gated.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
