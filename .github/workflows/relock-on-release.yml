@@ -16,15 +16,22 @@ concurrency:
 
 jobs:
   relock:
-    if: startsWith(github.head_ref, 'release-please--')
+    # Gate on the release PR author (the RELEASE_PLEASE_TOKEN owner), not just the
+    # branch name. A `release-please--` branch prefix can be forged by any account
+    # with write access; the PR author cannot. This keeps the PAT out of reach of a
+    # collaborator who crafts a malicious pyproject.toml to run code during uv lock.
+    if: >-
+      startsWith(github.head_ref, 'release-please--') &&
+      github.event.pull_request.user.login == 'dgrauet'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
-          # Push the uv.lock commit with the PAT (not GITHUB_TOKEN) so it
-          # re-triggers CI on the release PR instead of leaving it gated.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # Do NOT persist the PAT in .git/config. `uv lock` resolves and may build
+          # dependencies (arbitrary code via PEP 517 build backends); a persisted
+          # token would be readable by that code. The push step re-supplies it.
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -33,11 +40,16 @@ jobs:
       - name: Regenerate uv.lock
         run: uv lock
       - name: Commit and push if changed
+        env:
+          # Token is exposed only to this final step, which runs trusted git
+          # commands — not to the uv lock step that executes dependency code.
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if ! git diff --quiet uv.lock; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "mlx-forge-release"
+            git config user.email "release@users.noreply.github.com"
             git add uv.lock
             git commit -m "chore: sync uv.lock with release version"
-            git push
+            git push "https://x-access-token:${RELEASE_PLEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${HEAD_REF}"
           fi
