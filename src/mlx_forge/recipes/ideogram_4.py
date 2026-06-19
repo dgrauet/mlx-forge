@@ -133,10 +133,13 @@ def _dequantize_fp8(weights: dict[str, mx.array]) -> dict[str, mx.array]:
             if scale_key in weights:
                 scale = weights[scale_key]
                 _materialize(value, scale)
-                w_f32 = mx.from_fp8(value).astype(mx.float32) * scale[:, None]
-                _materialize(w_f32)
-                result[key] = w_f32.astype(mx.bfloat16)
-                del w_f32
+                # Dequantize directly to bfloat16: passing the dtype to from_fp8
+                # and casting the scale avoids materializing a transient float32
+                # copy of the (largest) weight matrix, halving peak memory.
+                w = mx.from_fp8(value, mx.bfloat16) * scale[:, None].astype(mx.bfloat16)
+                _materialize(w)
+                result[key] = w
+                del w
             else:
                 result[key] = value
         else:
@@ -273,6 +276,19 @@ def _convert_component(
         sanitizer=sanitizer,
         transform=maybe_transpose,
     )
+
+    # Fail loud on silent incompleteness: every component in this recipe holds
+    # weights, so an empty output means the sanitizer matched nothing (e.g. a
+    # changed LM key prefix in a future Qwen3-VL checkpoint). Without this guard
+    # process_component would just print "skipping" and the run would produce a
+    # model that can't encode text / decode latents, with no error.
+    if count == 0:
+        raise ValueError(
+            f"Component '{component}' produced 0 weights after sanitization "
+            f"({len(weights)} keys loaded). The checkpoint key layout likely "
+            f"changed and the sanitizer no longer matches — aborting rather than "
+            f"writing an incomplete model."
+        )
 
     del weights
     gc.collect()
@@ -530,8 +546,8 @@ def validate(args) -> None:
         "text_encoder_config.json",
         "vae_config.json",
         "scheduler_scheduler_config.json",
-        "tokenizer_tokenizer.json",
-        "tokenizer_tokenizer_config.json",
+        "tokenizer/tokenizer.json",
+        "tokenizer/tokenizer_config.json",
     ]:
         if (model_dir / fname).exists():
             print(f"  \033[92m✓\033[0m {fname} exists (optional)")
