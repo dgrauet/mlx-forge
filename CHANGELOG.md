@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/dgrauet/mlx-forge/compare/v0.3.0...v0.3.1) (2026-06-19)
+
+
+### Features
+
+* **recipes:** add ideogram-4 FP8 → MLX conversion recipe ([#19](https://github.com/dgrauet/mlx-forge/issues/19)) ([ad95a11](https://github.com/dgrauet/mlx-forge/commit/ad95a1113e30d3fbdb2eb78212e1ca10ba6906a1))
+
 ## [0.3.0](https://github.com/dgrauet/mlx-forge/compare/v0.2.1...v0.3.0) (2026-05-27)
 
 
