@@ -45,12 +45,24 @@ def load_safetensors(path: str | Path) -> dict[str, mx.array]:
 
 
 def _validate_path_within(filepath: Path, parent: Path) -> Path:
-    """Ensure filepath resolves within parent directory (prevents path traversal)."""
-    resolved = filepath.resolve()
-    parent_resolved = parent.resolve()
-    if not str(resolved).startswith(str(parent_resolved) + "/") and resolved != parent_resolved:
+    """Ensure filepath is within parent directory (prevents path traversal).
+
+    Uses lexical normalization (os.path.normpath) rather than symlink resolution
+    so that HuggingFace cache layouts — which store shard files as symlinks to
+    ../../blobs/ — pass the check while ``../`` traversal attacks are still caught.
+
+    Threat-model note: this intentionally allows a symlink *inside* ``parent``
+    that points outside ``parent`` (required for HF-cache ``--source``
+    conversions). Do not "restore" ``Path.resolve()`` here to re-tighten the
+    check — it re-breaks HF-cache conversions. The lexical check still rejects
+    ``../`` traversal and absolute-path injection in the requested filepath.
+    """
+    norm = os.path.normpath(filepath)
+    norm_parent = os.path.normpath(parent)
+    sep = os.sep
+    if not (str(norm).startswith(str(norm_parent) + sep) or norm == norm_parent):
         raise ValueError(f"Path traversal detected: '{filepath}' resolves outside '{parent}'")
-    return resolved
+    return filepath
 
 
 def download_hf_files(
