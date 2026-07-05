@@ -598,9 +598,12 @@ def _dry_run(args, output_dir: Path) -> None:
         upscaler_download_mb += size_mb
         print(f"    Source: {filename}")
 
-    # LoRA
+    # LoRA — only bundled when a dev transformer is present (see convert()).
     lora_download_mb = 0.0
-    for lora_name in args.lora:
+    lora_names = args.lora if "dev" in variants else []
+    if args.lora and not lora_names:
+        print("  (distilled LoRAs skipped — no 'dev' variant in this package)")
+    for lora_name in lora_names:
         filename = LORA_FILES[lora_name]
         print(f"  {filename}: ~{fmt_size(_LORA_SIZE_MB)} (bf16, synced as-is)")
         total_mb += _LORA_SIZE_MB
@@ -823,9 +826,19 @@ def convert(args) -> None:
             upscaler_components.append(comp_name)
             print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
-    # Sync LoRA files (no conversion, just download and copy)
+    # Sync LoRA files (no conversion, just download and copy).
+    # The distilled LoRAs run at inference on the *dev* transformer; the
+    # distilled variants are already pre-distilled checkpoints that never load
+    # them. Only bundle the LoRAs when a dev transformer is in the package —
+    # otherwise they are multiple GB of dead weight.
+    lora_names = args.lora if "dev" in variants else []
+    if args.lora and not lora_names:
+        print(
+            "\n[lora] Skipping distilled LoRA(s) — package has no 'dev' variant "
+            "(distilled transformers have the distillation baked in)."
+        )
     lora_synced: list[str] = []
-    for lora_name in args.lora:
+    for lora_name in lora_names:
         filename = LORA_FILES[lora_name]
         dest = output_dir / filename
         if dest.exists():
