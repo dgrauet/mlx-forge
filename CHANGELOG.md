@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/dgrauet/mlx-forge/compare/v0.3.1...v0.3.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **ltx-2.3:** only bundle distilled LoRAs when a dev variant is present ([#26](https://github.com/dgrauet/mlx-forge/issues/26)) ([71a177c](https://github.com/dgrauet/mlx-forge/commit/71a177c8337c98dfec934e5ce4909fb2dfd1348a))
+
 ## [0.3.1](https://github.com/dgrauet/mlx-forge/compare/v0.3.0...v0.3.1) (2026-06-19)
 
 
