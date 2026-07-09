@@ -536,6 +536,27 @@ def convert_upscaler(
 # ---------------------------------------------------------------------------
 
 
+def _effective_lora_names(args, variants: list[str]) -> list[str]:
+    """Resolve which LoRA files to bundle for this package.
+
+    ``--lora`` defaults to ``None`` (sentinel) so an explicit selection is always
+    honored, even for a distilled-only package. When left unset, the distilled
+    LoRAs are bundled only when a dev transformer is present — the distilled
+    variants are pre-distilled checkpoints that never load them, so bundling them
+    otherwise is multiple GB of dead weight. Prints a one-line notice when the
+    default is skipped for a distilled-only package.
+    """
+    if args.lora is not None:
+        return list(args.lora)
+    if "dev" in variants:
+        return list(LORA_FILES)
+    print(
+        "\n[lora] Skipping distilled LoRA(s) — package has no 'dev' variant "
+        "(distilled transformers have the distillation baked in)."
+    )
+    return []
+
+
 def _dry_run(args, output_dir: Path) -> None:
     """Print conversion plan without executing anything."""
     variants: list[str] = args.variant
@@ -598,9 +619,10 @@ def _dry_run(args, output_dir: Path) -> None:
         upscaler_download_mb += size_mb
         print(f"    Source: {filename}")
 
-    # LoRA
+    # LoRA — only bundled when a dev transformer is present (see convert()).
     lora_download_mb = 0.0
-    for lora_name in args.lora:
+    lora_names = _effective_lora_names(args, variants)
+    for lora_name in lora_names:
         filename = LORA_FILES[lora_name]
         print(f"  {filename}: ~{fmt_size(_LORA_SIZE_MB)} (bf16, synced as-is)")
         total_mb += _LORA_SIZE_MB
@@ -823,9 +845,14 @@ def convert(args) -> None:
             upscaler_components.append(comp_name)
             print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
-    # Sync LoRA files (no conversion, just download and copy)
+    # Sync LoRA files (no conversion, just download and copy).
+    # The distilled LoRAs run at inference on the *dev* transformer; the
+    # distilled variants are already pre-distilled checkpoints that never load
+    # them. Only bundle the LoRAs when a dev transformer is in the package —
+    # otherwise they are multiple GB of dead weight (see _effective_lora_names).
+    lora_names = _effective_lora_names(args, variants)
     lora_synced: list[str] = []
-    for lora_name in args.lora:
+    for lora_name in lora_names:
         filename = LORA_FILES[lora_name]
         dest = output_dir / filename
         if dest.exists():
@@ -1405,9 +1432,13 @@ def add_convert_args(parser) -> None:
         "--lora",
         type=str,
         nargs="*",
-        default=list(LORA_FILES),
+        default=None,
         choices=list(LORA_FILES),
-        help="LoRA file(s) to sync from source (default: all)",
+        help=(
+            "LoRA file(s) to sync from source "
+            "(default: all when the package includes a 'dev' variant, none otherwise). "
+            "An explicit selection is always honored."
+        ),
     )
 
 
