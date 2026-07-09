@@ -22,19 +22,12 @@ def _make_convert_args(tmp_path: Path, **overrides) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     add_convert_args(parser)
     args = parser.parse_args([])
-    args.checkpoint = None
+    # Override only the args the tests vary; the rest keep parser defaults
+    # (notably args.lora == None, the "not passed" sentinel).
     args.variant = ["distilled-1.1"]
     args.output = str(tmp_path)
     args.spatial_upscaler = []
     args.temporal_upscaler = []
-    args.spatial_upscaler_checkpoint = []
-    args.temporal_upscaler_checkpoint = []
-    args.lora = list(_ALL_LORAS)
-    args.quantize = False
-    args.bits = 8
-    args.group_size = 64
-    args.dry_run = False
-    args.skip_shared = False
     for k, v in overrides.items():
         setattr(args, k, v)
     return args
@@ -52,8 +45,9 @@ def _run_convert(args) -> dict:
 
 class TestLoraBundling:
     def test_distilled_only_skips_loras(self, tmp_path):
-        """A distilled-only package must not bundle the LoRAs (default --lora=all)."""
+        """A distilled-only package must not bundle the LoRAs when --lora is unset."""
         args = _make_convert_args(tmp_path, variant=["distilled-1.1"])
+        assert args.lora is None  # default sentinel: --lora not passed
         # download_hf_files must never be reached, since the gate empties the list.
         with patch.object(
             ltx_23, "download_hf_files", side_effect=AssertionError("downloaded LoRA")
@@ -92,3 +86,19 @@ class TestLoraBundling:
         split = _run_convert(args)
 
         assert split["lora"] == []
+
+    def test_explicit_lora_honored_without_dev(self, tmp_path):
+        """An explicit --lora is honored even for a distilled-only package.
+
+        The gate only supplies the *default* set of LoRAs; a user who explicitly
+        asks for one (e.g. to prep a repo they'll add dev to later) is not
+        silently overridden.
+        """
+        lora_name = _ALL_LORAS[0]
+        filename = LORA_FILES[lora_name]
+        (tmp_path / filename).write_bytes(b"stub")
+
+        args = _make_convert_args(tmp_path, variant=["distilled-1.1"], lora=[lora_name])
+        split = _run_convert(args)
+
+        assert split["lora"] == [filename]
