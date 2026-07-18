@@ -216,7 +216,9 @@ def _normalize_vae_key(key: str) -> str | None:
                 tail
             )
         if len(parts) >= 7 and parts[3] == "downsampler" and parts[4] == "resample":
-            return f"encoder.downsamples.{parts[2]}.downsamples.2.{parts[5]}." + ".".join(parts[6:])
+            return f"encoder.downsamples.{parts[2]}.downsamples.2.resample.{parts[5]}." + ".".join(
+                parts[6:]
+            )
         if len(parts) >= 6 and parts[3] == "downsampler" and parts[4] == "time_conv":
             return f"encoder.downsamples.{parts[2]}.downsamples.2.time_conv." + ".".join(parts[5:])
 
@@ -243,7 +245,9 @@ def _normalize_vae_key(key: str) -> str | None:
             tail = ".".join(parts[5:])
             return f"decoder.upsamples.{parts[2]}.upsamples.{parts[4]}." + _map_resnet_tail(tail)
         if len(parts) >= 7 and parts[3] == "upsampler" and parts[4] == "resample":
-            return f"decoder.upsamples.{parts[2]}.upsamples.3.{parts[5]}." + ".".join(parts[6:])
+            return f"decoder.upsamples.{parts[2]}.upsamples.3.resample.{parts[5]}." + ".".join(
+                parts[6:]
+            )
         if len(parts) >= 6 and parts[3] == "upsampler" and parts[4] == "time_conv":
             return f"decoder.upsamples.{parts[2]}.upsamples.3.time_conv." + ".".join(parts[5:])
 
