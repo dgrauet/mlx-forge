@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3](https://github.com/dgrauet/mlx-forge/compare/v0.3.2...v0.3.3) (2026-07-19)
+
+
+### Bug Fixes
+
+* **matrix-game:** keep the resample segment in LightVAE resample keys ([#30](https://github.com/dgrauet/mlx-forge/issues/30)) ([bf7cd88](https://github.com/dgrauet/mlx-forge/commit/bf7cd88cd04fbda3083ef22d34b7941e945d9b57))
+
 ## [0.3.2](https://github.com/dgrauet/mlx-forge/compare/v0.3.1...v0.3.2) (2026-07-09)
 
 
