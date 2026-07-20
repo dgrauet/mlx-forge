@@ -378,6 +378,33 @@ def _build_config(download_dir: Path, local_source: Path | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def copy_pipeline_configs(source_dir: Path, output_dir: Path) -> None:
+    """Copy every _HF_CONFIG_FILES entry, flattening `a/b` to `a_b`.
+
+    Strict on purpose: each listed file is required for a usable artifact
+    (the published q8 repo shipped without tokenizer/spiece.model because a
+    silent `if src.exists()` skip let an incomplete --source through — the
+    tokenizer could not load at all). Missing files abort the conversion
+    with the full list instead of publishing a broken pipeline.
+    """
+    missing = [f for f in _HF_CONFIG_FILES if not (source_dir / f).exists()]
+    if missing:
+        raise SystemExit(
+            "ERROR: required pipeline files missing from source: "
+            + ", ".join(missing)
+            + f" (looked in {source_dir})"
+        )
+    for config_file in _HF_CONFIG_FILES:
+        src = source_dir / config_file
+        if "/" in config_file:
+            prefix = config_file.split("/")[0]
+            dest = output_dir / f"{prefix}_{Path(config_file).name}"
+        else:
+            dest = output_dir / Path(config_file).name
+        shutil.copy2(str(src), str(dest))
+        print(f"  Copied {config_file} -> {dest.name}")
+
+
 def convert(args) -> None:
     """Convert CogVideoX-Fun-V1.5-5b-InP to MLX split format."""
     if args.output:
@@ -437,16 +464,7 @@ def convert(args) -> None:
             print(f"  Copied {comp}/config.json -> {dst_cfg.name}")
 
     # Copy pipeline config files (tokenizer, scheduler, model_index)
-    for config_file in _HF_CONFIG_FILES:
-        src = source_dir / config_file
-        if src.exists():
-            if "/" in config_file:
-                prefix = config_file.split("/")[0]
-                dest = output_dir / f"{prefix}_{Path(config_file).name}"
-            else:
-                dest = output_dir / Path(config_file).name
-            shutil.copy2(str(src), str(dest))
-            print(f"  Copied {config_file} -> {dest.name}")
+    copy_pipeline_configs(source_dir, output_dir)
 
     # Split model manifest
     split_info: dict = {
