@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4](https://github.com/dgrauet/mlx-forge/compare/v0.3.3...v0.3.4) (2026-07-20)
+
+
+### Bug Fixes
+
+* **cogvideox:** fail loudly when required pipeline files are missing ([#32](https://github.com/dgrauet/mlx-forge/issues/32)) ([e061a6d](https://github.com/dgrauet/mlx-forge/commit/e061a6dafeeb7b2a22190d82cabff5bd1684c375))
+* **recipes:** strict pipeline-file copies across fish_s2, matrix-game, ernie ([#32](https://github.com/dgrauet/mlx-forge/issues/32) audit) ([#34](https://github.com/dgrauet/mlx-forge/issues/34)) ([cd2e660](https://github.com/dgrauet/mlx-forge/commit/cd2e6600370634874dfd93030233dccfd27ebc52))
+
 ## [0.3.3](https://github.com/dgrauet/mlx-forge/compare/v0.3.2...v0.3.3) (2026-07-19)
 
 
