@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import gc
 import json
-import shutil
 import time
 from pathlib import Path
 
@@ -245,11 +244,11 @@ def convert(args) -> None:
         print("Downloading config and tokenizer files...")
         download_hf_files(REPO_ID, CONFIG_FILES, checkpoint_dir)
 
-    # Step 2: Copy config and tokenizer files to output dir
-    for fname in CONFIG_FILES:
-        src = checkpoint_dir / fname
-        if src.exists():
-            shutil.copy2(src, output_dir / fname)
+    # Step 2: Copy config and tokenizer files to output dir (all required —
+    # a silent skip shipped incomplete artifacts on other recipes, see #32).
+    from ..convert import copy_required_files
+
+    copy_required_files(checkpoint_dir, output_dir, CONFIG_FILES, flatten=True)
 
     # Step 3: Load weights lazily (sharded via index + codec.pth)
     t0 = time.monotonic()

@@ -205,14 +205,26 @@ def convert(args) -> None:
     shutil.copy2(pe_subdir / "config.json", output_dir / "pe_config.json")
     if (pe_subdir / "generation_config.json").exists():
         shutil.copy2(pe_subdir / "generation_config.json", output_dir / "generation_config.json")
-    if (pe_subdir / "chat_template.jinja").exists():
-        shutil.copy2(pe_subdir / "chat_template.jinja", output_dir / "chat_template.jinja")
+    # chat_template.jinja is genuinely optional: the ernie-image port
+    # bypasses the baked-in (Chinese) template at runtime and builds the
+    # chat string manually — warn, don't abort.
+    from ..convert import copy_required_files
+
+    copy_required_files(
+        pe_subdir,
+        output_dir,
+        ["chat_template.jinja"],
+        flatten=True,
+        optional={"chat_template.jinja"},
+    )
 
     # Tokenizer — copy from pe_tokenizer/ (where the actual vocab lives).
-    for tok_file in ("tokenizer.json", "tokenizer_config.json"):
-        src = pe_tok_subdir / tok_file
-        if src.exists():
-            shutil.copy2(src, output_dir / tok_file)
+    copy_required_files(
+        pe_tok_subdir,
+        output_dir,
+        ["tokenizer.json", "tokenizer_config.json"],
+        flatten=True,
+    )
 
     if args.quantize:
         quantize_component(

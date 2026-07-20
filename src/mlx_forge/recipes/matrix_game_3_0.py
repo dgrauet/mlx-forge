@@ -636,15 +636,11 @@ def convert(args) -> None:
 
     if not args.skip_tokenizer:
         download_hf_files(REPO_ID, TOKENIZER_FILES, download_dir)
-        import shutil
+        # All required — the published matrix-game-3.0-mlx shipped without
+        # google/umt5-xxl/spiece.model through the old silent skip (#32).
+        from ..convert import copy_required_files
 
-        for fname in TOKENIZER_FILES:
-            src = download_dir / fname
-            dst = output_dir / fname
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if src.exists():
-                shutil.copy2(str(src), str(dst))
-                print(f"  Copied {fname}")
+        copy_required_files(download_dir, output_dir, TOKENIZER_FILES, flatten=False)
 
     # -----------------------------------------------------------------------
     # 8. Config (from base_model config.json)

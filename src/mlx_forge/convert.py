@@ -9,6 +9,7 @@ from __future__ import annotations
 import gc
 import json
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -114,6 +115,52 @@ def download_hf_files(
         except (OSError, ConnectionError) as e:
             print(f"ERROR: Network error: {e}")
             raise SystemExit(1)
+
+
+def copy_required_files(
+    source_dir: Path,
+    output_dir: Path,
+    files: list[str],
+    *,
+    flatten: bool,
+    optional: set[str] | None = None,
+) -> None:
+    """Copy pipeline files, aborting loudly when a required one is missing.
+
+    A silent `if src.exists()` skip shipped incomplete artifacts twice
+    (cogvideox q8 without spiece.model, matrix-game-3.0-mlx without
+    google/umt5-xxl/spiece.model): a recipe's output must be complete or
+    the conversion must fail naming every missing file. Entries in
+    `optional` only warn (e.g. chat_template.jinja, bypassed at runtime
+    by the ernie-image port).
+
+    flatten=True maps `a/b.ext` to `a_b.ext`; flatten=False preserves the
+    source tree under output_dir.
+    """
+    optional = optional or set()
+    missing = [f for f in files if not (source_dir / f).exists()]
+    required_missing = [f for f in missing if f not in optional]
+    if required_missing:
+        raise SystemExit(
+            "ERROR: required pipeline files missing from source: "
+            + ", ".join(required_missing)
+            + f" (looked in {source_dir})"
+        )
+    for f in missing:
+        print(f"  WARNING: optional file missing, skipped: {f}")
+    for f in files:
+        if f in missing:
+            continue
+        src = source_dir / f
+        if flatten and "/" in f:
+            dest = output_dir / f"{f.split('/')[0]}_{Path(f).name}"
+        elif flatten:
+            dest = output_dir / Path(f).name
+        else:
+            dest = output_dir / f
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
+        print(f"  Copied {f} -> {dest.relative_to(output_dir)}")
 
 
 def load_weights(
