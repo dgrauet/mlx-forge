@@ -368,15 +368,11 @@ def convert(args) -> None:
         gc.collect()
         mx.clear_cache()
 
-    # Copy config files
-    for config_file in CONFIG_FILES:
-        src = checkpoint_dir / config_file
-        if src.exists():
-            dest = output_dir / Path(config_file).name
-            if "/" in config_file:
-                prefix = config_file.split("/")[0]
-                dest = output_dir / f"{prefix}_{Path(config_file).name}"
-            shutil.copy2(src, dest)
+    # Copy config files (all required — silent skips shipped incomplete
+    # artifacts on other recipes, see #32).
+    from ..convert import copy_required_files
+
+    copy_required_files(checkpoint_dir, output_dir, CONFIG_FILES, flatten=True)
     for comp_name in COMPONENTS:
         src = checkpoint_dir / comp_name / "config.json"
         if src.exists():
