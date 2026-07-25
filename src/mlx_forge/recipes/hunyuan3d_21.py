@@ -22,7 +22,13 @@ from typing import Any
 
 import mlx.core as mx
 
-from ..convert import download_hf_files, load_safetensors, quantize_component
+from ..convert import (
+    add_common_convert_args,
+    download_hf_files,
+    load_safetensors,
+    load_torch_state_dict,
+    quantize_component,
+)
 from ..quantize import _materialize
 from ..transpose import needs_transpose, transpose_conv
 from ..validate import (
@@ -329,10 +335,7 @@ def _convert_shape(args, output_dir: Path) -> None:
         download_hf_files(HF_REPO_ID, [SHAPE_CKPT_SUBPATH], dl_dir)
         ckpt_path = dl_dir / SHAPE_CKPT_SUBPATH
 
-    print(f"Loading checkpoint from {ckpt_path}...")
-    import torch  # ty: ignore[unresolved-import]
-
-    ckpt = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
+    ckpt = load_torch_state_dict(ckpt_path, label=f"checkpoint from {ckpt_path}")
 
     total_weights = 0
     for section_key, component_name in SHAPE_CKPT_SECTIONS.items():
@@ -383,9 +386,7 @@ def _convert_shape(args, output_dir: Path) -> None:
 
 def _load_torch_bin(path: Path) -> dict[str, mx.array]:
     """Load a PyTorch .bin checkpoint as MLX arrays."""
-    import torch  # ty: ignore[unresolved-import]
-
-    state = torch.load(str(path), map_location="cpu", weights_only=True)
+    state = load_torch_state_dict(path)
     return {k: mx.array(v.float().numpy()) for k, v in state.items()}
 
 
@@ -737,11 +738,11 @@ def add_convert_args(parser) -> None:
         default=None,
         help="Local path to dinov2-giant directory (paint stage)",
     )
-    parser.add_argument("--output", type=str, default=None)
-    parser.add_argument("--quantize", action="store_true")
-    parser.add_argument("--bits", type=int, default=8, choices=[4, 8])
-    parser.add_argument("--group-size", type=int, default=64)
-    parser.add_argument("--dry-run", action="store_true")
+    add_common_convert_args(
+        parser,
+        output_default="./models/hunyuan3d-2.1-mlx[-q<bits>]",
+        quantize_help="Quantize Linear weights after conversion",
+    )
 
 
 def add_validate_args(parser) -> None:

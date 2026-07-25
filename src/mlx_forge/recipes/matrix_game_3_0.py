@@ -25,9 +25,11 @@ from pathlib import Path
 import mlx.core as mx
 
 from ..convert import (
+    add_common_convert_args,
     download_hf_files,
     fmt_size,
     load_safetensors,
+    load_torch_state_dict,
     quantize_component,
 )
 from ..quantize import _materialize
@@ -440,16 +442,8 @@ def _convert_dit(args, download_dir: Path, output_dir: Path, component: str, hf_
 
 def _convert_t5_pth(pth_path: str, output_dir: Path) -> int:
     """Load T5 .pth, convert to mx arrays, save as safetensors. Returns weight count."""
-    print(f"\nLoading T5 weights from {pth_path}...")
     t0 = time.monotonic()
-    try:
-        import torch  # ty: ignore[unresolved-import]
-    except ImportError:
-        print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
-        raise SystemExit(1)
-
-    print("  (weights_only=True — safe deserialization mode)")
-    t5_raw = torch.load(pth_path, map_location="cpu", weights_only=True)
+    t5_raw = load_torch_state_dict(pth_path, label=f"T5 weights from {pth_path}")
     t5_raw = _extract_state_dict(t5_raw)
     print(f"  {len(t5_raw)} keys loaded in {time.monotonic() - t0:.1f}s")
 
@@ -494,16 +488,8 @@ def _convert_vae_pth(pth_path: str, output_path: Path, prefix: str) -> int:
 
     Returns the number of weights saved.
     """
-    print(f"\nLoading VAE weights from {pth_path}...")
     t0 = time.monotonic()
-    try:
-        import torch  # ty: ignore[unresolved-import]
-    except ImportError:
-        print("ERROR: torch is required to load .pth files\nInstall it with: uv pip install torch")
-        raise SystemExit(1)
-
-    print("  (weights_only=True — safe deserialization mode)")
-    vae_raw = torch.load(pth_path, map_location="cpu", weights_only=True)
+    vae_raw = load_torch_state_dict(pth_path, label=f"VAE weights from {pth_path}")
     vae_raw = _extract_state_dict(vae_raw)
     print(f"  {len(vae_raw)} keys loaded in {time.monotonic() - t0:.1f}s")
 
@@ -991,34 +977,11 @@ def add_convert_args(parser) -> None:
         default=None,
         help="Path to local Wan2.2 VAE .pth checkpoint (skips download)",
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output directory (default: ./models/matrix-game-3.0-mlx[-q<bits>])",
-    )
-    parser.add_argument(
-        "--quantize",
-        action="store_true",
-        help="Quantize both DiT variants after conversion",
-    )
-    parser.add_argument(
-        "--bits",
-        type=int,
-        default=8,
-        choices=[4, 8],
-        help="Quantization bits (default: 8)",
-    )
-    parser.add_argument(
-        "--group-size",
-        type=int,
-        default=64,
-        help="Quantization group size (default: 64)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview conversion plan without downloading or writing anything",
+    add_common_convert_args(
+        parser,
+        output_default="./models/matrix-game-3.0-mlx[-q<bits>]",
+        quantize_help="Quantize both DiT variants after conversion",
+        dry_run_help="Preview conversion plan without downloading or writing anything",
     )
     parser.add_argument(
         "--skip-tokenizer",
