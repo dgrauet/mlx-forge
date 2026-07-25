@@ -15,7 +15,7 @@ import importlib
 import sys
 
 from . import __version__
-from .recipes import AVAILABLE_RECIPES
+from .recipes import AVAILABLE_RECIPES, missing_recipe_attrs
 
 
 def _get_recipe(name: str):
@@ -25,6 +25,16 @@ def _get_recipe(name: str):
         print(f"Available recipes: {', '.join(AVAILABLE_RECIPES)}")
         sys.exit(1)
     return importlib.import_module(AVAILABLE_RECIPES[name])
+
+
+def _require_recipe_command(recipe, command: str, recipe_name: str) -> None:
+    """Abort with an actionable message when a recipe cannot serve `command`."""
+    missing = missing_recipe_attrs(recipe, command)
+    if missing:
+        print(f"ERROR: recipe '{recipe_name}' does not implement '{command}'.")
+        print(f"Missing: {', '.join(missing)}")
+        print("This is a recipe bug — please report it or add the missing function.")
+        sys.exit(1)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -229,6 +239,7 @@ def main() -> None:
 
     if args.command in ("convert", "validate", "split"):
         recipe = _get_recipe(args.recipe)
+        _require_recipe_command(recipe, args.command, args.recipe)
 
         # Create a new parser for the recipe-specific args
         recipe_parser = argparse.ArgumentParser(

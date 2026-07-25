@@ -746,3 +746,13 @@ def add_convert_args(parser) -> None:
 
 def add_validate_args(parser) -> None:
     parser.add_argument("model_dir", type=str)
+
+
+def add_split_args(parser) -> None:
+    """Add Hunyuan3D 2.1 split arguments (no-op, model is already split)."""
+    parser.add_argument("model_dir", type=str, help="Model directory (split not applicable)")
+
+
+def split(args) -> None:
+    print("Hunyuan3D 2.1 is already split by component during conversion.")
+    print("No further splitting needed.")

@@ -801,3 +801,8 @@ def add_split_args(parser) -> None:
         type=str,
         help="Model directory containing safetensors files",
     )
+
+
+def split(args) -> None:
+    print("CogVideoX-Fun is already split by component during conversion.")
+    print("No further splitting needed.")

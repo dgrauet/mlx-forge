@@ -1043,3 +1043,8 @@ def add_split_args(parser) -> None:
         type=str,
         help="Model directory containing unified safetensors",
     )
+
+
+def split(args) -> None:
+    print("Matrix-Game 3.0 is already split by component during conversion.")
+    print("No further splitting needed.")

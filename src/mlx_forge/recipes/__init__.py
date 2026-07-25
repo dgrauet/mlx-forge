@@ -6,7 +6,16 @@ Each recipe defines:
 - Conv transposition rules
 - Config extraction
 - Validation checks
+
+Recipes are plain modules dispatched by name from cli.py. COMMAND_REQUIREMENTS
+below is the contract each one must satisfy; `missing_recipe_attrs` turns a
+violation into an actionable message instead of an AttributeError traceback.
 """
+
+from __future__ import annotations
+
+import argparse
+from typing import Protocol
 
 AVAILABLE_RECIPES = {
     "ideogram-4": "mlx_forge.recipes.ideogram_4",
@@ -21,3 +30,30 @@ AVAILABLE_RECIPES = {
     "vjepa-2.1-vitl": "mlx_forge.recipes.vjepa_2_1_vitl",
     "vjepa-2.0-vitl": "mlx_forge.recipes.vjepa_2_0_vitl",
 }
+
+# command -> (arg-registration function, entry point) every recipe must expose.
+COMMAND_REQUIREMENTS: dict[str, tuple[str, str]] = {
+    "convert": ("add_convert_args", "convert"),
+    "validate": ("add_validate_args", "validate"),
+    "split": ("add_split_args", "split"),
+}
+
+
+class RecipeModule(Protocol):
+    """Structural type of a recipe module.
+
+    A recipe whose model needs no splitting still implements `split` — as a
+    no-op that says so — rather than omitting it.
+    """
+
+    def add_convert_args(self, parser: argparse.ArgumentParser) -> None: ...
+    def convert(self, args: argparse.Namespace) -> None: ...
+    def add_validate_args(self, parser: argparse.ArgumentParser) -> None: ...
+    def validate(self, args: argparse.Namespace) -> None: ...
+    def add_split_args(self, parser: argparse.ArgumentParser) -> None: ...
+    def split(self, args: argparse.Namespace) -> None: ...
+
+
+def missing_recipe_attrs(module: object, command: str) -> list[str]:
+    """Return the attributes `module` lacks to serve `command` (empty if complete)."""
+    return [attr for attr in COMMAND_REQUIREMENTS[command] if not hasattr(module, attr)]
