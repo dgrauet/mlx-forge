@@ -3,7 +3,7 @@
 ## Project Overview
 
 CLI tool to convert, quantize, split, and validate ML models for Apple MLX on Apple Silicon.
-Generic framework with model-specific "recipes" (8 supported).
+Generic framework with model-specific "recipes" (11 supported).
 
 ## Quick Start
 
@@ -35,23 +35,42 @@ src/mlx_forge/
 ├── upload.py        # HuggingFace Hub upload + model card generation
 ├── templates/       # Model card Jinja templates
 └── recipes/         # Model-specific conversion logic
-    ├── __init__.py             # Recipe registry (AVAILABLE_RECIPES)
+    ├── __init__.py             # Registry (AVAILABLE_RECIPES) + recipe contract
     ├── ltx_23.py                # LTX-2.3: 22B video DiT
+    ├── ideogram_4.py            # Ideogram 4: FP8 text-to-image DiT
     ├── fish_s2.py               # Fish S2 Pro: Dual-AR TTS + DAC codec
     ├── matrix_game_3_0.py       # Matrix-Game 3.0: interactive world model
     ├── cogvideox_fun_v1_5_5b_inp.py  # CogVideoX-Fun 1.5 5B (image-to-video)
-    ├── hunyuan3d_21.py          # Hunyuan3D 2.1
+    ├── hunyuan3d_21.py          # Hunyuan3D 2.1 (shape + paint stages)
     ├── ernie_image.py           # ERNIE-Image (SFT + Turbo)
     ├── ernie_image_pe.py        # ERNIE-Image PE variant
+    ├── vjepa_2_1_vitl.py        # V-JEPA 2.1 ViT-L (encoder + predictor)
+    ├── vjepa_2_0_vitl.py        # V-JEPA 2.0 ViT-L (+ attentive probes)
     └── void_model.py            # Test/scaffold recipe
 ```
 
 ## Adding a New Recipe
 
 1. Create `src/mlx_forge/recipes/<model>.py`
-2. Implement: `classify_key()`, sanitizer functions, `convert()`, `validate()`
-3. Export `add_convert_args()`, `add_validate_args()`, `add_split_args()` for CLI
-4. Register in `recipes/__init__.py` AVAILABLE_RECIPES dict
+2. Implement `classify_key()`, sanitizer functions, and the six functions the
+   CLI dispatches to — `convert`/`validate`/`split` plus their
+   `add_*_args` counterparts. All six are **required**: `COMMAND_REQUIREMENTS`
+   in `recipes/__init__.py` is the contract, `cli.py` enforces it, and
+   `tests/test_recipe_contract.py` checks every registered recipe.
+   A model that needs no splitting still implements `split` — as a no-op that
+   prints why. Omitting it used to produce an AttributeError traceback.
+3. Register in `recipes/__init__.py` AVAILABLE_RECIPES dict
+
+Use the shared helpers rather than re-deriving them:
+
+- `convert.add_common_convert_args()` — the
+  `--output/--quantize/--bits/--group-size/--dry-run` block. Call it where
+  `--output` belongs, then add recipe-specific arguments.
+- `convert.load_torch_state_dict()` — `.pt`/`.pth`/`.ckpt` loading with the
+  torch-missing hint. Defaults to `weights_only=True`; pass `False` only for a
+  trusted checkpoint that stores pickled objects, and say why at the call site.
+- `convert.copy_required_files()` — pipeline-file copies that fail loudly on a
+  missing required file.
 
 ## Critical Rules
 
@@ -86,6 +105,25 @@ uv run ty check       # type check (strict)
 ```
 
 `main` is branch-protected: changes go through PRs. CI runs lint, type, test (3.11/3.12/3.13), commitlint, and a smoke-test job.
+
+### torch is an optional dependency
+
+CI installs `uv sync --extra dev` — **without** torch. Consequences:
+
+- Keep the `# ty: ignore[unresolved-import]` on every `import torch`. They look
+  unused locally (`ty` reports `unused-ignore-comment` once torch is installed
+  in your venv) but they are what keeps the blocking `type` job green in CI.
+  Do not "clean them up".
+- Conversely, `ty check` passing locally does not mean it passes in CI. To
+  reproduce the CI environment:
+
+  ```bash
+  UV_PROJECT_ENVIRONMENT=/tmp/ci-venv uv sync --extra dev
+  UV_PROJECT_ENVIRONMENT=/tmp/ci-venv uv run ty check
+  ```
+
+- Tests touching torch use `pytest.importorskip("torch")` so they skip rather
+  than fail where it is absent.
 
 ## Delta workflow (adding a variant to an existing repo)
 

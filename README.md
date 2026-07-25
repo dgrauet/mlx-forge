@@ -137,9 +137,11 @@ mlx_forge/
 ├── validate.py      # Validation framework (generic)
 ├── upload.py        # HuggingFace Hub upload + model card (generic)
 └── recipes/
+    ├── __init__.py  # Registry (AVAILABLE_RECIPES) + the contract every recipe must satisfy
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
     ├── fish_s2.py   # Fish S2 Pro: Dual-AR TTS + DAC codec
-    └── ernie_image.py  # ERNIE-Image: 8B single-stream text-to-image DiT
+    ├── ernie_image.py  # ERNIE-Image: 8B single-stream text-to-image DiT
+    └── ...          # 11 recipes in total — see AVAILABLE_RECIPES
 ```
 
 Generic tools live at the top level. Model-specific logic lives in **recipes**. Adding support for a new model means creating a new recipe file.
@@ -172,7 +174,24 @@ def add_convert_args(parser) -> None:
 def add_validate_args(parser) -> None:
     """Register CLI arguments for validate."""
     ...
+
+def split(args) -> None:
+    """Split a unified checkpoint into components.
+
+    Required even when the model needs no splitting — in that case print why
+    and return. The CLI dispatches on this name; omitting it is a recipe bug
+    that tests/test_recipe_contract.py will catch.
+    """
+    ...
+
+def add_split_args(parser) -> None:
+    """Register CLI arguments for split."""
+    ...
 ```
+
+`add_convert_args` should build its common block with
+`mlx_forge.convert.add_common_convert_args()`, which registers
+`--output/--quantize/--bits/--group-size/--dry-run` consistently across recipes.
 
 Then register it in `recipes/__init__.py`:
 
@@ -184,6 +203,10 @@ AVAILABLE_RECIPES = {
     "my-model": "mlx_forge.recipes.my_model",
 }
 ```
+
+The contract is enforced: `cli.py` refuses to dispatch a command a recipe does
+not implement, and `tests/test_recipe_contract.py` runs every command against
+every registered recipe.
 
 ## Key Technical Notes
 
