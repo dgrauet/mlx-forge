@@ -80,9 +80,9 @@ class TestMatrixGamePthConversion:
         assert matrix_game_3_0._convert_t5_pth(str(path), tmp_path) == 1
 
     def test_vae_pth_written_with_prefix(self, tmp_path):
-        import mlx.core as mx
+        from mlx_forge.convert import load_safetensors
 
         path = _save(tmp_path, {"encoder.conv_in.weight": torch.ones(2, 2, 3, 3, 3)}, "vae.pth")
         out = tmp_path / "vae.safetensors"
         assert matrix_game_3_0._convert_vae_pth(str(path), out, "vae") == 1
-        assert all(k.startswith("vae.") for k in mx.load(str(out)))
+        assert all(k.startswith("vae.") for k in load_safetensors(out))
