@@ -464,3 +464,8 @@ def add_split_args(parser) -> None:
         type=str,
         help="Model directory containing safetensors files",
     )
+
+
+def split(args) -> None:
+    print("VOID model is already split by pass during conversion.")
+    print("No further splitting needed.")

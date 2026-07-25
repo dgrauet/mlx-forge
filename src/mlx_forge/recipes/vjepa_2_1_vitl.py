@@ -691,3 +691,8 @@ def add_validate_args(parser) -> None:
 def add_split_args(parser) -> None:
     """Register split arguments (no-op: single-component model)."""
     parser.add_argument("model_dir", type=str, help="Model directory containing safetensors")
+
+
+def split(args) -> None:
+    print("vjepa-2.1-vitl is already split by component during conversion.")
+    print("No further splitting needed.")
