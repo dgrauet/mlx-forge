@@ -31,6 +31,7 @@ from pathlib import Path
 import mlx.core as mx
 
 from ..convert import (
+    add_common_convert_args,
     download_hf_files,
     fmt_size,
     load_weights,
@@ -664,34 +665,11 @@ def add_convert_args(parser) -> None:
             "Expects transformer/, unconditional_transformer/, text_encoder/, vae/ subdirs."
         ),
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output directory (default: ./models/ideogram-4-mlx[-q<bits>])",
-    )
-    parser.add_argument(
-        "--quantize",
-        action="store_true",
-        help="Quantize linear weights to int4/int8 after FP8 dequantization",
-    )
-    parser.add_argument(
-        "--bits",
-        type=int,
-        default=8,
-        choices=[4, 8],
-        help="Quantization bits (default: 8)",
-    )
-    parser.add_argument(
-        "--group-size",
-        type=int,
-        default=64,
-        help="Quantization group size (default: 64)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview conversion plan without downloading or writing anything",
+    add_common_convert_args(
+        parser,
+        output_default="./models/ideogram-4-mlx[-q<bits>]",
+        quantize_help="Quantize linear weights to int4/int8 after FP8 dequantization",
+        dry_run_help="Preview conversion plan without downloading or writing anything",
     )
 
 

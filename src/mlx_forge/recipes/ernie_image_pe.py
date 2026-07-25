@@ -38,6 +38,7 @@ from pathlib import Path
 import mlx.core as mx
 
 from ..convert import (
+    add_common_convert_args,
     download_hf_files,
     fmt_size,
     load_safetensors,
@@ -346,22 +347,13 @@ def add_convert_args(parser) -> None:
         default=None,
         help="Path to local checkpoint directory (default: download from HuggingFace)",
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output directory (default: models/ernie-image-pe-mlx[-q<bits>])",
+    add_common_convert_args(
+        parser,
+        output_default="models/ernie-image-pe-mlx[-q<bits>]",
+        quantize_help="Quantize block Linears after conversion",
+        bits_default=4,
+        dry_run_help="Preview conversion plan",
     )
-    parser.add_argument(
-        "--quantize", action="store_true", help="Quantize block Linears after conversion"
-    )
-    parser.add_argument(
-        "--bits", type=int, default=4, choices=[4, 8], help="Quantization bits (default: 4)"
-    )
-    parser.add_argument(
-        "--group-size", type=int, default=64, help="Quantization group size (default: 64)"
-    )
-    parser.add_argument("--dry-run", action="store_true", help="Preview conversion plan")
 
 
 def add_validate_args(parser) -> None:

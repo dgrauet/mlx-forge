@@ -55,6 +55,7 @@ from typing import Any
 
 import mlx.core as mx
 
+from ..convert import add_common_convert_args, load_torch_state_dict
 from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
 
@@ -124,12 +125,16 @@ _KNOWN_PREFIXES = ("module.", "encoder.", "target_encoder.", "backbone.")
 
 
 def _load_torch_checkpoint(src_path: Path) -> dict[str, Any]:
-    """Load a Meta ``.pt`` checkpoint; return the full raw dict (not unwrapped)."""
-    import torch  # ty: ignore[unresolved-import]
+    """Load a Meta ``.pt`` checkpoint; return the full raw dict (not unwrapped).
 
-    print(f"\nLoading torch checkpoint from {src_path}...")
+    weights_only=False is required here: this checkpoint stores its encoder
+    inside a pickled wrapper object, which the safe loader refuses. Only run
+    this recipe against a checkpoint you trust.
+    """
     t0 = time.monotonic()
-    raw = torch.load(str(src_path), map_location="cpu", weights_only=False)
+    raw = load_torch_state_dict(
+        src_path, label=f"torch checkpoint from {src_path}", weights_only=False
+    )
     print(f"  loaded in {time.monotonic() - t0:.1f}s")
     return raw
 
@@ -652,34 +657,11 @@ def add_convert_args(parser) -> None:
         default=None,
         help="Path to the Meta V-JEPA 2.1 ViT-L RoPE encoder .pt checkpoint (required).",
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output directory (default: ./models/vjepa-2.1-vitl-mlx[-q<bits>])",
-    )
-    parser.add_argument(
-        "--quantize",
-        action="store_true",
-        help="Quantize transformer block Linear weights after conversion",
-    )
-    parser.add_argument(
-        "--bits",
-        type=int,
-        default=8,
-        choices=[4, 8],
-        help="Quantization bits (default: 8)",
-    )
-    parser.add_argument(
-        "--group-size",
-        type=int,
-        default=64,
-        help="Quantization group size (default: 64)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview the conversion plan without writing anything",
+    add_common_convert_args(
+        parser,
+        output_default="./models/vjepa-2.1-vitl-mlx[-q<bits>]",
+        quantize_help="Quantize transformer block Linear weights after conversion",
+        dry_run_help="Preview the conversion plan without writing anything",
     )
 
 

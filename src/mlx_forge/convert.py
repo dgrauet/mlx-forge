@@ -29,6 +29,89 @@ from tqdm import tqdm
 from .quantize import _materialize, quantize_weights
 
 
+def add_common_convert_args(
+    parser,
+    *,
+    output_default: str,
+    quantize_help: str,
+    bits_default: int = 8,
+    dry_run_help: str = "Preview conversion plan without writing anything",
+) -> None:
+    """Register the --output/--quantize/--bits/--group-size/--dry-run block.
+
+    Every recipe takes these five arguments; only the wording and the default
+    bit-width differ. Call this at the point where `--output` belongs so the
+    order in `--help` is preserved, then add recipe-specific arguments.
+
+    Args:
+        parser: Parser to register on.
+        output_default: Default output path, as shown in help
+            (e.g. "./models/ltx-2.3-mlx[-q<bits>]").
+        quantize_help: What --quantize acts on for this recipe.
+        bits_default: Default bit-width (8 everywhere except ernie-image-pe).
+        dry_run_help: Override when the recipe's dry run differs (e.g. recipes
+            that would otherwise download).
+    """
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help=f"Output directory (default: {output_default})",
+    )
+    parser.add_argument("--quantize", action="store_true", help=quantize_help)
+    parser.add_argument(
+        "--bits",
+        type=int,
+        default=bits_default,
+        choices=[4, 8],
+        help=f"Quantization bits (default: {bits_default})",
+    )
+    parser.add_argument(
+        "--group-size",
+        type=int,
+        default=64,
+        help="Quantization group size (default: 64)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help=dry_run_help)
+
+
+def load_torch_state_dict(
+    path: str | Path,
+    *,
+    label: str | None = None,
+    mmap: bool = False,
+    weights_only: bool = True,
+) -> dict:
+    """Load a PyTorch checkpoint, failing with an install hint if torch is absent.
+
+    torch is an optional dependency — only recipes whose upstream ships .pt/.pth
+    /.ckpt files need it — so the import is deferred to call time.
+
+    Args:
+        path: Checkpoint file to load.
+        label: Name used in the progress line (defaults to the filename).
+        mmap: Memory-map the checkpoint instead of reading it into RAM.
+        weights_only: Keep True unless the checkpoint stores non-tensor objects
+            that must be unpickled. False executes arbitrary code from the
+            file — only pass it for a checkpoint you trust (vjepa-2.1 stores
+            its encoder under a pickled wrapper).
+
+    Returns:
+        The raw object torch.load returned — usually a state dict, sometimes a
+        wrapper the caller must unwrap.
+    """
+    try:
+        import torch  # ty: ignore[unresolved-import]
+    except ImportError:
+        raise SystemExit(
+            "ERROR: PyTorch is required to read this checkpoint.\nInstall it with: uv add torch"
+        )
+
+    path = Path(path)
+    print(f"  Loading {label or path.name} (torch.load)...")
+    return torch.load(str(path), map_location="cpu", mmap=mmap, weights_only=weights_only)
+
+
 def fmt_size(mb: float) -> str:
     """Format a size in MB to a human-readable string."""
     if mb >= 1000:

@@ -24,10 +24,12 @@ from pathlib import Path
 import mlx.core as mx
 
 from ..convert import (
+    add_common_convert_args,
     classify_keys,
     download_hf_files,
     fmt_size,
     load_safetensors,
+    load_torch_state_dict,
     load_weights,
     process_component,
     quantize_component,
@@ -258,20 +260,9 @@ def convert(args) -> None:
     # Load codec weights from codec.pth (PyTorch format, keys under "generator.")
     codec_path = checkpoint_dir / CODEC_FILE
     if codec_path.exists():
-        print(f"  Loading codec weights from {CODEC_FILE}...")
-        try:
-            import torch  # ty: ignore[unresolved-import]
-        except ImportError:
-            print(
-                "ERROR: torch is required to load codec.pth\n"
-                "Install it with: uv pip install 'mlx-forge[torch]'"
-            )
-            raise SystemExit(1)
-
-        # SECURITY: weights_only=True restricts unpickling to tensor data only,
-        # blocking arbitrary code execution from malicious .pth files.
-        print("  (weights_only=True — safe deserialization mode)")
-        codec_raw = torch.load(str(codec_path), map_location="cpu", weights_only=True)
+        # weights_only=True (the helper's default) restricts unpickling to tensor
+        # data, blocking arbitrary code execution from a malicious .pth.
+        codec_raw = load_torch_state_dict(codec_path, label=f"codec weights from {CODEC_FILE}")
         # Unwrap if wrapped in a "state_dict" key
         if isinstance(codec_raw, dict) and "state_dict" in codec_raw:
             codec_raw = codec_raw["state_dict"]
@@ -572,25 +563,11 @@ def add_convert_args(parser) -> None:
         default=None,
         help="Path to local checkpoint directory (skips download)",
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output directory (default: ./models/fish-s2-pro-mlx[-q<bits>])",
-    )
-    parser.add_argument(
-        "--quantize", action="store_true", help="Quantize transformer weights after conversion"
-    )
-    parser.add_argument(
-        "--bits", type=int, default=8, choices=[4, 8], help="Quantization bits (default: 8)"
-    )
-    parser.add_argument(
-        "--group-size", type=int, default=64, help="Quantization group size (default: 64)"
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview conversion plan without downloading or writing anything",
+    add_common_convert_args(
+        parser,
+        output_default="./models/fish-s2-pro-mlx[-q<bits>]",
+        quantize_help="Quantize transformer weights after conversion",
+        dry_run_help="Preview conversion plan without downloading or writing anything",
     )
 
 

@@ -63,7 +63,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
-from ..convert import fmt_size, load_safetensors
+from ..convert import add_common_convert_args, fmt_size, load_safetensors, load_torch_state_dict
 from ..quantize import _materialize, quantize_weights
 from ..transpose import transpose_conv
 from ..validate import (
@@ -244,13 +244,7 @@ def _detect_probe_heads(raw: dict[str, mx.array]) -> dict[str, int]:
 
 def _load_pt_encoder(source_path: Path) -> dict[str, mx.array]:
     """Load target_encoder from a V-JEPA 2.0 .pt checkpoint."""
-    try:
-        import torch  # ty: ignore[unresolved-import]
-    except ImportError:
-        raise SystemExit("torch is required to load .pt files: pip install torch")
-
-    print(f"  Loading encoder from {source_path.name} (torch.load)...")
-    ckpt = torch.load(str(source_path), map_location="cpu", weights_only=True)
+    ckpt = load_torch_state_dict(source_path, label=f"encoder from {source_path.name}")
     if "target_encoder" not in ckpt:
         raise SystemExit(
             f"'target_encoder' key not found in {source_path.name}. "
@@ -268,13 +262,9 @@ def _load_pt_predictor(source_path: Path) -> dict[str, mx.array] | None:
     non-standard checkpoint degrades to encoder-only instead of crashing.
     Uses mmap so only the predictor's ~160 tensors are materialized, not the 5 GB.
     """
-    try:
-        import torch  # ty: ignore[unresolved-import]
-    except ImportError:
-        raise SystemExit("torch is required to load .pt files: pip install torch")
-
-    print(f"  Loading predictor from {source_path.name} (torch.load, mmap)...")
-    ckpt = torch.load(str(source_path), map_location="cpu", mmap=True, weights_only=True)
+    ckpt = load_torch_state_dict(
+        source_path, label=f"predictor from {source_path.name} (mmap)", mmap=True
+    )
     if "predictor" not in ckpt:
         print(f"  [WARN] no 'predictor' key in {source_path.name}; skipping predictor")
         return None
@@ -285,13 +275,7 @@ def _load_pt_predictor(source_path: Path) -> dict[str, mx.array] | None:
 
 def _load_pt_probe(probe_path: Path) -> dict[str, mx.array]:
     """Load classifiers[0] from a V-JEPA 2.0 probe .pt checkpoint."""
-    try:
-        import torch  # ty: ignore[unresolved-import]
-    except ImportError:
-        raise SystemExit("torch is required to load .pt files: pip install torch")
-
-    print(f"  Loading probe from {probe_path.name} (torch.load)...")
-    ckpt = torch.load(str(probe_path), map_location="cpu", weights_only=True)
+    ckpt = load_torch_state_dict(probe_path, label=f"probe from {probe_path.name}")
     if "classifiers" not in ckpt or len(ckpt["classifiers"]) == 0:
         raise SystemExit(
             f"'classifiers' list not found or empty in {probe_path.name}. "
@@ -892,34 +876,11 @@ def add_convert_args(parser) -> None:
         dest="ek100_source",
         help="Path to ek100-vitl-256.pt (Epic-Kitchens-100 AttentiveClassifier). Optional.",
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output directory (default: models/vjepa-2.0-vitl-mlx[-q<bits>])",
-    )
-    parser.add_argument(
-        "--quantize",
-        action="store_true",
-        help="Quantize encoder + probe block Linears after conversion",
-    )
-    parser.add_argument(
-        "--bits",
-        type=int,
-        default=8,
-        choices=[4, 8],
-        help="Quantization bits (default: 8)",
-    )
-    parser.add_argument(
-        "--group-size",
-        type=int,
-        default=64,
-        help="Quantization group size (default: 64)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview conversion plan without writing files",
+    add_common_convert_args(
+        parser,
+        output_default="models/vjepa-2.0-vitl-mlx[-q<bits>]",
+        quantize_help="Quantize encoder + probe block Linears after conversion",
+        dry_run_help="Preview conversion plan without writing files",
     )
 
 
