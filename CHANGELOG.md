@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5](https://github.com/dgrauet/mlx-forge/compare/v0.3.4...v0.3.5) (2026-07-25)
+
+
+### Bug Fixes
+
+* **cli:** make the recipe command contract explicit and testable ([#36](https://github.com/dgrauet/mlx-forge/issues/36)) ([58b013f](https://github.com/dgrauet/mlx-forge/commit/58b013fe0338a242a35f675296dbb79a2ddd782e))
+
+
+### Documentation
+
+* refresh CLAUDE.md and README for the current recipe set and contract ([#38](https://github.com/dgrauet/mlx-forge/issues/38)) ([3d5532e](https://github.com/dgrauet/mlx-forge/commit/3d5532ef89c37078c3ff36d35f4d914e2f3bd540))
+
 ## [0.3.4](https://github.com/dgrauet/mlx-forge/compare/v0.3.3...v0.3.4) (2026-07-20)
 
 
