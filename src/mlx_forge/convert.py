@@ -112,6 +112,52 @@ def load_torch_state_dict(
     return torch.load(str(path), map_location="cpu", mmap=mmap, weights_only=weights_only)
 
 
+SPLIT_MODEL_FILENAME = "split_model.json"
+
+
+def default_output_dir(model_name: str, *, quantize: bool, bits: int) -> Path:
+    """`models/<model_name>-mlx[-q<bits>]` — the house naming convention.
+
+    upload.derive_repo_id() parses this suffix back out to recover the bit
+    width for recipes that record it nowhere else, so the shape matters.
+    """
+    suffix = f"-q{bits}" if quantize else ""
+    return Path("models") / f"{model_name}-mlx{suffix}"
+
+
+def write_split_model(output_dir: Path, info: dict) -> Path:
+    """Write split_model.json.
+
+    Centralises the filename only. The CONTENT stays per-recipe on purpose:
+    upload.py and the model card read `source`, `quantized`,
+    `quantization_bits` and `transformer_variants` out of it, and the recipes
+    genuinely disagree on the rest (vjepa-2.0 writes a flat
+    {component: filename} table, vjepa-2.1 a {model_name, components,
+    quantized} record). Imposing one schema would rewrite published metadata,
+    which is a behaviour change, not a refactor.
+    """
+    path = output_dir / SPLIT_MODEL_FILENAME
+    with open(path, "w") as f:
+        json.dump(info, f, indent=2)
+    return path
+
+
+def print_output_summary(output_dir: Path, *, header: str | None = None) -> None:
+    """List what a conversion produced, with sizes.
+
+    Recurses: four recipes used iterdir() and missed files written into
+    subdirectories (ideogram-4 writes tokenizer/ that way), three used rglob().
+    """
+    if header:
+        print(f"\n{'=' * 60}")
+        print(header)
+    print(f"Output: {output_dir}")
+    for p in sorted(output_dir.rglob("*")):
+        if p.is_file():
+            size_mb = p.stat().st_size / (1024 * 1024)
+            print(f"  {p.relative_to(output_dir)}: {size_mb:.1f} MB")
+
+
 def fmt_size(mb: float) -> str:
     """Format a size in MB to a human-readable string."""
     if mb >= 1000:
@@ -207,6 +253,7 @@ def copy_required_files(
     *,
     flatten: bool,
     optional: set[str] | None = None,
+    keep_tree: set[str] | None = None,
 ) -> None:
     """Copy pipeline files, aborting loudly when a required one is missing.
 
@@ -218,9 +265,12 @@ def copy_required_files(
     by the ernie-image port).
 
     flatten=True maps `a/b.ext` to `a_b.ext`; flatten=False preserves the
-    source tree under output_dir.
+    source tree under output_dir. `keep_tree` lists top-level directories
+    exempt from flattening — ideogram-4 keeps `tokenizer/` intact so
+    AutoTokenizer loads it without path mapping, while flattening the rest.
     """
     optional = optional or set()
+    keep_tree = keep_tree or set()
     missing = [f for f in files if not (source_dir / f).exists()]
     required_missing = [f for f in missing if f not in optional]
     if required_missing:
@@ -235,8 +285,12 @@ def copy_required_files(
         if f in missing:
             continue
         src = source_dir / f
-        if flatten and "/" in f:
-            dest = output_dir / f"{f.split('/')[0]}_{Path(f).name}"
+        top = f.split("/")[0] if "/" in f else ""
+        if top and top in keep_tree:
+            dest = output_dir / f
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        elif flatten and top:
+            dest = output_dir / f"{top}_{Path(f).name}"
         elif flatten:
             dest = output_dir / Path(f).name
         else:
