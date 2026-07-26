@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/dgrauet/mlx-forge/compare/v0.3.6...v0.4.0) (2026-07-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **recipes:** `mlx-forge convert|validate|split fish-s2-pro` no longer exists. Use the MLX Community conversion instead.
+
+### Features
+
+* **recipes:** remove the fish-s2-pro recipe ([#45](https://github.com/dgrauet/mlx-forge/issues/45)) ([c5742ae](https://github.com/dgrauet/mlx-forge/commit/c5742aed24b3d57397f66d9981e31141633d6f92))
+
 ## [0.3.6](https://github.com/dgrauet/mlx-forge/compare/v0.3.5...v0.3.6) (2026-07-26)
 
 
