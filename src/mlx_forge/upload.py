@@ -179,6 +179,47 @@ def generate_model_card(
     )
 
 
+#: Never uploaded: OS/editor droppings and caches that can appear in a model dir.
+#: This is a deny-list on purpose. An allow-list of suffixes is what silently
+#: dropped spiece.model and chat_template.jinja from published repos — a
+#: conversion's output is complete by construction (copy_required_files fails
+#: loudly on a missing file), so the upload must not second-guess which of
+#: those files matter.
+IGNORE_PATTERNS = [
+    ".DS_Store",
+    "**/.DS_Store",
+    "__pycache__/**",
+    "**/__pycache__/**",
+    "*.pyc",
+    ".git/**",
+    "*.lock",
+    "*.tmp",
+]
+
+
+def _is_ignored(relative_path: str) -> bool:
+    """Whether a repo-relative path matches IGNORE_PATTERNS."""
+    from fnmatch import fnmatch
+
+    parts = relative_path.split("/")
+    if ".DS_Store" in parts or "__pycache__" in parts or ".git" in parts:
+        return True
+    return any(fnmatch(relative_path, pattern) for pattern in IGNORE_PATTERNS)
+
+
+def iter_model_files(model_dir: Path) -> list[Path]:
+    """Every file of a converted model, recursively, minus junk.
+
+    Single source of truth for what "the model" is, shared by the full upload
+    and the --add-only delta path so the two modes cannot disagree.
+    """
+    return sorted(
+        p
+        for p in model_dir.rglob("*")
+        if p.is_file() and not _is_ignored(p.relative_to(model_dir).as_posix())
+    )
+
+
 def upload_model(
     model_dir: Path,
     *,
@@ -224,27 +265,26 @@ def upload_model(
         if not model_dir.is_dir():
             print(f"ERROR: model directory does not exist: {model_dir}")
             raise SystemExit(1)
-        candidates = sorted(
-            p
-            for p in model_dir.iterdir()
-            if p.is_file() and (p.suffix in (".safetensors", ".json") or p.name == "README.md")
-        )
-        new_files = [p for p in candidates if p.name not in remote]
+        # Compare on the repo-relative path, not the basename: a nested
+        # google/umt5-xxl/spiece.model must neither be masked by a root-level
+        # spiece.model on the remote nor be re-uploaded when already there.
+        candidates = [(p, p.relative_to(model_dir).as_posix()) for p in iter_model_files(model_dir)]
+        new_files = [(p, rel) for p, rel in candidates if rel not in remote]
 
         if not new_files:
             print(f"Nothing to upload (all {len(candidates)} files already on remote)")
             return f"https://huggingface.co/{repo_id}"
 
-        skipped = [p.name for p in candidates if p.name in remote]
+        skipped = [rel for _, rel in candidates if rel in remote]
         if skipped:
             print(f"Skipped (on remote): {', '.join(skipped)}")
 
-        for p in new_files:
-            msg = f"{commit_message}: {p.name}" if len(new_files) > 1 else commit_message
-            print(f"Uploading: {p.name}")
+        for p, rel in new_files:
+            msg = f"{commit_message}: {rel}" if len(new_files) > 1 else commit_message
+            print(f"Uploading: {rel}")
             api.upload_file(
                 path_or_fileobj=str(p),
-                path_in_repo=p.name,
+                path_in_repo=rel,
                 repo_id=repo_id,
                 commit_message=msg,
             )
@@ -320,11 +360,20 @@ def upload_model(
                 commit_message=commit_message,
             )
         else:
+            # The upload is a deny-list, so anything left in the directory goes
+            # up. Show what that is before pushing — a stray source checkpoint
+            # is now a visible multi-GB line rather than a silent skip.
+            files = iter_model_files(model_dir)
+            total = sum(p.stat().st_size for p in files)
             print(f"Uploading {model_dir} -> {repo_id}...")
+            print(f"  {len(files)} files, {format_bytes(total)}:")
+            for p in files:
+                rel = p.relative_to(model_dir).as_posix()
+                print(f"    {rel} ({format_bytes(p.stat().st_size)})")
             api.upload_folder(
                 repo_id=repo_id,
                 folder_path=str(model_dir),
-                allow_patterns=["*.safetensors", "*.json", "README.md"],
+                ignore_patterns=IGNORE_PATTERNS,
                 commit_message=commit_message,
             )
     except HfHubHTTPError as e:
