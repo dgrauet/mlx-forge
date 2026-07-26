@@ -150,14 +150,30 @@ def generate_model_card(
     bits = split_info.get("quantization_bits")
     model_version = config.get("model_version")
 
-    # Build file listing from local dir (only files that exist)
+    # Build the Files section from what the upload actually publishes — the
+    # same iter_model_files() the upload uses, so the card cannot advertise a
+    # different set. It listed only top-level *.safetensors/*.json before, which
+    # omitted the tokenizer files (published since the upload stopped filtering
+    # by suffix) and everything in a subdirectory.
+    #
+    # README.md is excluded: it is written after this runs, so listing it would
+    # make a first upload and a later --card-only refresh produce different
+    # cards for the same model.
     model_files = []
     if model_dir.exists():
-        for p in sorted(model_dir.iterdir()):
-            if p.is_file() and p.suffix in (".safetensors", ".json"):
-                model_files.append(
-                    type("F", (), {"name": p.name, "size_str": format_bytes(p.stat().st_size)})()
-                )
+        for p in iter_model_files(model_dir):
+            if p.name == "README.md":
+                continue
+            model_files.append(
+                type(
+                    "F",
+                    (),
+                    {
+                        "name": p.relative_to(model_dir).as_posix(),
+                        "size_str": format_bytes(p.stat().st_size),
+                    },
+                )()
+            )
 
     template_text = files("mlx_forge.templates").joinpath("model-card.md.j2").read_text()
     env = Environment(trim_blocks=True, lstrip_blocks=True, keep_trailing_newline=True)

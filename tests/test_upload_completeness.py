@@ -162,3 +162,49 @@ def test_no_upload_path_drops_a_produced_file(tmp_path, mode):
     on_disk = {p.relative_to(model_dir).as_posix() for p in model_dir.rglob("*") if p.is_file()}
     considered = {p.relative_to(model_dir).as_posix() for p in iter_model_files(model_dir)}
     assert considered == on_disk
+
+
+class TestModelCardFileListing:
+    """The card's Files section must match what the upload actually publishes.
+
+    It listed only *.safetensors and *.json from the top level, so the tokenizer
+    files that #41 started uploading were absent from the card, and nested ones
+    were invisible entirely.
+    """
+
+    def _card(self, model_dir):
+        from mlx_forge.upload import generate_model_card
+
+        return generate_model_card(model_dir, split_info={}, config={}, repo_id="user/model-mlx")
+
+    def test_tokenizer_files_are_listed(self, tmp_path):
+        card = self._card(_model_dir(tmp_path))
+        assert "tokenizer_spiece.model" in card
+        assert "chat_template.jinja" in card
+
+    def test_nested_files_are_listed_with_their_path(self, tmp_path):
+        card = self._card(_model_dir(tmp_path))
+        assert "google/umt5-xxl/spiece.model" in card, (
+            "a bare basename does not tell the reader where the file lives in the repo"
+        )
+
+    def test_weights_are_still_listed(self, tmp_path):
+        card = self._card(_model_dir(tmp_path))
+        assert "transformer.safetensors" in card
+        assert "config.json" in card
+
+    def test_junk_is_not_listed(self, tmp_path):
+        model_dir = _model_dir(tmp_path)
+        (model_dir / ".DS_Store").write_bytes(b"junk")
+
+        assert ".DS_Store" not in self._card(model_dir)
+
+    def test_the_card_does_not_list_itself(self, tmp_path):
+        """README.md is written after generation; listing it would make the
+        card differ between a first run and a --card-only refresh."""
+        model_dir = _model_dir(tmp_path)
+        first = self._card(model_dir)
+        (model_dir / "README.md").write_text(first)
+
+        assert first == self._card(model_dir), "card is not idempotent across runs"
+        assert "`README.md`" not in first
