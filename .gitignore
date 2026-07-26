@@ -7,6 +7,9 @@ build/
 *.egg-info/
 .ruff_cache/
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 .DS_Store
 models/*
 !models/.gitkeep
