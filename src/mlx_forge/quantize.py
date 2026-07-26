@@ -91,6 +91,11 @@ def quantize_weights(
     for key, weight in tqdm(to_quantize.items(), desc=f"  Quantizing to int{bits}", leave=False):
         if weight.shape[-1] % group_size != 0:
             skipped.append((key, weight.shape))
+            # Materialize before keeping it: this tensor was NOT in the to_keep
+            # batch above, and the mx.quantize() calls in the remaining
+            # iterations can evict its lazy backing buffer — it would then save
+            # as zeros.
+            _materialize(weight)
             result[key] = weight
             continue
 
