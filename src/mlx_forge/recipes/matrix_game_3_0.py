@@ -31,7 +31,9 @@ from ..convert import (
     fmt_size,
     load_safetensors,
     load_torch_state_dict,
+    print_output_summary,
     quantize_component,
+    write_split_model,
 )
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
@@ -650,8 +652,7 @@ def convert(args) -> None:
         "source": REPO_ID,
         "links": ["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
     }
-    with open(output_dir / "split_model.json", "w") as f:
-        json.dump(split_info, f, indent=2)
+    write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # 9. Optional quantization (both DiT variants)
@@ -672,20 +673,14 @@ def convert(args) -> None:
         # Also record it where validate() looks: gating the scales/biases checks
         # on quantize_config.json meant they never ran for this recipe.
         write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
-        with open(output_dir / "split_model.json", "w") as f:
-            json.dump(split_info, f, indent=2)
+        write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print(f"Conversion complete: {total_weights} total weights")
-    print(f"Output: {output_dir}")
-    for p in sorted(output_dir.rglob("*")):
-        if p.is_file():
-            size_mb = p.stat().st_size / (1024 * 1024)
-            rel = p.relative_to(output_dir)
-            print(f"  {rel}: {size_mb:.1f} MB")
+    print_output_summary(output_dir)
     print("\nDone!")
 
 

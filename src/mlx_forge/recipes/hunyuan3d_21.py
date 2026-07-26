@@ -29,6 +29,7 @@ from ..convert import (
     load_safetensors,
     load_torch_state_dict,
     quantize_component,
+    write_split_model,
 )
 from ..quantize import _materialize
 from ..transpose import needs_transpose, transpose_conv
@@ -623,9 +624,7 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
             "group_size": args.group_size,
             "quantized_components": [quantize_target],
         }
-    split_path = output_dir / "split_model.json"
-    with open(split_path, "w") as f:
-        json.dump(split_model, f, indent=2)
+    write_split_model(output_dir, split_model)
 
 
 # ---------------------------------------------------------------------------

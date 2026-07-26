@@ -31,7 +31,6 @@ computes the tied lm_head on the fly via ``embed_tokens.as_linear(...)``.
 from __future__ import annotations
 
 import gc
-import json
 import shutil
 from pathlib import Path
 
@@ -44,8 +43,10 @@ from ..convert import (
     fmt_size,
     load_safetensors,
     load_weights,
+    print_output_summary,
     process_component,
     quantize_component,
+    write_split_model,
 )
 from ..quantize import read_quantize_config, write_quantize_config
 from ..validate import (
@@ -252,16 +253,11 @@ def convert(args) -> None:
     if args.quantize:
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
-    with open(output_dir / "split_model.json", "w") as f:
-        json.dump(split_info, f, indent=2)
+    write_split_model(output_dir, split_info)
 
     print("\n" + "=" * 60)
     print(f"Conversion complete: {count} weights")
-    print(f"Output: {output_dir}")
-    for p in sorted(output_dir.iterdir()):
-        if p.is_file():
-            size_mb = p.stat().st_size / (1024 * 1024)
-            print(f"  {p.name}: {size_mb:.1f} MB")
+    print_output_summary(output_dir)
 
     print("Done!")
 

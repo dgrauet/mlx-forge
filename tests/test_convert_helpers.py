@@ -233,3 +233,96 @@ class TestQuantizeComponentFilename:
         quantize_component(tmp_path, "absent", bits=8, should_quantize=default_should_quantize)
 
         assert "not found" in capsys.readouterr().out
+
+
+class TestDefaultOutputDir:
+    def test_unquantized(self):
+        from mlx_forge.convert import default_output_dir
+
+        assert str(default_output_dir("ltx-2.3", quantize=False, bits=8)) == "models/ltx-2.3-mlx"
+
+    def test_quantized_encodes_bits(self):
+        from mlx_forge.convert import default_output_dir
+
+        assert str(default_output_dir("ltx-2.3", quantize=True, bits=4)) == "models/ltx-2.3-mlx-q4"
+
+    def test_bits_ignored_when_not_quantizing(self):
+        from pathlib import Path
+
+        from mlx_forge.convert import default_output_dir
+
+        assert default_output_dir("x", quantize=False, bits=4) == Path("models/x-mlx")
+
+    def test_upload_can_parse_the_bits_back_out(self):
+        """derive_repo_id() recovers the bit width from this suffix."""
+        from unittest.mock import MagicMock
+
+        from mlx_forge.convert import default_output_dir
+        from mlx_forge.upload import derive_repo_id
+
+        api = MagicMock()
+        api.whoami.return_value = {"name": "u"}
+        out = default_output_dir("vjepa-2.0-vitl", quantize=True, bits=8)
+        assert derive_repo_id({}, out, api=api) == "u/vjepa-2.0-vitl-mlx-q8"
+
+
+class TestWriteSplitModel:
+    def test_writes_the_payload_verbatim(self, tmp_path):
+        import json
+
+        from mlx_forge.convert import write_split_model
+
+        info = {"format": "split", "source": "Org/Model", "components": ["a", "b"]}
+        path = write_split_model(tmp_path, info)
+
+        assert path.name == "split_model.json"
+        assert json.loads(path.read_text()) == info
+
+    def test_accepts_the_other_recipe_schemas(self, tmp_path):
+        """Content is per-recipe on purpose — the helper must not impose one."""
+        import json
+
+        from mlx_forge.convert import write_split_model
+
+        flat = {"encoder": "encoder.safetensors", "predictor": "predictor.safetensors"}
+        assert json.loads(write_split_model(tmp_path, flat).read_text()) == flat
+
+
+class TestPrintOutputSummary:
+    def test_lists_nested_files(self, tmp_path, capsys):
+        from mlx_forge.convert import print_output_summary
+
+        (tmp_path / "a.safetensors").write_bytes(b"x" * 2048)
+        nested = tmp_path / "tokenizer"
+        nested.mkdir()
+        (nested / "tokenizer.json").write_bytes(b"y")
+
+        print_output_summary(tmp_path)
+
+        out = capsys.readouterr().out
+        assert "a.safetensors" in out
+        assert "tokenizer/tokenizer.json" in out, "files in subdirectories must be listed"
+
+
+class TestCopyRequiredFilesKeepTree:
+    def test_keep_tree_preserves_that_directory_only(self, tmp_path):
+        from mlx_forge.convert import copy_required_files
+
+        files = [
+            "tokenizer/tokenizer.json",
+            "scheduler/scheduler_config.json",
+            "model_index.json",
+        ]
+        src = tmp_path / "src"
+        for f in files:
+            p = src / f
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"x")
+        out = tmp_path / "out"
+        out.mkdir()
+
+        copy_required_files(src, out, files, flatten=True, keep_tree={"tokenizer"})
+
+        assert (out / "tokenizer" / "tokenizer.json").exists()
+        assert (out / "scheduler_scheduler_config.json").exists()
+        assert (out / "model_index.json").exists()

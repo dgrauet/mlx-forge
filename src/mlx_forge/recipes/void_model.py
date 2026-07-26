@@ -37,6 +37,7 @@ from ..convert import (
     download_hf_files,
     fmt_size,
     load_safetensors,
+    print_output_summary,
     quantize_component,
 )
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
@@ -238,12 +239,7 @@ def convert(args) -> None:
     # -----------------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print(f"Conversion complete: {total_weights} total weights")
-    print(f"Output: {output_dir}")
-    for p in sorted(output_dir.rglob("*")):
-        if p.is_file():
-            size_mb = p.stat().st_size / (1024 * 1024)
-            rel = p.relative_to(output_dir)
-            print(f"  {rel}: {size_mb:.1f} MB")
+    print_output_summary(output_dir)
     print("\nDone!")
 
 

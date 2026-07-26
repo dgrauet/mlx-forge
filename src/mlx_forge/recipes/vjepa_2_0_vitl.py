@@ -69,7 +69,9 @@ from ..convert import (
     fmt_size,
     load_safetensors,
     load_torch_state_dict,
+    print_output_summary,
     quantize_component,
+    write_split_model,
 )
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
@@ -501,8 +503,7 @@ def convert(args) -> None:  # noqa: C901
 
     # Build split_model.json
     split_info: dict[str, str] = {comp: f"{comp}.safetensors" for comp in components}
-    with open(output_dir / "split_model.json", "w") as f:
-        json.dump(split_info, f, indent=2)
+    write_split_model(output_dir, split_info)
     print("Saved split_model.json")
 
     # Optional quantization
@@ -543,11 +544,7 @@ def convert(args) -> None:  # noqa: C901
     # Summary
     print(f"\n{'=' * 60}")
     print(f"Conversion complete: {total_weights} total weights")
-    print(f"Output: {output_dir}")
-    for p in sorted(output_dir.iterdir()):
-        if p.is_file():
-            size_mb = p.stat().st_size / (1024 * 1024)
-            print(f"  {p.name}: {size_mb:.1f} MB")
+    print_output_summary(output_dir)
     print("Done!")
 
 

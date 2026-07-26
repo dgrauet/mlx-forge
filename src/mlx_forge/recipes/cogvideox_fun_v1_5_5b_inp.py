@@ -41,7 +41,9 @@ from ..convert import (
     fmt_size,
     load_safetensors,
     load_weights,
+    print_output_summary,
     quantize_component,
+    write_split_model,
 )
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
@@ -465,8 +467,7 @@ def convert(args) -> None:
             "text_encoder": "T5-v1.1-XXL encoder (24 layers, d_model=4096).",
         },
     }
-    with open(output_dir / "split_model.json", "w") as f:
-        json.dump(split_info, f, indent=2)
+    write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # 5. Optional quantization (transformer + text_encoder, skip vae)
@@ -494,20 +495,14 @@ def convert(args) -> None:
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
-        with open(output_dir / "split_model.json", "w") as f:
-            json.dump(split_info, f, indent=2)
+        write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print(f"Conversion complete: {total_weights} total weights")
-    print(f"Output: {output_dir}")
-    for p in sorted(output_dir.rglob("*")):
-        if p.is_file():
-            size_mb = p.stat().st_size / (1024 * 1024)
-            rel = p.relative_to(output_dir)
-            print(f"  {rel}: {size_mb:.1f} MB")
+    print_output_summary(output_dir)
     print("\nDone!")
 
 
