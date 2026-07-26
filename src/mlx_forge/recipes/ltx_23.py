@@ -27,12 +27,15 @@ from ..convert import (
     fmt_size,
     load_safetensors,
     process_component,
+    quantize_component,
 )
-from ..quantize import _materialize, quantize_weights
+from ..quantize import _materialize
 from ..transpose import transpose_conv
 from ..validate import (
     ValidationResult,
     count_layer_indices,
+    finish_validation,
+    start_validation,
     validate_conv_layout,
     validate_file_exists,
     validate_no_pytorch_prefix,
@@ -421,25 +424,20 @@ def ltx23_should_quantize(key: str, weight: mx.array) -> bool:
 def quantize_transformer(
     output_dir: Path, *, variant: str = "distilled", bits: int = 8, group_size: int = 64
 ) -> None:
-    """Quantize transformer weights in-place."""
-    tf_filename = VARIANT_FILENAMES[variant]
-    tf_file = output_dir / tf_filename
-    if not tf_file.exists():
-        print(f"ERROR: {tf_filename} not found")
-        return
+    """Quantize one variant's transformer in-place and record how.
 
-    print(f"\nQuantizing transformer ({variant}) to int{bits} (group_size={group_size})...")
-    weights = load_safetensors(tf_file)
-
-    result = quantize_weights(
-        weights,
+    Delegates the load/quantize/save to `quantize_component` (the variant files
+    are not named after a component, hence `filename=`); what stays here is the
+    LTX-specific quantize_config.json, which records only_transformer_blocks.
+    """
+    quantize_component(
+        output_dir,
+        f"transformer ({variant})",
         bits=bits,
         group_size=group_size,
         should_quantize=ltx23_should_quantize,
+        filename=VARIANT_FILENAMES[variant],
     )
-
-    print(f"  Saving quantized transformer ({len(result)} keys)...")
-    mx.save_safetensors(str(tf_file), result)
 
     qconfig = {
         "quantization": {
@@ -451,9 +449,6 @@ def quantize_transformer(
     with open(output_dir / "quantize_config.json", "w") as f:
         json.dump(qconfig, f, indent=2)
 
-    del result, weights
-    gc.collect()
-    mx.clear_cache()
     print("  Quantization complete")
 
 
@@ -996,13 +991,7 @@ _EXPECTED_SST_SIZE = 9
 
 def validate(args) -> None:
     """Validate a converted LTX-2.3 model."""
-    model_dir = Path(args.model_dir)
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} does not exist")
-        raise SystemExit(1)
-
-    print(f"Validating: {model_dir}")
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
 
     # Read manifest early to detect delta mode
     split_path = model_dir / "split_model.json"
@@ -1250,9 +1239,7 @@ def validate(args) -> None:
     if hasattr(args, "source") and args.source:
         _cross_reference(model_dir, args.source, result)
 
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 def _cross_reference(model_dir: Path, source_path: str, result: ValidationResult) -> None:

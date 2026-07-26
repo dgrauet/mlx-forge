@@ -361,17 +361,22 @@ def quantize_component(
     bits: int = 8,
     group_size: int = 64,
     should_quantize: Callable[[str, mx.array], bool],
+    filename: str | None = None,
 ) -> None:
     """Quantize a component's weights in-place.
 
     Args:
         output_dir: Directory containing the component safetensors file.
-        component_name: Name of the component (e.g. "text_model").
+        component_name: Name of the component (e.g. "text_model"), used in the
+            progress output and to derive the filename.
         bits: Quantization bits (4 or 8).
         group_size: Quantization group size.
         should_quantize: Predicate deciding which weights to quantize.
+        filename: Override for `{component_name}.safetensors`, for recipes
+            whose output files are not named after their component (e.g. VOID's
+            `void_pass1.safetensors`, LTX's per-variant transformer files).
     """
-    filepath = output_dir / f"{component_name}.safetensors"
+    filepath = output_dir / (filename or f"{component_name}.safetensors")
     if not filepath.exists():
         print(f"  WARNING: {filepath.name} not found, skipping quantization")
         return

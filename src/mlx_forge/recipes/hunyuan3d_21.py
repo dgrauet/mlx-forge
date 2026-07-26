@@ -33,6 +33,8 @@ from ..quantize import _materialize
 from ..transpose import needs_transpose, transpose_conv
 from ..validate import (
     ValidationResult,
+    finish_validation,
+    start_validation,
     validate_file_exists,
     validate_no_pytorch_prefix,
     validate_quantization,
@@ -629,13 +631,10 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
 
 def validate(args) -> None:
     """Validate a converted Hunyuan3D-2.1 model directory."""
-    model_dir = Path(args.model_dir)
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
 
     validate_file_exists(model_dir, "config.json", result)
-    if not result.passed:
-        result.summary()
-        raise SystemExit(1)
+    finish_validation(result)
 
     with open(model_dir / "config.json") as f:
         config = json.load(f)
@@ -650,9 +649,7 @@ def validate(args) -> None:
     if "paint_unet" in config.get("components", []):
         _validate_paint(model_dir, config, result)
 
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 def _validate_shape(model_dir: Path, config: dict, result: ValidationResult) -> None:

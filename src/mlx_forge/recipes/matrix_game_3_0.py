@@ -37,6 +37,8 @@ from ..transpose import transpose_conv
 from ..validate import (
     ValidationResult,
     count_layer_indices,
+    finish_validation,
+    start_validation,
     validate_conv_layout,
     validate_file_exists,
     validate_quantization,
@@ -866,13 +868,7 @@ def _validate_vae(
 
 def validate(args) -> None:
     """Validate a converted Matrix-Game-3.0 model."""
-    model_dir = Path(args.model_dir)
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} does not exist")
-        raise SystemExit(1)
-
-    print(f"Validating: {model_dir}")
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
 
     # Check quantization
     is_quantized = (model_dir / "quantize_config.json").exists()
@@ -947,9 +943,7 @@ def validate(args) -> None:
     _validate_vae(model_dir, "vae_lightvae", result)
     _validate_vae(model_dir, "vae_lightvae_v2", result)
 
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 # ---------------------------------------------------------------------------

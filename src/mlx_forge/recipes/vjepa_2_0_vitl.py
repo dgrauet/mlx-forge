@@ -63,12 +63,19 @@ from pathlib import Path
 
 import mlx.core as mx
 
-from ..convert import add_common_convert_args, fmt_size, load_safetensors, load_torch_state_dict
-from ..quantize import _materialize, quantize_weights
+from ..convert import (
+    add_common_convert_args,
+    fmt_size,
+    load_safetensors,
+    load_torch_state_dict,
+    quantize_component,
+)
+from ..quantize import _materialize
 from ..transpose import transpose_conv
 from ..validate import (
-    ValidationResult,
     count_layer_indices,
+    finish_validation,
+    start_validation,
     validate_conv_layout,
     validate_file_exists,
     validate_no_pytorch_prefix,
@@ -396,29 +403,6 @@ def _process_probe(
 # ---------------------------------------------------------------------------
 
 
-def _quantize_component(
-    comp_name: str,
-    should_quantize,
-    output_dir: Path,
-    bits: int,
-    group_size: int,
-) -> None:
-    filepath = output_dir / f"{comp_name}.safetensors"
-    print(f"\n  Quantizing {comp_name} to int{bits} (group_size={group_size})...")
-    weights = load_safetensors(filepath)
-    result = quantize_weights(
-        weights,
-        bits=bits,
-        group_size=group_size,
-        should_quantize=should_quantize,
-    )
-    print(f"  Saving quantized {comp_name} ({len(result)} keys)...")
-    mx.save_safetensors(str(filepath), result)
-    del result, weights
-    gc.collect()
-    mx.clear_cache()
-
-
 # ---------------------------------------------------------------------------
 # Convert
 # ---------------------------------------------------------------------------
@@ -523,16 +507,28 @@ def convert(args) -> None:  # noqa: C901
 
     # Optional quantization
     if args.quantize:
-        _quantize_component(
-            "encoder", _encoder_should_quantize, output_dir, args.bits, args.group_size
+        quantize_component(
+            output_dir,
+            "encoder",
+            bits=args.bits,
+            group_size=args.group_size,
+            should_quantize=_encoder_should_quantize,
         )
         if pred_count:
-            _quantize_component(
-                "predictor", _predictor_should_quantize, output_dir, args.bits, args.group_size
+            quantize_component(
+                output_dir,
+                "predictor",
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=_predictor_should_quantize,
             )
         for info in probe_info.values():
-            _quantize_component(
-                info["component"], _probe_should_quantize, output_dir, args.bits, args.group_size
+            quantize_component(
+                output_dir,
+                info["component"],
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=_probe_should_quantize,
             )
 
         qconfig: dict = {
@@ -608,12 +604,7 @@ def _dry_run(
 
 def validate(args) -> None:  # noqa: C901
     """Validate a converted V-JEPA 2.0 ViT-L model directory."""
-    model_dir = Path(args.model_dir).expanduser()
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} not found")
-        raise SystemExit(1)
-
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
     is_quantized = (model_dir / "quantize_config.json").exists()
     if is_quantized:
         print("  [INFO] Quantized model detected")
@@ -836,10 +827,7 @@ def validate(args) -> None:  # noqa: C901
         gc.collect()
         mx.clear_cache()
 
-    print("\n" + "=" * 60)
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 # ---------------------------------------------------------------------------

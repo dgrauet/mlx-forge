@@ -36,6 +36,7 @@ from ..convert import (
     download_hf_files,
     fmt_size,
     load_safetensors,
+    quantize_component,
 )
 from ..quantize import _materialize
 
@@ -219,9 +220,14 @@ def convert(args) -> None:
     # -----------------------------------------------------------------------
     if args.quantize:
         for pass_file in PASS_FILES:
-            # quantize_component expects {component_name}.safetensors
-            # but our files are named void_pass1.safetensors, so we do it manually
-            _quantize_pass(output_dir, pass_file, args.bits, args.group_size)
+            quantize_component(
+                output_dir,
+                Path(pass_file).stem,
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=should_quantize_transformer,
+                filename=pass_file,
+            )
 
         qconfig = {
             "quantization": {
@@ -244,39 +250,6 @@ def convert(args) -> None:
             rel = p.relative_to(output_dir)
             print(f"  {rel}: {size_mb:.1f} MB")
     print("\nDone!")
-
-
-def _quantize_pass(
-    output_dir: Path,
-    pass_filename: str,
-    bits: int,
-    group_size: int,
-) -> None:
-    """Quantize a single pass file in-place."""
-    from ..quantize import quantize_weights
-
-    filepath = output_dir / pass_filename
-    if not filepath.exists():
-        print(f"  WARNING: {filepath.name} not found, skipping quantization")
-        return
-
-    pass_name = Path(pass_filename).stem
-    print(f"\n  Quantizing {pass_name} to int{bits} (group_size={group_size})...")
-    weights = load_safetensors(filepath)
-
-    result = quantize_weights(
-        weights,
-        bits=bits,
-        group_size=group_size,
-        should_quantize=should_quantize_transformer,
-    )
-
-    print(f"  Saving quantized {pass_name} ({len(result)} keys)...")
-    mx.save_safetensors(str(filepath), result)
-
-    del result, weights
-    gc.collect()
-    mx.clear_cache()
 
 
 def _dry_run(args, output_dir: Path) -> None:
@@ -317,19 +290,14 @@ def _dry_run(args, output_dir: Path) -> None:
 def validate(args) -> None:
     """Validate converted VOID model weights."""
     from ..validate import (
-        ValidationResult,
         count_layer_indices,
+        finish_validation,
+        start_validation,
         validate_file_exists,
         validate_quantization,
     )
 
-    model_dir = Path(args.model_dir)
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} does not exist")
-        raise SystemExit(1)
-
-    print(f"Validating: {model_dir}")
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
 
     # Check quantization
     is_quantized = (model_dir / "quantize_config.json").exists()
@@ -399,9 +367,7 @@ def validate(args) -> None:
         gc.collect()
         mx.clear_cache()
 
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,13 @@ class ValidationResult:
         return self.errors == 0
 
     def summary(self) -> None:
-        """Print summary and exit with appropriate code."""
+        """Print the pass/fail summary.
+
+        This only PRINTS — it does not exit. Two recipes read the old
+        "and exit with appropriate code" wording literally and ended their
+        validate() here, so a failed validation exited 0. Use
+        `finish_validation()` to report and exit.
+        """
         print(f"\n{'=' * 60}")
         if self.passed:
             print(f"{PASS} All checks passed! ({self.warnings} warnings)")
@@ -171,3 +177,42 @@ def validate_quantization(
         f"Quantization only in {label} (non-block scales: {len(non_block)})",
         warn_only=True,
     )
+
+
+def start_validation(model_dir: str | Path) -> tuple[Path, ValidationResult]:
+    """Open a validation run: check the directory exists, announce it, and
+    return the resolved path plus a fresh result accumulator.
+
+    Args:
+        model_dir: Path to the converted model directory.
+
+    Returns:
+        (model_dir, result) — pass `result` to `finish_validation()` at the end.
+
+    Raises:
+        SystemExit: with code 1 if the directory does not exist.
+    """
+    # expanduser() so `~/weights/...` works: vjepa-2.0 did this and the other
+    # nine did not, which is exactly the kind of drift this helper removes.
+    path = Path(model_dir).expanduser()
+    if not path.exists():
+        print(f"ERROR: {path} does not exist")
+        raise SystemExit(1)
+
+    print(f"Validating: {path}")
+    return path, ValidationResult()
+
+
+def finish_validation(result: ValidationResult) -> None:
+    """Close a validation run: print the summary, then exit 1 if it failed.
+
+    Every recipe must end its validate() here. Ending at `result.summary()`
+    instead prints the failures and exits 0, which is invisible to any caller
+    gating on the exit code — that shipped in two recipes.
+
+    Raises:
+        SystemExit: with code 1 if any check failed.
+    """
+    result.summary()
+    if not result.passed:
+        raise SystemExit(1)

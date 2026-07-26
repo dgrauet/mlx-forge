@@ -47,7 +47,8 @@ from ..convert import (
     quantize_component,
 )
 from ..validate import (
-    ValidationResult,
+    finish_validation,
+    start_validation,
     validate_file_exists,
     validate_quantization,
 )
@@ -273,12 +274,7 @@ def convert(args) -> None:
 
 
 def validate(args) -> None:
-    model_dir = Path(args.model_dir)
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} not found")
-        raise SystemExit(1)
-
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
     is_quantized = (model_dir / "quantize_config.json").exists()
 
     print("\n== File Structure ==")
@@ -331,10 +327,7 @@ def validate(args) -> None:
         if is_quantized:
             validate_quantization(weights, result, block_key="layers")
 
-    print("\n" + "=" * 60)
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 # ---------------------------------------------------------------------------

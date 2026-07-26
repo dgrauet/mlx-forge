@@ -55,8 +55,8 @@ from typing import Any
 
 import mlx.core as mx
 
-from ..convert import add_common_convert_args, load_torch_state_dict
-from ..quantize import _materialize, quantize_weights
+from ..convert import add_common_convert_args, load_torch_state_dict, quantize_component
+from ..quantize import _materialize
 from ..transpose import transpose_conv
 
 # Canonical Meta CDN checkpoint for the ViT-L RoPE V-JEPA 2.1 encoder (the
@@ -402,8 +402,20 @@ def convert(args) -> None:
 
     # ----- Optional quantization -----
     if args.quantize:
-        _quantize_encoder(output_dir, args.bits, args.group_size)
-        _quantize_predictor(output_dir, args.bits, args.group_size)
+        quantize_component(
+            output_dir,
+            ENCODER_COMPONENT,
+            bits=args.bits,
+            group_size=args.group_size,
+            should_quantize=should_quantize_encoder,
+        )
+        quantize_component(
+            output_dir,
+            PREDICTOR_COMPONENT,
+            bits=args.bits,
+            group_size=args.group_size,
+            should_quantize=should_quantize_predictor,
+        )
         with open(output_dir / "quantize_config.json", "w") as f:
             json.dump(
                 {"quantization": {"bits": args.bits, "group_size": args.group_size}},
@@ -419,54 +431,6 @@ def convert(args) -> None:
         if p.is_file():
             print(f"  {p.relative_to(output_dir)}: {p.stat().st_size / (1024 * 1024):.1f} MB")
     print("\nDone!")
-
-
-def _quantize_encoder(output_dir: Path, bits: int, group_size: int) -> None:
-    """Quantize the encoder safetensors in-place (transformer Linears only)."""
-    from ..convert import load_safetensors
-
-    filepath = output_dir / OUTPUT_FILENAME
-    if not filepath.exists():
-        print(f"  WARNING: {filepath.name} not found, skipping encoder quantization")
-        return
-
-    print(f"\n  Quantizing encoder to int{bits} (group_size={group_size})...")
-    weights = load_safetensors(filepath)
-    result = quantize_weights(
-        weights,
-        bits=bits,
-        group_size=group_size,
-        should_quantize=should_quantize_encoder,
-    )
-    print(f"  Saving quantized encoder ({len(result)} keys)...")
-    mx.save_safetensors(str(filepath), result)
-    del result, weights
-    gc.collect()
-    mx.clear_cache()
-
-
-def _quantize_predictor(output_dir: Path, bits: int, group_size: int) -> None:
-    """Quantize the predictor safetensors in-place (predictor_blocks Linears only)."""
-    from ..convert import load_safetensors
-
-    filepath = output_dir / PREDICTOR_OUTPUT_FILENAME
-    if not filepath.exists():
-        print(f"  WARNING: {filepath.name} not found, skipping predictor quantization")
-        return
-
-    print(f"\n  Quantizing predictor to int{bits} (group_size={group_size})...")
-    weights = load_safetensors(filepath)
-    result = quantize_weights(
-        weights,
-        bits=bits,
-        group_size=group_size,
-        should_quantize=should_quantize_predictor,
-    )
-    print(f"  Saving quantized predictor ({len(result)} keys)...")
-    mx.save_safetensors(str(filepath), result)
-    del result, weights
-    gc.collect()
-    mx.clear_cache()
 
 
 def _dry_run(args, src_path: Path, output_dir: Path) -> None:
@@ -496,19 +460,14 @@ def validate(args) -> None:
     """Validate converted V-JEPA 2.1 encoder + predictor weights."""
     from ..convert import load_safetensors
     from ..validate import (
-        ValidationResult,
         count_layer_indices,
+        finish_validation,
+        start_validation,
         validate_file_exists,
         validate_quantization,
     )
 
-    model_dir = Path(args.model_dir)
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} does not exist")
-        raise SystemExit(1)
-
-    print(f"Validating: {model_dir}")
-    result = ValidationResult()
+    model_dir, result = start_validation(args.model_dir)
 
     is_quantized = (model_dir / "quantize_config.json").exists()
     if is_quantized:
@@ -639,9 +598,7 @@ def validate(args) -> None:
         gc.collect()
         mx.clear_cache()
 
-    result.summary()
-    if not result.passed:
-        raise SystemExit(1)
+    finish_validation(result)
 
 
 # --------------------------------------------------------------------------- #
