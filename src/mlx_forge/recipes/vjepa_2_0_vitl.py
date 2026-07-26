@@ -65,6 +65,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    default_output_dir,
     fmt_size,
     load_safetensors,
     load_torch_state_dict,
@@ -433,8 +434,7 @@ def convert(args) -> None:  # noqa: C901
     if args.output:
         output_dir = Path(args.output).expanduser()
     else:
-        suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"vjepa-2.0-vitl-mlx{suffix}"
+        output_dir = default_output_dir("vjepa-2.0-vitl", quantize=args.quantize, bits=args.bits)
 
     if args.dry_run:
         _dry_run(args, source_path, probe_paths, output_dir)

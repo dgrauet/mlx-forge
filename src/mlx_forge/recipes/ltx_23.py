@@ -23,6 +23,7 @@ import mlx.core as mx
 from ..convert import (
     add_common_convert_args,
     classify_keys,
+    default_output_dir,
     download_hf_files,
     fmt_size,
     load_safetensors,
@@ -756,8 +757,7 @@ def convert(args) -> None:
     if args.output:
         output_dir = Path(args.output)
     else:
-        suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"ltx-2.3-mlx{suffix}"
+        output_dir = default_output_dir("ltx-2.3", quantize=args.quantize, bits=args.bits)
 
     if args.dry_run:
         _dry_run(args, output_dir)

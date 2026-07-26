@@ -52,6 +52,7 @@ import mlx.core as mx
 from ..convert import (
     WeightTransform,
     add_common_convert_args,
+    default_output_dir,
     download_hf_files,
     fmt_size,
     load_safetensors,
@@ -260,8 +261,7 @@ def _resolve_repo_id(args) -> str:
 
 
 def _default_output_dir(variant: str, quantize: bool, bits: int) -> Path:
-    suffix = f"-q{bits}" if quantize else ""
-    return Path("models") / f"ernie-image-{variant}-mlx{suffix}"
+    return default_output_dir(f"ernie-image-{variant}", quantize=quantize, bits=bits)
 
 
 # ---------------------------------------------------------------------------

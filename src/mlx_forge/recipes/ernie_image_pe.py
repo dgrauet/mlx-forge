@@ -39,6 +39,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    default_output_dir,
     download_hf_files,
     fmt_size,
     load_safetensors,
@@ -121,8 +122,7 @@ def ernie_image_pe_should_quantize(key: str, weight: mx.array) -> bool:
 
 
 def _default_output_dir(quantize: bool, bits: int) -> Path:
-    suffix = f"-q{bits}" if quantize else ""
-    return Path("models") / f"ernie-image-pe-mlx{suffix}"
+    return default_output_dir("ernie-image-pe", quantize=quantize, bits=bits)
 
 
 # ---------------------------------------------------------------------------

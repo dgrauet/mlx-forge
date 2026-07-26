@@ -156,6 +156,20 @@ class TestConvertEndToEnd:
         assert "transformer_blocks.0.attn1.to_q.weight" in saved
         assert "patch_embed.proj.weight" in saved
 
+    def test_dry_run_without_source_does_not_download(self, tmp_path, monkeypatch):
+        """--dry-run must not touch the network: convert() downloaded first and
+        checked args.dry_run afterwards, so previewing a plan started a
+        multi-GB fetch."""
+        called = []
+        monkeypatch.setattr(void_model, "download_hf_files", lambda *a, **k: called.append(a))
+
+        args = _args(tmp_path / "unused", tmp_path / "out", dry_run=True)
+        args.source = None
+        void_model.convert(args)
+
+        assert called == [], "dry run hit the network"
+        assert not (tmp_path / "out").exists()
+
     def test_dry_run_writes_nothing(self, tmp_path, capsys):
         out = tmp_path / "out"
         convert(_args(_source_dir(tmp_path), out, dry_run=True))

@@ -33,6 +33,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    default_output_dir,
     download_hf_files,
     fmt_size,
     load_safetensors,
@@ -166,6 +167,18 @@ def _convert_pass(
 
 def convert(args) -> None:
     """Convert VOID transformer weights to MLX format."""
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        output_dir = default_output_dir("void-model", quantize=args.quantize, bits=args.bits)
+
+    # Before any side effect: a dry run must not download or write anything.
+    # This used to sit after the download, so previewing the plan for a source
+    # that was not local started a multi-GB fetch.
+    if args.dry_run:
+        _dry_run(args, output_dir)
+        return
+
     if args.source:
         source_dir = Path(args.source)
         if not source_dir.is_dir():
@@ -176,16 +189,6 @@ def convert(args) -> None:
         source_dir = Path("models") / "void-model-src"
         print(f"\nDownloading from {REPO_ID}...")
         download_hf_files(REPO_ID, PASS_FILES, source_dir)
-
-    if args.output:
-        output_dir = Path(args.output)
-    else:
-        suffix = f"-q{args.bits}" if args.quantize else ""
-        output_dir = Path("models") / f"void-model-mlx{suffix}"
-
-    if args.dry_run:
-        _dry_run(args, output_dir)
-        return
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
