@@ -45,7 +45,7 @@ src/mlx_forge/
     ├── ernie_image_pe.py        # ERNIE-Image PE variant
     ├── vjepa_2_1_vitl.py        # V-JEPA 2.1 ViT-L (encoder + predictor)
     ├── vjepa_2_0_vitl.py        # V-JEPA 2.0 ViT-L (+ attentive probes)
-    └── void_model.py            # Test/scaffold recipe
+    └── void_model.py            # Netflix VOID: dual-pass CogVideoX transformer
 ```
 
 ## Adding a New Recipe

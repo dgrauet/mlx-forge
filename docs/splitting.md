@@ -130,3 +130,4 @@ To remove: rm '/path/to/model.safetensors'
 ## Model-Specific Guides
 
 - [LTX-2.3](models/ltx-2.3.md#split-component-map) — component map and output files
+- [Matrix-Game 3.0](models/matrix-game-3.0.md) — output files

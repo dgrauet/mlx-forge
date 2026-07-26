@@ -190,3 +190,5 @@ Recipes may add extra fields to indicate which layers were targeted.
 ## Model-Specific Guides
 
 - [LTX-2.3](models/ltx-2.3.md#quantization-strategy) — quantization strategy and exclusion list
+- [ERNIE-Image](models/ernie-image.md) — quantization scope
+- [Matrix-Game 3.0](models/matrix-game-3.0.md) — quantization scope

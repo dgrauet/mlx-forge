@@ -192,3 +192,6 @@ The recipe name (dict key) is the user-facing CLI name. The module filename can 
 ## Model-Specific Guides
 
 - [LTX-2.3](models/ltx-2.3.md) — 22B audio-video DiT
+- [ERNIE-Image](models/ernie-image.md) — 8B text-to-image DiT
+- [Matrix-Game 3.0](models/matrix-game-3.0.md) — interactive world model
+- [V-JEPA 2](models/vjepa-2.md) — ViT-L encoder + predictor
