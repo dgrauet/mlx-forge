@@ -46,6 +46,7 @@ from ..convert import (
     process_component,
     quantize_component,
 )
+from ..quantize import read_quantize_config, write_quantize_config
 from ..validate import (
     finish_validation,
     start_validation,
@@ -236,15 +237,12 @@ def convert(args) -> None:
             group_size=args.group_size,
             should_quantize=ernie_image_pe_should_quantize,
         )
-        qconfig = {
-            "quantization": {
-                "bits": args.bits,
-                "group_size": args.group_size,
-                "skip_components": [],
-            }
-        }
-        with open(output_dir / "quantize_config.json", "w") as f:
-            json.dump(qconfig, f, indent=2)
+        write_quantize_config(
+            output_dir,
+            bits=args.bits,
+            group_size=args.group_size,
+            skip_components=[],
+        )
 
     split_info: dict = {
         "format": "split",
@@ -275,7 +273,7 @@ def convert(args) -> None:
 
 def validate(args) -> None:
     model_dir, result = start_validation(args.model_dir)
-    is_quantized = (model_dir / "quantize_config.json").exists()
+    is_quantized = read_quantize_config(model_dir) is not None
 
     print("\n== File Structure ==")
     validate_file_exists(model_dir, "split_model.json", result)

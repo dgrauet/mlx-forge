@@ -32,7 +32,7 @@ from ..convert import (
     load_torch_state_dict,
     quantize_component,
 )
-from ..quantize import _materialize
+from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
     ValidationResult,
@@ -669,6 +669,9 @@ def convert(args) -> None:
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        # Also record it where validate() looks: gating the scales/biases checks
+        # on quantize_config.json meant they never ran for this recipe.
+        write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
         with open(output_dir / "split_model.json", "w") as f:
             json.dump(split_info, f, indent=2)
 
@@ -871,12 +874,10 @@ def validate(args) -> None:
     model_dir, result = start_validation(args.model_dir)
 
     # Check quantization
-    is_quantized = (model_dir / "quantize_config.json").exists()
-    if is_quantized:
-        with open(model_dir / "quantize_config.json") as f:
-            qconfig = json.load(f)
-        bits = qconfig.get("quantization", {}).get("bits", "?")
-        print(f"Model is quantized: int{bits}")
+    qconfig = read_quantize_config(model_dir)
+    is_quantized = qconfig is not None
+    if qconfig is not None:
+        print(f"Model is quantized: int{qconfig.get('bits', '?')}")
 
     # --- File structure ---
     print("\n== File Structure ==")

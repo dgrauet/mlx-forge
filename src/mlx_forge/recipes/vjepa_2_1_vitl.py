@@ -56,7 +56,7 @@ from typing import Any
 import mlx.core as mx
 
 from ..convert import add_common_convert_args, load_torch_state_dict, quantize_component
-from ..quantize import _materialize
+from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 
 # Canonical Meta CDN checkpoint for the ViT-L RoPE V-JEPA 2.1 encoder (the
@@ -416,12 +416,7 @@ def convert(args) -> None:
             group_size=args.group_size,
             should_quantize=should_quantize_predictor,
         )
-        with open(output_dir / "quantize_config.json", "w") as f:
-            json.dump(
-                {"quantization": {"bits": args.bits, "group_size": args.group_size}},
-                f,
-                indent=2,
-            )
+        write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
 
     # ----- Summary -----
     print(f"\n{'=' * 60}")
@@ -469,11 +464,10 @@ def validate(args) -> None:
 
     model_dir, result = start_validation(args.model_dir)
 
-    is_quantized = (model_dir / "quantize_config.json").exists()
-    if is_quantized:
-        with open(model_dir / "quantize_config.json") as f:
-            bits = json.load(f).get("quantization", {}).get("bits", "?")
-        print(f"Model is quantized: int{bits}")
+    qconfig = read_quantize_config(model_dir)
+    is_quantized = qconfig is not None
+    if qconfig is not None:
+        print(f"Model is quantized: int{qconfig.get('bits', '?')}")
 
     print("\n== File Structure ==")
     validate_file_exists(model_dir, OUTPUT_FILENAME, result)

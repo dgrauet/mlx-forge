@@ -70,7 +70,7 @@ from ..convert import (
     load_torch_state_dict,
     quantize_component,
 )
-from ..quantize import _materialize
+from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
     count_layer_indices,
@@ -531,17 +531,14 @@ def convert(args) -> None:  # noqa: C901
                 should_quantize=_probe_should_quantize,
             )
 
-        qconfig: dict = {
-            "quantization": {
-                "bits": args.bits,
-                "group_size": args.group_size,
-                "skip_keys_encoder": list(_ENCODER_SKIP_QUANT),
-                "skip_keys_predictor": list(_PREDICTOR_SKIP_QUANT),
-                "skip_keys_probe": list(_PROBE_SKIP_QUANT),
-            }
-        }
-        with open(output_dir / "quantize_config.json", "w") as f:
-            json.dump(qconfig, f, indent=2)
+        write_quantize_config(
+            output_dir,
+            bits=args.bits,
+            group_size=args.group_size,
+            skip_keys_encoder=list(_ENCODER_SKIP_QUANT),
+            skip_keys_predictor=list(_PREDICTOR_SKIP_QUANT),
+            skip_keys_probe=list(_PROBE_SKIP_QUANT),
+        )
 
     # Summary
     print(f"\n{'=' * 60}")
@@ -605,7 +602,7 @@ def _dry_run(
 def validate(args) -> None:  # noqa: C901
     """Validate a converted V-JEPA 2.0 ViT-L model directory."""
     model_dir, result = start_validation(args.model_dir)
-    is_quantized = (model_dir / "quantize_config.json").exists()
+    is_quantized = read_quantize_config(model_dir) is not None
     if is_quantized:
         print("  [INFO] Quantized model detected")
 

@@ -191,3 +191,52 @@ def format_bytes(n: float) -> str:
             return f"{n:.2f} {unit}"
         n /= 1024
     return f"{n:.2f} PB"
+
+
+QUANTIZE_CONFIG_FILENAME = "quantize_config.json"
+
+
+def write_quantize_config(
+    output_dir: Path,
+    *,
+    bits: int,
+    group_size: int,
+    **extra: object,
+) -> Path:
+    """Record how a model was quantized, next to its weights.
+
+    Every recipe that supports --quantize must call this: `validate` decides
+    whether to run the scales/biases checks by looking for this file, so a
+    recipe that quantizes without writing it has its quantization silently
+    unverified (matrix-game-3.0 recorded quantization only in split_model.json
+    and its validate never checked a quantized model).
+
+    Args:
+        output_dir: Converted model directory.
+        bits: Quantization bit-width.
+        group_size: Quantization group size.
+        **extra: Recipe-specific fields to record alongside, e.g.
+            `skip_components=[...]` or `only_transformer_blocks=True`.
+
+    Returns:
+        Path to the written file.
+    """
+    path = output_dir / QUANTIZE_CONFIG_FILENAME
+    with open(path, "w") as f:
+        json.dump({"quantization": {"bits": bits, "group_size": group_size, **extra}}, f, indent=2)
+    return path
+
+
+def read_quantize_config(model_dir: Path) -> dict | None:
+    """Read a model's quantization record.
+
+    Returns:
+        The inner "quantization" mapping, or None if the model is not
+        quantized — so callers can write `qconfig = read_quantize_config(d)`
+        and treat None as "not quantized" instead of re-deriving the filename.
+    """
+    path = model_dir / QUANTIZE_CONFIG_FILENAME
+    if not path.exists():
+        return None
+    with open(path) as f:
+        return json.load(f).get("quantization", {})

@@ -38,7 +38,7 @@ from ..convert import (
     load_safetensors,
     quantize_component,
 )
-from ..quantize import _materialize
+from ..quantize import _materialize, read_quantize_config, write_quantize_config
 
 REPO_ID = "netflix/void-model"
 
@@ -228,14 +228,7 @@ def convert(args) -> None:
                 should_quantize=should_quantize_transformer,
             )
 
-        qconfig = {
-            "quantization": {
-                "bits": args.bits,
-                "group_size": args.group_size,
-            }
-        }
-        with open(output_dir / "quantize_config.json", "w") as f:
-            json.dump(qconfig, f, indent=2)
+        write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
 
     # -----------------------------------------------------------------------
     # Summary
@@ -299,12 +292,10 @@ def validate(args) -> None:
     model_dir, result = start_validation(args.model_dir)
 
     # Check quantization
-    is_quantized = (model_dir / "quantize_config.json").exists()
-    if is_quantized:
-        with open(model_dir / "quantize_config.json") as f:
-            qconfig = json.load(f)
-        bits = qconfig.get("quantization", {}).get("bits", "?")
-        print(f"Model is quantized: int{bits}")
+    qconfig = read_quantize_config(model_dir)
+    is_quantized = qconfig is not None
+    if qconfig is not None:
+        print(f"Model is quantized: int{qconfig.get('bits', '?')}")
 
     # --- File structure ---
     print("\n== File Structure ==")

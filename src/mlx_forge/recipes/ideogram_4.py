@@ -38,7 +38,7 @@ from ..convert import (
     process_component,
     quantize_component,
 )
-from ..quantize import _materialize
+from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
     count_layer_indices,
@@ -495,15 +495,12 @@ def convert(args) -> None:
         with open(output_dir / "split_model.json", "w") as f:
             json.dump(split_info, f, indent=2)
 
-        qconfig = {
-            "quantization": {
-                "bits": args.bits,
-                "group_size": args.group_size,
-                "skip_components": list(_SKIP_QUANTIZE_COMPONENTS),
-            }
-        }
-        with open(output_dir / "quantize_config.json", "w") as f:
-            json.dump(qconfig, f, indent=2)
+        write_quantize_config(
+            output_dir,
+            bits=args.bits,
+            group_size=args.group_size,
+            skip_components=list(_SKIP_QUANTIZE_COMPONENTS),
+        )
 
         print("\nFinal files after quantization:")
         for p in sorted(output_dir.iterdir()):
@@ -525,12 +522,10 @@ def validate(args) -> None:
 
     model_dir, result = start_validation(args.model_dir)
 
-    is_quantized = (model_dir / "quantize_config.json").exists()
-    if is_quantized:
-        with open(model_dir / "quantize_config.json") as f:
-            qconfig = json.load(f)
-        bits = qconfig.get("quantization", {}).get("bits", "?")
-        print(f"Model is quantized: int{bits}")
+    qconfig = read_quantize_config(model_dir)
+    is_quantized = qconfig is not None
+    if qconfig is not None:
+        print(f"Model is quantized: int{qconfig.get('bits', '?')}")
 
     # File structure
     print("\n== File Structure ==")
