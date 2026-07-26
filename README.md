@@ -17,7 +17,6 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | Model | Recipe | Status |
 |-------|--------|--------|
 | [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx-2.3` | Stable |
-| [Fish S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B TTS) | `fish-s2-pro` | Stable |
 | [ERNIE-Image](https://huggingface.co/baidu/ERNIE-Image) (8B text-to-image DiT) | `ernie-image` | Stable |
 | [ERNIE-Image Prompt Enhancer](https://huggingface.co/baidu/ERNIE-Image-Turbo/tree/main/pe) (3B Ministral3 CausalLM) | `ernie-image-pe` | Stable |
 | [V-JEPA 2.1 ViT-L](https://github.com/facebookresearch/vjepa2) (encoder + predictor, RoPE) | `vjepa-2.1-vitl` | Stable |
@@ -37,7 +36,7 @@ uv pip install -e .
 
 Requires macOS with Apple Silicon and Python 3.11+.
 
-For recipes that load PyTorch `.pth` checkpoints (e.g. Fish S2 Pro codec):
+For recipes that load PyTorch `.pth`/`.pt` checkpoints (e.g. Matrix-Game, V-JEPA):
 
 ```bash
 pip install 'mlx-forge[torch]'
@@ -50,14 +49,13 @@ pip install 'mlx-forge[torch]'
 ```bash
 # Convert a model (downloads checkpoint from HuggingFace)
 mlx-forge convert ltx-2.3
-mlx-forge convert fish-s2-pro
 mlx-forge convert ernie-image
 
 # Convert with int8 quantization
 mlx-forge convert ltx-2.3 --quantize --bits 8
 
 # Preview conversion plan (no download, no writes)
-mlx-forge convert fish-s2-pro --dry-run
+mlx-forge convert ltx-2.3 --dry-run
 
 # Convert from a local checkpoint
 mlx-forge convert ltx-2.3 --checkpoint /path/to/checkpoint.safetensors
@@ -89,7 +87,6 @@ See model-specific options in [docs/models/](docs/models/).
 
 ```bash
 mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
-mlx-forge validate fish-s2-pro models/fish-s2-pro-mlx
 mlx-forge validate ernie-image models/ernie-image-mlx
 ```
 
@@ -106,7 +103,7 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 mlx-forge upload models/ltx-2.3-mlx-distilled
 
 # Upload to a specific repo or organization
-mlx-forge upload models/fish-s2-pro-mlx --repo-id myuser/my-model
+mlx-forge upload models/ernie-image-mlx --repo-id myuser/my-model
 mlx-forge upload models/ernie-image-mlx --namespace my-org
 
 # Upload and add to a collection
@@ -139,7 +136,6 @@ mlx_forge/
 └── recipes/
     ├── __init__.py  # Registry (AVAILABLE_RECIPES) + the contract every recipe must satisfy
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
-    ├── fish_s2.py   # Fish S2 Pro: Dual-AR TTS + DAC codec
     ├── ernie_image.py  # ERNIE-Image: 8B single-stream text-to-image DiT
     └── ...          # 11 recipes in total — see AVAILABLE_RECIPES
 ```
@@ -198,7 +194,6 @@ Then register it in `recipes/__init__.py`:
 ```python
 AVAILABLE_RECIPES = {
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
-    "fish-s2-pro": "mlx_forge.recipes.fish_s2",
     "ernie-image": "mlx_forge.recipes.ernie_image",
     "my-model": "mlx_forge.recipes.my_model",
 }
@@ -239,7 +234,6 @@ PyTorch stores conv weights as `(O, I, ...)` while MLX expects channels-last `(O
 Each recipe has its own detailed guide with architecture, key mapping, known gotchas, and validation details:
 
 - [LTX-2.3](docs/models/ltx-2.3.md) — 22B video DiT (6 components, Conv3d/Conv1d transposition)
-- [Fish S2 Pro](docs/models/fish-s2-pro.md) — 5B TTS (Dual-AR + DAC codec)
 - [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
 - [V-JEPA 2](docs/models/vjepa-2.md) — Meta video world model: ViT-L encoder + predictor, RoPE (2.1 `vjepa-2.1-vitl` / 2.0 `vjepa-2.0-vitl` + attentive probes)
 

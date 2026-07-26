@@ -32,7 +32,7 @@ def _model_dir(tmp_path):
     (tmp_path / "config.json").write_text("{}")
     (tmp_path / "split_model.json").write_text("{}")
     (tmp_path / "README.md").write_text("# Card")
-    # cogvideox / fish flatten tokenizer files next to the weights
+    # cogvideox flattens tokenizer files next to the weights
     (tmp_path / "tokenizer_spiece.model").write_bytes(b"sp")
     # ernie-image ships a chat template
     (tmp_path / "chat_template.jinja").write_text("{{ x }}")

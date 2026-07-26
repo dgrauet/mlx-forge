@@ -395,7 +395,12 @@ def quantize_component(
 
 
 def shard_filenames(n: int, prefix: str = "model") -> list[str]:
-    """Generate shard filenames for n-shard models, plus the index file."""
+    """Generate shard filenames for n-shard models, plus the index file.
+
+    No recipe calls this today (fish-s2-pro was the only caller). Kept because
+    it is the counterpart of load_weights()'s index handling and any sharded
+    upstream needs it — covered by tests so it cannot rot silently.
+    """
     shards = [f"{prefix}-{i:05d}-of-{n:05d}.safetensors" for i in range(1, n + 1)]
     shards.append(f"{prefix}.safetensors.index.json")
     return shards

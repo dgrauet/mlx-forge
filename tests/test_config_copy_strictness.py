@@ -4,7 +4,7 @@ The cogvideox silent-skip bug (`if src.exists()`) had already shipped a
 second incomplete artifact: dgrauet/matrix-game-3.0-mlx lacks
 google/umt5-xxl/spiece.model (present upstream in Skywork/Matrix-Game-3.0).
 Centralize the strict copy in convert.copy_required_files and use it in
-fish_s2, matrix_game_3_0 and ernie_image; genuinely optional files
+matrix_game_3_0 and ernie_image; genuinely optional files
 (ernie_image_pe's chat_template.jinja, bypassed at runtime by the port)
 warn instead of aborting.
 """
@@ -71,8 +71,8 @@ def test_recipes_use_the_strict_helper():
     `if src.exists()` copy for their required pipeline files."""
     import inspect
 
-    from mlx_forge.recipes import ernie_image, fish_s2, matrix_game_3_0
+    from mlx_forge.recipes import ernie_image, matrix_game_3_0
 
-    for mod in (fish_s2, matrix_game_3_0, ernie_image):
+    for mod in (matrix_game_3_0, ernie_image):
         src = inspect.getsource(mod)
         assert "copy_required_files" in src, mod.__name__

@@ -67,7 +67,6 @@ jobs:
       - name: Verify recipe dry-run (no network, no GPU)
         run: |
           uv run mlx-forge convert ltx-2.3 --dry-run
-          uv run mlx-forge convert fish-s2-pro --dry-run
 
   commitlint:
     runs-on: ubuntu-latest

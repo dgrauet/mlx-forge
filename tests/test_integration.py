@@ -12,22 +12,6 @@ import mlx.core as mx
 
 from mlx_forge.convert import classify_keys, load_safetensors, process_component
 from mlx_forge.quantize import quantize_weights
-from mlx_forge.recipes.fish_s2 import (
-    COMPONENT_PREFIX as FISH_COMPONENT_PREFIX,
-)
-from mlx_forge.recipes.fish_s2 import (
-    COMPONENTS as FISH_COMPONENTS,
-)
-from mlx_forge.recipes.fish_s2 import (
-    FISH_S2_SPLIT_MAP,
-    fish_s2_should_quantize,
-)
-from mlx_forge.recipes.fish_s2 import (
-    SANITIZERS as FISH_SANITIZERS,
-)
-from mlx_forge.recipes.fish_s2 import (
-    classify_key as fish_classify_key,
-)
 from mlx_forge.recipes.ltx_23 import (
     COMPONENT_PREFIX as LTX_COMPONENT_PREFIX,
 )
@@ -112,35 +96,6 @@ def _make_ltx23_checkpoint() -> dict[str, mx.array]:
     weights["vocoder.conv_pre.weight"] = mx.random.normal((512, 128, 7))
     weights["vocoder.ups.0.weight"] = mx.random.normal((256, 512, 16))
     weights["vocoder.conv_post.weight"] = mx.random.normal((1, 512, 7))
-
-    return weights
-
-
-def _make_fish_s2_checkpoint() -> dict[str, mx.array]:
-    """Create a minimal fake Fish S2 Pro checkpoint with realistic keys."""
-    weights: dict[str, mx.array] = {}
-
-    # Text model keys (Qwen3-style)
-    weights["text_model.model.embeddings.weight"] = mx.random.normal((1024, 256))
-    weights["text_model.model.norm.weight"] = mx.random.normal((256,))
-    for i in range(2):
-        prefix = f"text_model.model.layers.{i}"
-        weights[f"{prefix}.attention.wqkv.weight"] = mx.random.normal((768, 256))
-        weights[f"{prefix}.attention.wo.weight"] = mx.random.normal((256, 256))
-        weights[f"{prefix}.attention.q_norm.weight"] = mx.random.normal((128,))
-        weights[f"{prefix}.attention.k_norm.weight"] = mx.random.normal((128,))
-        weights[f"{prefix}.attention_norm.weight"] = mx.random.normal((256,))
-        weights[f"{prefix}.feed_forward.w1.weight"] = mx.random.normal((512, 256))
-        weights[f"{prefix}.feed_forward.w2.weight"] = mx.random.normal((256, 512))
-
-    # Audio decoder keys
-    weights["audio_decoder.codebook_embeddings.weight"] = mx.random.normal((10, 256))
-    weights["audio_decoder.output.weight"] = mx.random.normal((4096, 256))
-    for i in range(2):
-        prefix = f"audio_decoder.layers.{i}"
-        weights[f"{prefix}.attention.wqkv.weight"] = mx.random.normal((768, 256))
-        weights[f"{prefix}.attention.wo.weight"] = mx.random.normal((256, 256))
-        weights[f"{prefix}.feed_forward.w1.weight"] = mx.random.normal((512, 256))
 
     return weights
 
@@ -387,178 +342,6 @@ class TestLtx23Pipeline:
 
 
 # ---------------------------------------------------------------------------
-# Fish S2 Pro integration tests
-# ---------------------------------------------------------------------------
-
-
-class TestFishS2Pipeline:
-    """End-to-end tests for the Fish S2 Pro conversion pipeline."""
-
-    def test_classify_all_keys(self):
-        """All fake checkpoint keys are classified into known components."""
-        checkpoint = _make_fish_s2_checkpoint()
-        by_component = classify_keys(checkpoint, fish_classify_key)
-
-        assert "text_model" in by_component
-        assert "audio_decoder" in by_component
-
-        total_classified = sum(len(v) for v in by_component.values())
-        assert total_classified == len(checkpoint)
-
-    def test_full_convert_pipeline(self, tmp_path):
-        """Convert fake Fish S2 checkpoint end-to-end."""
-        checkpoint = _make_fish_s2_checkpoint()
-        output_dir = tmp_path / "fish-s2-mlx"
-        output_dir.mkdir()
-
-        by_component = classify_keys(checkpoint, fish_classify_key)
-
-        total = 0
-        for comp_name in FISH_COMPONENTS:
-            keys = by_component.get(comp_name, [])
-            if not keys:
-                continue
-            count = process_component(
-                checkpoint,
-                comp_name,
-                keys,
-                output_dir,
-                FISH_COMPONENT_PREFIX[comp_name],
-                sanitizer=FISH_SANITIZERS[comp_name],
-            )
-            total += count
-
-        assert total > 0
-
-        # Only text_model and audio_decoder have keys in the fake checkpoint (no codec)
-        for comp_name in ["text_model", "audio_decoder"]:
-            out_file = output_dir / f"{comp_name}.safetensors"
-            assert out_file.exists(), f"{comp_name}.safetensors missing"
-            loaded = load_safetensors(out_file)
-            assert len(loaded) > 0
-
-    def test_key_sanitization_text_model(self, tmp_path):
-        """Text model keys have text_model.model. prefix stripped."""
-        checkpoint = _make_fish_s2_checkpoint()
-        output_dir = tmp_path / "fish-s2-sanitized"
-        output_dir.mkdir()
-
-        by_component = classify_keys(checkpoint, fish_classify_key)
-
-        process_component(
-            checkpoint,
-            "text_model",
-            by_component["text_model"],
-            output_dir,
-            FISH_COMPONENT_PREFIX["text_model"],
-            sanitizer=FISH_SANITIZERS["text_model"],
-        )
-
-        loaded = load_safetensors(output_dir / "text_model.safetensors")
-        output_keys = set(loaded.keys())
-
-        # No "text_model.model." prefix should remain
-        assert not any("text_model.model." in k for k in output_keys)
-        # All keys should have the component prefix
-        assert all(k.startswith("text_model.") for k in output_keys)
-        # Specific checks
-        assert "text_model.embeddings.weight" in output_keys
-        assert "text_model.layers.0.attention.wqkv.weight" in output_keys
-
-    def test_key_sanitization_audio_decoder(self, tmp_path):
-        """Audio decoder keys have audio_decoder. prefix stripped and re-added."""
-        checkpoint = _make_fish_s2_checkpoint()
-        output_dir = tmp_path / "fish-s2-audio"
-        output_dir.mkdir()
-
-        by_component = classify_keys(checkpoint, fish_classify_key)
-
-        process_component(
-            checkpoint,
-            "audio_decoder",
-            by_component["audio_decoder"],
-            output_dir,
-            FISH_COMPONENT_PREFIX["audio_decoder"],
-            sanitizer=FISH_SANITIZERS["audio_decoder"],
-        )
-
-        loaded = load_safetensors(output_dir / "audio_decoder.safetensors")
-        output_keys = set(loaded.keys())
-
-        assert all(k.startswith("audio_decoder.") for k in output_keys)
-        assert "audio_decoder.codebook_embeddings.weight" in output_keys
-        assert "audio_decoder.output.weight" in output_keys
-
-    def test_convert_then_quantize(self, tmp_path):
-        """Convert and quantize Fish S2 text_model; verify scales/biases."""
-        checkpoint = _make_fish_s2_checkpoint()
-        output_dir = tmp_path / "fish-s2-quant"
-        output_dir.mkdir()
-
-        by_component = classify_keys(checkpoint, fish_classify_key)
-
-        process_component(
-            checkpoint,
-            "text_model",
-            by_component["text_model"],
-            output_dir,
-            FISH_COMPONENT_PREFIX["text_model"],
-            sanitizer=FISH_SANITIZERS["text_model"],
-        )
-
-        tm_path = output_dir / "text_model.safetensors"
-        weights = load_safetensors(tm_path)
-        quantized = quantize_weights(
-            weights, bits=8, group_size=64, should_quantize=fish_s2_should_quantize
-        )
-        mx.save_safetensors(str(tm_path), quantized)
-
-        reloaded = load_safetensors(tm_path)
-        scales = [k for k in reloaded if k.endswith(".scales")]
-        biases = [k for k in reloaded if k.endswith(".biases")]
-
-        assert len(scales) > 0
-        assert len(biases) > 0
-
-        # Embeddings should NOT be quantized
-        emb_key = "text_model.embeddings.weight"
-        assert emb_key in reloaded
-        assert reloaded[emb_key].dtype != mx.uint32
-
-        # Linear weights should be quantized
-        linear_key = "text_model.layers.0.attention.wqkv.weight"
-        assert linear_key in reloaded
-        assert reloaded[linear_key].dtype == mx.uint32
-
-    def test_round_trip_values(self, tmp_path):
-        """Save and reload Fish S2 weights; verify values match."""
-        checkpoint = _make_fish_s2_checkpoint()
-        output_dir = tmp_path / "fish-s2-roundtrip"
-        output_dir.mkdir()
-
-        by_component = classify_keys(checkpoint, fish_classify_key)
-
-        process_component(
-            checkpoint,
-            "audio_decoder",
-            by_component["audio_decoder"],
-            output_dir,
-            FISH_COMPONENT_PREFIX["audio_decoder"],
-            sanitizer=FISH_SANITIZERS["audio_decoder"],
-        )
-
-        loaded = load_safetensors(output_dir / "audio_decoder.safetensors")
-
-        orig_key = "audio_decoder.codebook_embeddings.weight"
-        out_key = "audio_decoder.codebook_embeddings.weight"
-        assert out_key in loaded
-
-        orig_val = checkpoint[orig_key]
-        loaded_val = loaded[out_key]
-        assert mx.allclose(orig_val, loaded_val).item()
-
-
-# ---------------------------------------------------------------------------
 # Split pipeline integration tests
 # ---------------------------------------------------------------------------
 
@@ -602,41 +385,53 @@ class TestSplitPipeline:
         assert data["split"] is True
         assert "transformer.safetensors" in data["files"]
 
-    def test_split_fish_s2_unified(self, tmp_path):
-        """Split a fake unified Fish S2 model and verify output."""
+    def test_split_multi_component_unified(self, tmp_path):
+        """Split a unified model whose keys span several components."""
         unified = {
-            "text_model.embeddings.weight": mx.random.normal((256, 128)),
-            "text_model.layers.0.weight": mx.random.normal((128, 128)),
-            "audio_decoder.output.weight": mx.random.normal((256, 128)),
-            "audio_decoder.layers.0.weight": mx.random.normal((128, 128)),
+            "vae_encoder.conv_in.weight": mx.random.normal((256, 128)),
+            "vae_encoder.blocks.0.weight": mx.random.normal((128, 128)),
+            "vae_decoder.conv_out.weight": mx.random.normal((256, 128)),
+            "vae_decoder.blocks.0.weight": mx.random.normal((128, 128)),
         }
         mx.save_safetensors(str(tmp_path / "model.safetensors"), unified)
 
-        result = split_model(tmp_path, FISH_S2_SPLIT_MAP)
+        result = split_model(tmp_path, LTX23_SPLIT_MAP)
 
-        assert "text_model.safetensors" in result
-        assert "audio_decoder.safetensors" in result
+        assert "vae_encoder.safetensors" in result
+        assert "vae_decoder.safetensors" in result
 
         # Verify loadable
-        tm = load_safetensors(tmp_path / "text_model.safetensors")
-        assert len(tm) == 2
-        ad = load_safetensors(tmp_path / "audio_decoder.safetensors")
-        assert len(ad) == 2
+        enc = load_safetensors(tmp_path / "vae_encoder.safetensors")
+        assert len(enc) == 2
+        dec = load_safetensors(tmp_path / "vae_decoder.safetensors")
+        assert len(dec) == 2
+
+    def test_split_merges_components_sharing_one_file(self, tmp_path):
+        """Two key prefixes mapped to the same output land in one file."""
+        unified = {
+            "connector.weight": mx.random.normal((64, 64)),
+            "text_embedding_projection.weight": mx.random.normal((64, 64)),
+        }
+        mx.save_safetensors(str(tmp_path / "model.safetensors"), unified)
+
+        result = split_model(tmp_path, LTX23_SPLIT_MAP)
+
+        assert result["connector.safetensors"] == 2
 
     def test_split_model_json_content(self, tmp_path):
         """Verify split_model.json has correct structure and counts."""
         unified = {
-            "text_model.weight": mx.random.normal((64, 64)),
-            "audio_decoder.weight": mx.random.normal((64, 64)),
+            "vae_encoder.weight": mx.random.normal((64, 64)),
+            "vae_decoder.weight": mx.random.normal((64, 64)),
         }
         mx.save_safetensors(str(tmp_path / "model.safetensors"), unified)
 
-        split_model(tmp_path, FISH_S2_SPLIT_MAP)
+        split_model(tmp_path, LTX23_SPLIT_MAP)
 
         data = json.loads((tmp_path / "split_model.json").read_text())
         assert data["split"] is True
-        assert data["files"]["text_model.safetensors"] == 1
-        assert data["files"]["audio_decoder.safetensors"] == 1
+        assert data["files"]["vae_encoder.safetensors"] == 1
+        assert data["files"]["vae_decoder.safetensors"] == 1
 
     def test_split_round_trip_values(self, tmp_path):
         """Values survive the split pipeline unchanged."""
@@ -686,34 +481,34 @@ class TestQuantizationIntegration:
     def test_4bit_quantization(self, tmp_path):
         """4-bit quantization produces valid output."""
         weights = {
-            "layers.0.attention.wqkv.weight": mx.random.normal((256, 256)),
-            "layers.0.attention_norm.weight": mx.random.normal((256,)),
+            "transformer_blocks.0.attn1.to_qkv.weight": mx.random.normal((256, 256)),
+            "transformer_blocks.0.norm1.weight": mx.random.normal((256,)),
         }
 
         quantized = quantize_weights(
-            weights, bits=4, group_size=64, should_quantize=fish_s2_should_quantize
+            weights, bits=4, group_size=64, should_quantize=ltx23_should_quantize
         )
 
-        assert "layers.0.attention.wqkv.scales" in quantized
-        assert "layers.0.attention.wqkv.biases" in quantized
-        assert quantized["layers.0.attention.wqkv.weight"].dtype == mx.uint32
+        assert "transformer_blocks.0.attn1.to_qkv.scales" in quantized
+        assert "transformer_blocks.0.attn1.to_qkv.biases" in quantized
+        assert quantized["transformer_blocks.0.attn1.to_qkv.weight"].dtype == mx.uint32
 
         # norm weight should be untouched
-        assert quantized["layers.0.attention_norm.weight"].dtype != mx.uint32
+        assert quantized["transformer_blocks.0.norm1.weight"].dtype != mx.uint32
 
     def test_quantize_skips_incompatible_shapes(self):
         """Weights with last dim not divisible by group_size are skipped."""
         weights = {
-            "layers.0.attention.wqkv.weight": mx.random.normal((256, 100)),
+            "transformer_blocks.0.attn1.to_qkv.weight": mx.random.normal((256, 100)),
         }
 
         quantized = quantize_weights(
-            weights, bits=8, group_size=64, should_quantize=fish_s2_should_quantize
+            weights, bits=8, group_size=64, should_quantize=ltx23_should_quantize
         )
 
         # Should be kept as-is (not quantized) because 100 % 64 != 0
-        assert "layers.0.attention.wqkv.weight" in quantized
-        assert "layers.0.attention.wqkv.scales" not in quantized
+        assert "transformer_blocks.0.attn1.to_qkv.weight" in quantized
+        assert "transformer_blocks.0.attn1.to_qkv.scales" not in quantized
 
 
 # ---------------------------------------------------------------------------

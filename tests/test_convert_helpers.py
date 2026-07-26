@@ -133,3 +133,55 @@ class TestLoadTorchStateDict:
         with pytest.raises(SystemExit) as exc_info:
             load_torch_state_dict(path)
         assert "PyTorch is required" in str(exc_info.value)
+
+
+class TestShardFilenames:
+    """No recipe calls this since fish-s2-pro was removed; tested so it can't rot."""
+
+    def test_single_shard(self):
+        from mlx_forge.convert import shard_filenames
+
+        assert shard_filenames(1) == [
+            "model-00001-of-00001.safetensors",
+            "model.safetensors.index.json",
+        ]
+
+    def test_multi_shard_is_zero_padded(self):
+        from mlx_forge.convert import shard_filenames
+
+        names = shard_filenames(3)
+        assert names[:3] == [
+            "model-00001-of-00003.safetensors",
+            "model-00002-of-00003.safetensors",
+            "model-00003-of-00003.safetensors",
+        ]
+
+    def test_index_file_is_last(self):
+        from mlx_forge.convert import shard_filenames
+
+        assert shard_filenames(2)[-1] == "model.safetensors.index.json"
+
+    def test_custom_prefix(self):
+        from mlx_forge.convert import shard_filenames
+
+        names = shard_filenames(2, prefix="diffusion_pytorch_model")
+        assert names[0] == "diffusion_pytorch_model-00001-of-00002.safetensors"
+        assert names[-1] == "diffusion_pytorch_model.safetensors.index.json"
+
+    def test_matches_what_load_weights_expects(self, tmp_path):
+        """The generated index name is the one load_weights() looks for."""
+        import json
+
+        import mlx.core as mx
+
+        from mlx_forge.convert import load_weights, shard_filenames
+
+        names = shard_filenames(2)
+        for shard in names[:-1]:
+            mx.save_safetensors(str(tmp_path / shard), {f"w_{shard[6:11]}": mx.ones((2, 2))})
+        (tmp_path / names[-1]).write_text(
+            json.dumps({"weight_map": {f"w_{s[6:11]}": s for s in names[:-1]}})
+        )
+
+        weights = load_weights(tmp_path)
+        assert set(weights) == {"w_00001", "w_00002"}

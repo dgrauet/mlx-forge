@@ -130,4 +130,3 @@ To remove: rm '/path/to/model.safetensors'
 ## Model-Specific Guides
 
 - [LTX-2.3](models/ltx-2.3.md#split-component-map) — component map and output files
-- [Fish S2 Pro](models/fish-s2-pro.md#output-files) — output files
