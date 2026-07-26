@@ -309,12 +309,22 @@ def _copy_pipeline_files(source_dir: Path, output_dir: Path) -> None:
     original names so downstream tools (e.g. mflux TokenizerLoader, Hugging
     Face AutoTokenizer) can load them without extra path mapping.  All other
     subdirectory files are written flat with a ``{prefix}_`` name.
+
+    Strict on purpose, like every other recipe since #32/#34: a silent
+    ``if not src.exists(): continue`` shipped incomplete artifacts twice, and a
+    WARNING scrolling past mid-conversion is not a failure signal. Missing
+    files abort before anything is copied, naming all of them at once — so no
+    partial output directory is left behind either.
     """
+    missing = [f for f in _HF_CONFIG_FILES if not (source_dir / f).exists()]
+    if missing:
+        raise SystemExit(
+            "ERROR: required pipeline files missing from source: "
+            + ", ".join(missing)
+            + f" (looked in {source_dir})"
+        )
     for config_file in _HF_CONFIG_FILES:
         src = source_dir / config_file
-        if not src.exists():
-            print(f"  WARNING: {config_file} not found, skipping")
-            continue
         if config_file.startswith("tokenizer/"):
             dest = output_dir / config_file
             dest.parent.mkdir(parents=True, exist_ok=True)

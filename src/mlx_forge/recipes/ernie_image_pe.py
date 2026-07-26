@@ -333,6 +333,8 @@ def validate(args) -> None:
 
     print("\n" + "=" * 60)
     result.summary()
+    if not result.passed:
+        raise SystemExit(1)
 
 
 # ---------------------------------------------------------------------------
