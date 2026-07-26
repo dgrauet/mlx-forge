@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1](https://github.com/dgrauet/mlx-forge/compare/v0.4.0...v0.4.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **recipes:** exit non-zero on failed validation, abort on missing ideogram files ([#49](https://github.com/dgrauet/mlx-forge/issues/49)) ([8c9901e](https://github.com/dgrauet/mlx-forge/commit/8c9901e85c09786b318566e8cfbaa08e4370031f))
+
+
+### Documentation
+
+* list every supported recipe and pin the docs to the registry ([#47](https://github.com/dgrauet/mlx-forge/issues/47)) ([5c19cd8](https://github.com/dgrauet/mlx-forge/commit/5c19cd86c92effff7e84d3a309408d7e3e4804ee))
+
 ## [0.4.0](https://github.com/dgrauet/mlx-forge/compare/v0.3.6...v0.4.0) (2026-07-26)
 
 
