@@ -226,7 +226,6 @@ def convert(args) -> None:
                 bits=args.bits,
                 group_size=args.group_size,
                 should_quantize=should_quantize_transformer,
-                filename=pass_file,
             )
 
         qconfig = {

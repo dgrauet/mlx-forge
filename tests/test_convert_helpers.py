@@ -185,3 +185,51 @@ class TestShardFilenames:
 
         weights = load_weights(tmp_path)
         assert set(weights) == {"w_00001", "w_00002"}
+
+
+class TestQuantizeComponentFilename:
+    """`filename=` exists for files not named after their component (LTX variants)."""
+
+    def _model(self, tmp_path, name):
+        import mlx.core as mx
+
+        mx.save_safetensors(
+            str(tmp_path / name),
+            {"blocks.0.attn.weight": mx.ones((64, 128)), "blocks.0.norm.weight": mx.ones((64,))},
+        )
+
+    def test_override_targets_the_named_file(self, tmp_path):
+        from mlx_forge.convert import load_safetensors, quantize_component
+        from mlx_forge.quantize import default_should_quantize
+
+        self._model(tmp_path, "transformer-distilled.safetensors")
+
+        quantize_component(
+            tmp_path,
+            "transformer (distilled)",
+            bits=8,
+            should_quantize=default_should_quantize,
+            filename="transformer-distilled.safetensors",
+        )
+
+        out = load_safetensors(tmp_path / "transformer-distilled.safetensors")
+        assert "blocks.0.attn.scales" in out, "the override file was not quantized"
+
+    def test_without_override_the_component_name_is_used(self, tmp_path):
+        from mlx_forge.convert import load_safetensors, quantize_component
+        from mlx_forge.quantize import default_should_quantize
+
+        self._model(tmp_path, "encoder.safetensors")
+
+        quantize_component(tmp_path, "encoder", bits=8, should_quantize=default_should_quantize)
+
+        assert "blocks.0.attn.scales" in load_safetensors(tmp_path / "encoder.safetensors")
+
+    def test_missing_file_warns_instead_of_crashing(self, tmp_path, capsys):
+        """vjepa-2.0's local copy lacked this guard and raised instead."""
+        from mlx_forge.convert import quantize_component
+        from mlx_forge.quantize import default_should_quantize
+
+        quantize_component(tmp_path, "absent", bits=8, should_quantize=default_should_quantize)
+
+        assert "not found" in capsys.readouterr().out

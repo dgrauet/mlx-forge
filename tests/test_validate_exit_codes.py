@@ -35,13 +35,17 @@ def test_validate_exits_nonzero_on_an_empty_model_dir(recipe_name: str, tmp_path
 
 
 @pytest.mark.parametrize("recipe_name", RECIPE_NAMES)
-def test_validate_exits_nonzero_on_a_missing_model_dir(recipe_name: str, tmp_path):
+def test_validate_exits_nonzero_on_a_missing_model_dir(recipe_name: str, tmp_path, capsys):
     module = importlib.import_module(AVAILABLE_RECIPES[recipe_name])
 
     with pytest.raises(SystemExit) as exc_info:
         module.validate(argparse.Namespace(model_dir=str(tmp_path / "does-not-exist")))
 
     assert exc_info.value.code == 1
+    # A missing directory must be named as such. Without the guard the run
+    # still exits 1, but only after a cascade of confusing check failures —
+    # so asserting the exit code alone does not cover this.
+    assert "does not exist" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("recipe_name", RECIPE_NAMES)
