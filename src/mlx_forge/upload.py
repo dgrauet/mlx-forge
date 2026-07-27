@@ -105,6 +105,16 @@ def derive_repo_id(
     return f"{namespace}/{repo_name}"
 
 
+#: Not part of the model: the card itself, and files the Hub creates. The local
+#: listing never contained these, but the remote one does, so filter here too.
+_CARD_EXCLUDED = frozenset({"README.md", ".gitattributes", ".gitignore"})
+
+
+def _is_plumbing(name: str) -> bool:
+    """Whether a repo path is Hub/Git plumbing rather than model content."""
+    return name in _CARD_EXCLUDED or name.split("/")[-1].startswith(".")
+
+
 def generate_model_card(
     model_dir: Path,
     *,
@@ -171,7 +181,7 @@ def generate_model_card(
     model_files = [
         type("F", (), {"name": name, "size_str": format_bytes(size)})()
         for name, size in sorted(file_listing.items())
-        if name != "README.md"
+        if not _is_plumbing(name)
     ]
 
     template_text = files("mlx_forge.templates").joinpath("model-card.md.j2").read_text()

@@ -194,7 +194,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Bash snippet to embed in the model card's Usage section as a code block. "
-            "Use this to show how to install and run the downstream inference CLI."
+            "Published verbatim and now persisted in split_model.json, so it is "
+            "reused by every later --card-only refresh: only reference a package or "
+            "command that actually exists."
         ),
     )
     mode_group = upload_parser.add_mutually_exclusive_group()

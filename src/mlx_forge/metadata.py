@@ -30,7 +30,9 @@ class RecipeMetadata:
             for the auto-derived repo name.
         links: Related projects, each "Label: URL".
         usage_url: Inference project that consumes these weights.
-        cli_snippet: Bash shown in the card's Usage section.
+        cli_snippet: Bash shown in the card's Usage section. Published
+            verbatim on the Hub — only reference a package or command that
+            actually exists, and remember it now persists across refreshes.
     """
 
     source: str

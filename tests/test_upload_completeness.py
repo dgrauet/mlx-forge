@@ -358,3 +358,45 @@ class TestCardOnlyCarriesMetadata:
         upload_model(model_dir, api=api, repo_id="test/repo", card_only=True)
 
         assert [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list] == ["README.md"]
+
+
+class TestCardExcludesHubPlumbing:
+    """The remote listing contains files the local one never did."""
+
+    def test_gitattributes_is_not_listed(self, tmp_path):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="u/m",
+            file_listing={".gitattributes": 1519, "model.safetensors": 100},
+        )
+        assert ".gitattributes" not in card
+        assert "model.safetensors" in card
+
+    def test_readme_is_not_listed(self, tmp_path):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="u/m",
+            file_listing={"README.md": 900, "model.safetensors": 100},
+        )
+        assert "`README.md`" not in card
+
+    def test_nested_dotfiles_are_not_listed(self, tmp_path):
+        from mlx_forge.upload import generate_model_card
+
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="u/m",
+            file_listing={"tokenizer/.DS_Store": 6148, "tokenizer/spiece.model": 100},
+        )
+        assert ".DS_Store" not in card
+        assert "tokenizer/spiece.model" in card
