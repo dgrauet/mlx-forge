@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4](https://github.com/dgrauet/mlx-forge/compare/v0.4.3...v0.4.4) (2026-07-27)
+
+
+### Features
+
+* **recipes:** declare publication metadata instead of retyping it as flags ([#58](https://github.com/dgrauet/mlx-forge/issues/58)) ([ae01f35](https://github.com/dgrauet/mlx-forge/commit/ae01f359cafe506ae3f29c6ee0118045245c3c42))
+
+
+### Bug Fixes
+
+* **upload:** keep Hub plumbing out of the card, and warn about --cli-snippet ([#60](https://github.com/dgrauet/mlx-forge/issues/60)) ([e193938](https://github.com/dgrauet/mlx-forge/commit/e193938b2748868db7fa67e495420b4534db336d))
+
+
+### Documentation
+
+* map what varies between recipes, and why ([#57](https://github.com/dgrauet/mlx-forge/issues/57)) ([74663dc](https://github.com/dgrauet/mlx-forge/commit/74663dc49ab357d947576a2f383011b5ccf2fa9b))
+
 ## [0.4.3](https://github.com/dgrauet/mlx-forge/compare/v0.4.2...v0.4.3) (2026-07-26)
 
 
