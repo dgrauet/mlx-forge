@@ -49,6 +49,8 @@ them is drifting.
 | Record / read quantization | `quantize.write_quantize_config` / `read_quantize_config` |
 | Open / close a validation run | `validate.start_validation` / `finish_validation` |
 | Conv layout | `transpose.transpose_conv` |
+| Publication metadata | `metadata.RecipeMetadata` |
+| Persist operator-supplied card metadata | `upload.persist_card_metadata` |
 
 Each of these replaced between 2 and 17 hand-written copies. Three latent
 defects were found in the process — the copies had drifted:
@@ -84,24 +86,24 @@ identically everywhere.
 
 ---
 
-## Not yet declarative
+## Declarative metadata
 
-This is the remaining accidental variation, and where the "why is this
-per-recipe?" feeling now comes from. Card and repo metadata are passed as CLI
-flags at upload time instead of being declared once by the recipe.
+Each recipe declares a `RecipeMetadata` (`src/mlx_forge/metadata.py`):
 
-| Metadata | Declared by the recipe? | Consequence |
-|---|---|---|
-| `source` (→ `base_model` on the Hub) | 9 of 10 (not vjepa-2.0) | the published cards do not track the code either way — see below |
-| `links` | 1 of 10 (matrix-game) | operator must re-pass `--link` on every refresh |
-| `usage_url` | 0 of 10 | idem |
-| `cli_snippet` | **not persisted anywhere** | a `--card-only` refresh **silently drops the Usage section** |
+```python
+METADATA = RecipeMetadata(
+    source="Skywork/Matrix-Game-3.0",
+    links=["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
+)
+```
 
-That last row is a live defect: `CLAUDE.md` documents `--card-only` as
-idempotent ("re-running always produces a card matching the current remote
-state"), but `cli_snippet` is the one card variable with no fallback, so
-regenerating without re-passing `--cli-snippet` publishes a card missing the
-section.
+`convert` persists it into `split_model.json`; `upload` reads it back for the
+card. Operator flags still win for one-offs, and anything they pass
+(`--usage-url`, `--link`, `--cli-snippet`) is written back so the next
+`--card-only` refresh keeps it.
+
+This replaced metadata that lived only in CLI flags, which is why the published
+cards below track neither the recipe nor a rule.
 
 ### Evidence from the published cards
 
@@ -141,30 +143,28 @@ Concretely:
   flags, and it is why a declarative source of truth is the fix rather than
   more flags.
 
-The first row is largely addressed for *future* uploads (the card now lists
-what the upload publishes), but two structural issues remain:
+All of the above is fixed for *future* uploads: the card lists what the upload
+publishes, its file list is derived from the remote merged with what is about
+to go up (so a delta upload no longer produces a card that contradicts its own
+variant list), and `source` / `cli_snippet` now persist. Two caveats remain:
 
-1. **Sections have inconsistent provenance.** `transformer_variants` is
-   derived from the *remote* repo, `model_files` from the *local* directory,
-   `cli_snippet` from the *command line*. A `--card-only` refresh after a delta
-   upload therefore produces a card whose variant list and file list disagree,
-   which is exactly what `ltx-2.3-mlx-q8` shows.
-2. Every already-published card stays stale until its model is re-uploaded.
+1. **`vjepa-2.0` still writes no `source`.** Its `split_model.json` top-level
+   keys *are* its component table, so adding a key changes what a downstream
+   loader iterating that file sees. Its `METADATA` is declared and ready; the
+   consumer needs checking first.
+2. **Every already-published card stays stale** until its model is
+   re-uploaded, or refreshed with `mlx-forge upload <dir> --card-only`.
 
 `split_model.json` also has three incompatible schemas — most recipes write
 `{format, components, source, …}`, vjepa-2.0 a flat `{component: filename}`
 table, vjepa-2.1 a `{model_name, components, quantized}` record, and
-void-model writes none at all (so `mlx-forge upload` on it fails without
-`--repo-id`).
+void-model wrote none at all until it was given one (without it,
+`mlx-forge upload` on a void model refused to run without `--repo-id`).
 
-**The fix is not to unify those schemas.** Their non-common fields have no
-reader, and rewriting them would change metadata already published on the Hub.
-The fix is a declarative `RecipeMetadata` per recipe — source, links, usage
-URL, CLI snippet — persisted at convert time and read back at upload time, with
-CLI flags still overriding for one-offs. That is additive, so existing
-consumers keep working. Paired with it, the card's Files section should be
-derived from the *remote* listing like `transformer_variants` already is, so
-every section of a card describes the same repo.
+**Those schemas are deliberately not unified.** Their non-common fields have
+no reader, and rewriting them would change metadata already published on the
+Hub. `RecipeMetadata` adds the fields that *are* read, additively, so existing
+consumers keep working.
 
 One caution: **vjepa-2.0's top-level keys *are* its component table.** Adding
 any key there changes what a downstream loader iterating the file sees. That
