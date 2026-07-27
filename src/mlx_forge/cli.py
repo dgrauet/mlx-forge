@@ -295,6 +295,31 @@ def _run_generic_quantize(args) -> None:
     )
 
 
+def _card_file_listing(api, repo_id: str, model_dir) -> dict[str, int]:
+    """What the repo will contain: the remote listing plus what is about to go up.
+
+    The card's other derived section (transformer_variants) already reads the
+    remote, so deriving the file list from the local directory alone produced
+    cards that contradicted themselves after a delta upload.
+    """
+    from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
+
+    from .upload import iter_model_files
+
+    listing: dict[str, int] = {}
+    try:
+        info = api.model_info(repo_id, files_metadata=True)
+        for sibling in info.siblings or []:
+            if sibling.size is not None:
+                listing[sibling.rfilename] = sibling.size
+    except (RepositoryNotFoundError, HfHubHTTPError, OSError, ConnectionError):
+        pass  # new repo, or offline: the local directory is the whole story
+
+    for p in iter_model_files(model_dir):
+        listing[p.relative_to(model_dir).as_posix()] = p.stat().st_size
+    return listing
+
+
 def _run_upload(args) -> None:
     """Upload a converted model directory to HuggingFace Hub."""
     from pathlib import Path
@@ -305,6 +330,7 @@ def _run_upload(args) -> None:
         derive_repo_id,
         generate_model_card,
         load_model_metadata,
+        persist_card_metadata,
         upload_model,
     )
 
@@ -338,6 +364,20 @@ def _run_upload(args) -> None:
 
     print(f"Repo ID: {repo_id}")
 
+    # Record anything the operator supplied, so a later --card-only refresh
+    # does not silently drop it.
+    split_info = persist_card_metadata(
+        model_dir,
+        split_info,
+        usage_url=args.usage_url,
+        links=args.link,
+        cli_snippet=args.cli_snippet,
+    )
+
+    # Describe the repo as it will be, not just the local directory: after a
+    # delta upload the remote holds files this directory never had.
+    file_listing = _card_file_listing(api, repo_id, model_dir)
+
     # Generate and write model card
     card_content = generate_model_card(
         model_dir,
@@ -348,7 +388,8 @@ def _run_upload(args) -> None:
         license_id=args.license,
         usage_url=args.usage_url or split_info.get("usage_url"),
         links=args.link or split_info.get("links"),
-        cli_snippet=args.cli_snippet,
+        cli_snippet=args.cli_snippet or split_info.get("cli_snippet"),
+        file_listing=file_listing,
     )
     readme_path = model_dir / "README.md"
     with open(readme_path, "w") as f:

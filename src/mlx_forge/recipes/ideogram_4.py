@@ -42,6 +42,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
@@ -120,6 +121,11 @@ _ALL_HF_FILES = (
 # ---------------------------------------------------------------------------
 # FP8 dequantization
 # ---------------------------------------------------------------------------
+
+
+METADATA = RecipeMetadata(
+    source=REPO_ID,
+)
 
 
 def _dequantize_fp8(weights: dict[str, mx.array]) -> dict[str, mx.array]:
@@ -430,7 +436,7 @@ def convert(args) -> None:
     split_info: dict = {
         "format": "split",
         "components": COMPONENTS,
-        "source": REPO_ID,
+        **METADATA.as_split_fields(),
         "quantized": False,
     }
     write_split_model(output_dir, split_info)

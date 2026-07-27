@@ -35,6 +35,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
@@ -128,6 +129,12 @@ _DIT_SEQUENTIAL_MAP: list[tuple[str, str]] = [
     (".action_model.mouse_mlp.2.", ".action_model.mouse_mlp_linear2."),
     (".action_model.mouse_mlp.3.", ".action_model.mouse_mlp_layernorm."),
 ]
+
+
+METADATA = RecipeMetadata(
+    source=REPO_ID,
+    links=["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
+)
 
 
 def sanitize_dit_key(key: str) -> str | None:
@@ -649,8 +656,7 @@ def convert(args) -> None:
     split_info: dict = {
         "format": "split",
         "components": COMPONENTS,
-        "source": REPO_ID,
-        "links": ["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
+        **METADATA.as_split_fields(),
     }
     write_split_model(output_dir, split_info)
 

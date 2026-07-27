@@ -145,12 +145,19 @@ class TestAddOnlyCompleteness:
 
 
 class TestCardOnlyUnaffected:
-    def test_card_only_still_pushes_just_the_readme(self, tmp_path):
+    def test_card_only_never_repushes_the_weights(self, tmp_path):
+        """The point of --card-only: refresh metadata without re-hashing GBs.
+
+        It pushes README.md and split_model.json (the card's metadata carrier),
+        and nothing else.
+        """
         api = _api()
         upload_model(_model_dir(tmp_path), api=api, repo_id="test/repo", card_only=True)
 
         api.upload_folder.assert_not_called()
-        assert api.upload_file.call_args.kwargs["path_in_repo"] == "README.md"
+        pushed = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert not any(p.endswith(".safetensors") for p in pushed)
+        assert "README.md" in pushed
 
 
 @pytest.mark.parametrize("mode", ["full", "add_only"])
@@ -208,3 +215,146 @@ class TestModelCardFileListing:
 
         assert first == self._card(model_dir), "card is not idempotent across runs"
         assert "`README.md`" not in first
+
+
+class TestCardMetadataPersistence:
+    """Operator-supplied card metadata must survive a --card-only refresh.
+
+    `links` and `usage_url` already fell back to split_model.json; `cli_snippet`
+    did not, so refreshing a card without re-typing --cli-snippet republished it
+    without its Usage section. Measured on the Hub: matrix-game-3.0-mlx has no
+    Usage section at all.
+    """
+
+    def test_snippet_is_persisted_for_later_refreshes(self, tmp_path):
+        import json
+
+        from mlx_forge.upload import persist_card_metadata
+
+        (tmp_path / "split_model.json").write_text(json.dumps({"source": "Org/M"}))
+
+        persist_card_metadata(
+            tmp_path,
+            {"source": "Org/M"},
+            usage_url=None,
+            links=None,
+            cli_snippet="pip install thing\nthing run",
+        )
+
+        stored = json.loads((tmp_path / "split_model.json").read_text())
+        assert stored["cli_snippet"] == "pip install thing\nthing run"
+        assert stored["source"] == "Org/M", "existing fields must survive"
+
+    def test_refresh_without_the_flag_keeps_the_usage_section(self, tmp_path):
+        import json
+
+        from mlx_forge.upload import generate_model_card, persist_card_metadata
+
+        (tmp_path / "split_model.json").write_text(json.dumps({"source": "Org/M"}))
+        info = persist_card_metadata(
+            tmp_path,
+            {"source": "Org/M"},
+            usage_url=None,
+            links=None,
+            cli_snippet="pip install thing",
+        )
+        first = generate_model_card(
+            tmp_path,
+            split_info=info,
+            config={},
+            repo_id="u/m",
+            cli_snippet=info.get("cli_snippet"),
+        )
+
+        # later: mlx-forge upload --card-only, no flags
+        reloaded = json.loads((tmp_path / "split_model.json").read_text())
+        refreshed = generate_model_card(
+            tmp_path,
+            split_info=reloaded,
+            config={},
+            repo_id="u/m",
+            cli_snippet=reloaded.get("cli_snippet"),
+        )
+
+        assert "pip install thing" in first
+        assert "pip install thing" in refreshed
+
+    def test_nothing_written_when_no_metadata_supplied(self, tmp_path):
+        from mlx_forge.upload import persist_card_metadata
+
+        info = persist_card_metadata(
+            tmp_path, {"source": "Org/M"}, usage_url=None, links=None, cli_snippet=None
+        )
+        assert info == {"source": "Org/M"}
+        assert not (tmp_path / "split_model.json").exists()
+
+
+class TestCardFileListingProvenance:
+    """Every section of a card must describe the same repo.
+
+    transformer_variants is derived from the remote, model_files was derived
+    from the local directory. After a delta upload the two disagree: the
+    published ltx-2.3-mlx-q8 card never mentions the 1.1 transformer or LoRA
+    that --add-only put in the repo.
+    """
+
+    def test_remote_only_files_are_listed(self, tmp_path):
+        from mlx_forge.upload import generate_model_card
+
+        (tmp_path / "transformer-dev.safetensors").write_bytes(b"x" * 10)
+
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="u/ltx",
+            file_listing={"transformer-distilled-1.1.safetensors": 2048},
+        )
+
+        assert "transformer-distilled-1.1.safetensors" in card, (
+            "a file added by a delta upload must appear in the card"
+        )
+
+    def test_local_files_still_listed(self, tmp_path):
+        from mlx_forge.upload import generate_model_card
+
+        (tmp_path / "transformer-dev.safetensors").write_bytes(b"x" * 10)
+        card = generate_model_card(
+            tmp_path,
+            split_info={},
+            config={},
+            repo_id="u/ltx",
+            file_listing={"transformer-dev.safetensors": 10},
+        )
+        assert "transformer-dev.safetensors" in card
+
+    def test_falls_back_to_the_local_directory(self, tmp_path):
+        """No listing supplied (fresh repo): behave as before."""
+        from mlx_forge.upload import generate_model_card
+
+        (tmp_path / "a.safetensors").write_bytes(b"x" * 10)
+        assert "a.safetensors" in generate_model_card(
+            tmp_path, split_info={}, config={}, repo_id="u/m"
+        )
+
+
+class TestCardOnlyCarriesMetadata:
+    def test_split_model_is_pushed_alongside_the_readme(self, tmp_path):
+        model_dir = _model_dir(tmp_path)
+        api = _api()
+
+        upload_model(model_dir, api=api, repo_id="test/repo", card_only=True)
+
+        pushed = [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list]
+        assert pushed == ["README.md", "split_model.json"], (
+            "metadata recorded for the next refresh must reach the remote"
+        )
+
+    def test_absent_split_model_is_not_invented(self, tmp_path):
+        model_dir = _model_dir(tmp_path)
+        (model_dir / "split_model.json").unlink()
+        api = _api()
+
+        upload_model(model_dir, api=api, repo_id="test/repo", card_only=True)
+
+        assert [c.kwargs["path_in_repo"] for c in api.upload_file.call_args_list] == ["README.md"]

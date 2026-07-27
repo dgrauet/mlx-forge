@@ -61,6 +61,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import needs_transpose, transpose_conv
 from ..validate import (
@@ -135,6 +136,9 @@ ALL_CHECKPOINT_FILES = TRANSFORMER_FILES + TEXT_ENCODER_FILES + VAE_FILES + CONF
 # ---------------------------------------------------------------------------
 # Sanitization — translates PyTorch keys to MLX names (matches runtime loader)
 # ---------------------------------------------------------------------------
+
+
+METADATA = RecipeMetadata(source=REPO_TURBO)
 
 
 def _sanitize_transformer_key(key: str) -> str:
@@ -418,7 +422,7 @@ def convert(args) -> None:
 
     split_info: dict = {
         "format": "split",
-        "source": repo_id,
+        **METADATA.with_source(repo_id).as_split_fields(),
         "variant": variant,
         "components": COMPONENTS,
     }

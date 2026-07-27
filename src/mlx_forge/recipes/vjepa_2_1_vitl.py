@@ -63,6 +63,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 
@@ -129,6 +130,11 @@ _KNOWN_PREFIXES = ("module.", "encoder.", "target_encoder.", "backbone.")
 # --------------------------------------------------------------------------- #
 # Checkpoint loading + unwrapping
 # --------------------------------------------------------------------------- #
+
+
+METADATA = RecipeMetadata(
+    source="facebookresearch/vjepa2 (app/vjepa_2_1)",
+)
 
 
 def _load_torch_checkpoint(src_path: Path) -> dict[str, Any]:
@@ -362,7 +368,7 @@ def convert(args) -> None:
     # ================================================================== #
     config = {
         "model_type": "vjepa-2.1-vitl",
-        "source": "facebookresearch/vjepa2 (app/vjepa_2_1)",
+        **METADATA.as_split_fields(),
         "variant": "vit-l-rope",
         "architecture": "VisionTransformer",
         # Encoder params

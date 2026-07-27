@@ -48,6 +48,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import read_quantize_config, write_quantize_config
 from ..validate import (
     finish_validation,
@@ -87,6 +88,11 @@ _PE_SIZE_MB = 7700  # ~7.1 GB fp16 single-shard safetensors
 # ---------------------------------------------------------------------------
 # Sanitization — none needed, HF keys already match mlx-lm layout
 # ---------------------------------------------------------------------------
+
+
+METADATA = RecipeMetadata(
+    source=REPO_SOURCE + "/pe",
+)
 
 
 def _sanitize_pe_key(key: str) -> str:
@@ -247,7 +253,7 @@ def convert(args) -> None:
 
     split_info: dict = {
         "format": "split",
-        "source": REPO_SOURCE + "/pe",
+        **METADATA.as_split_fields(),
         "components": ["pe"],
     }
     if args.quantize:

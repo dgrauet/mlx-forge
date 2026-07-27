@@ -17,6 +17,7 @@ os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
+from .convert import SPLIT_MODEL_FILENAME, write_split_model
 from .quantize import format_bytes
 
 
@@ -117,6 +118,7 @@ def generate_model_card(
     cli_snippet: str | None = None,
     transformer_variants: list[str] | None = None,
     lora_files: list[str] | None = None,
+    file_listing: dict[str, int] | None = None,
 ) -> str:
     """Render the model card from ``templates/model-card.md.j2``.
 
@@ -159,21 +161,18 @@ def generate_model_card(
     # README.md is excluded: it is written after this runs, so listing it would
     # make a first upload and a later --card-only refresh produce different
     # cards for the same model.
-    model_files = []
-    if model_dir.exists():
-        for p in iter_model_files(model_dir):
-            if p.name == "README.md":
-                continue
-            model_files.append(
-                type(
-                    "F",
-                    (),
-                    {
-                        "name": p.relative_to(model_dir).as_posix(),
-                        "size_str": format_bytes(p.stat().st_size),
-                    },
-                )()
-            )
+    if file_listing is None:
+        file_listing = {}
+        if model_dir.exists():
+            file_listing = {
+                p.relative_to(model_dir).as_posix(): p.stat().st_size
+                for p in iter_model_files(model_dir)
+            }
+    model_files = [
+        type("F", (), {"name": name, "size_str": format_bytes(size)})()
+        for name, size in sorted(file_listing.items())
+        if name != "README.md"
+    ]
 
     template_text = files("mlx_forge.templates").joinpath("model-card.md.j2").read_text()
     env = Environment(trim_blocks=True, lstrip_blocks=True, keep_trailing_newline=True)
@@ -234,6 +233,36 @@ def iter_model_files(model_dir: Path) -> list[Path]:
         for p in model_dir.rglob("*")
         if p.is_file() and not _is_ignored(p.relative_to(model_dir).as_posix())
     )
+
+
+def persist_card_metadata(
+    model_dir: Path,
+    split_info: dict,
+    *,
+    usage_url: str | None,
+    links: list[str] | None,
+    cli_snippet: str | None,
+) -> dict:
+    """Store operator-supplied card metadata so a later refresh keeps it.
+
+    `--card-only` is documented as idempotent, but a flag typed once lives only
+    in that invocation: refreshing without re-typing --cli-snippet republished
+    the card with its Usage section gone. Anything the operator passes is
+    written back into split_model.json, which the upload then carries.
+
+    Returns:
+        The updated split_info (unchanged, and nothing written, if no metadata
+        was supplied).
+    """
+    supplied = {"usage_url": usage_url, "links": links, "cli_snippet": cli_snippet}
+    new = {k: v for k, v in supplied.items() if v and split_info.get(k) != v}
+    if not new:
+        return split_info
+
+    merged = {**split_info, **new}
+    write_split_model(model_dir, merged)
+    print(f"Recorded in split_model.json: {', '.join(sorted(new))}")
+    return merged
 
 
 def upload_model(
@@ -375,6 +404,17 @@ def upload_model(
                 repo_id=repo_id,
                 commit_message=commit_message,
             )
+            # Card metadata the operator just supplied lives in split_model.json;
+            # without this it would stay local and the next refresh would lose it.
+            split_path = model_dir / SPLIT_MODEL_FILENAME
+            if split_path.exists():
+                print(f"Uploading {SPLIT_MODEL_FILENAME} -> {repo_id}...")
+                api.upload_file(
+                    path_or_fileobj=str(split_path),
+                    path_in_repo=SPLIT_MODEL_FILENAME,
+                    repo_id=repo_id,
+                    commit_message=commit_message,
+                )
         else:
             # The upload is a deny-list, so anything left in the directory goes
             # up. Show what that is before pushing — a stray source checkpoint

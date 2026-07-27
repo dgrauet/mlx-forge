@@ -39,7 +39,9 @@ from ..convert import (
     load_safetensors,
     print_output_summary,
     quantize_component,
+    write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 
 REPO_ID = "netflix/void-model"
@@ -57,6 +59,11 @@ _PASS_SIZE_MB = 9_500  # ~9.5 GB each
 # ---------------------------------------------------------------------------
 # Key sanitization
 # ---------------------------------------------------------------------------
+
+
+METADATA = RecipeMetadata(
+    source=REPO_ID,
+)
 
 
 def sanitize_key(key: str) -> str | None:
@@ -218,6 +225,18 @@ def convert(args) -> None:
     with open(output_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
+
+    # Without this, `mlx-forge upload models/void-model-mlx` cannot derive the
+    # repo name and refuses to run unless --repo-id is passed by hand.
+    write_split_model(
+        output_dir,
+        {
+            "format": "split",
+            "components": [Path(f).stem for f in PASS_FILES],
+            **METADATA.as_split_fields(),
+        },
+    )
+    print("Saved split_model.json")
 
     # -----------------------------------------------------------------------
     # Optional quantization (transformer weights only)

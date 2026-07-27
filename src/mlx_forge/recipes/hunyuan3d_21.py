@@ -31,6 +31,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize
 from ..transpose import needs_transpose, transpose_conv
 from ..validate import (
@@ -72,6 +73,11 @@ PAINT_FILES = [
 # ---------------------------------------------------------------------------
 # Shape stage — key sanitization (unchanged from original)
 # ---------------------------------------------------------------------------
+
+
+METADATA = RecipeMetadata(
+    source=HF_REPO_ID,
+)
 
 
 def sanitize_dit_key(key: str) -> str | None:
@@ -615,7 +621,7 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
 
     split_model: dict[str, Any] = {
         "model_type": "hunyuan3d-2.1",
-        "source": "tencent/Hunyuan3D-2.1",
+        **METADATA.as_split_fields(),
         "components": {name: f"{name}.safetensors" for name in config["components"]},
     }
     if args.quantize:

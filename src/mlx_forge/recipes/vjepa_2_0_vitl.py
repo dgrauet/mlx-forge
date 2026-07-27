@@ -73,6 +73,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
@@ -163,6 +164,11 @@ _PROBE_SKIP_QUANT = (
 # ---------------------------------------------------------------------------
 # Key sanitization
 # ---------------------------------------------------------------------------
+
+
+METADATA = RecipeMetadata(
+    source="facebookresearch/vjepa2",
+)
 
 
 def _sanitize_encoder_key(key: str) -> str:

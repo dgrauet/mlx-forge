@@ -32,6 +32,7 @@ from ..convert import (
     quantize_component,
     write_split_model,
 )
+from ..metadata import RecipeMetadata
 from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
@@ -113,6 +114,11 @@ VARIANT_FILENAMES = {
     "distilled-1.1": "transformer-distilled-1.1.safetensors",
     "dev": "transformer-dev.safetensors",
 }
+
+
+METADATA = RecipeMetadata(
+    source="Lightricks/LTX-2.3",
+)
 
 
 def classify_key(key: str) -> str | None:
@@ -876,7 +882,7 @@ def convert(args) -> None:
         "components": components,
         "transformer_variants": list(variant_adaln.keys()),
         "lora": lora_synced,
-        "source": "Lightricks/LTX-2.3",
+        **METADATA.as_split_fields(),
         "notes": {
             "vocoder": "Also contains BWE (bandwidth extension) generator weights"
             " — upsample layers [6,5,2,2,2] (240x) and mel_stft parameters.",
