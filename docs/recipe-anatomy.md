@@ -148,10 +148,13 @@ publishes, its file list is derived from the remote merged with what is about
 to go up (so a delta upload no longer produces a card that contradicts its own
 variant list), and `source` / `cli_snippet` now persist. Two caveats remain:
 
-1. **`vjepa-2.0` still writes no `source`.** Its `split_model.json` top-level
-   keys *are* its component table, so adding a key changes what a downstream
-   loader iterating that file sees. Its `METADATA` is declared and ready; the
-   consumer needs checking first.
+1. ~~`vjepa-2.0` still writes no `source`.~~ **Resolved.** The caution was
+   based on a guessed consumer. `vjepa2-core-mlx` resolves components through
+   `manifest.get("components", {})` and never iterates the top-level keys, so
+   adding `source` is safe — and the flat table it used to write was being
+   ignored outright, leaving its predictor and probes unaddressable. It now
+   writes the same nested shape as vjepa-2.1. **Check the consumer before
+   assuming a format is load-bearing.**
 2. **Every already-published card stays stale** until its model is
    re-uploaded, or refreshed with `mlx-forge upload <dir> --card-only`.
 
@@ -159,7 +162,8 @@ variant list), and `source` / `cli_snippet` now persist. Two caveats remain:
 `{format, components, source, …}`, vjepa-2.0 a flat `{component: filename}`
 table, vjepa-2.1 a `{model_name, components, quantized}` record, and
 void-model wrote none at all until it was given one (without it,
-`mlx-forge upload` on a void model refused to run without `--repo-id`).
+`mlx-forge upload` on a void model refused to run without `--repo-id`), and
+vjepa-2.0 wrote a flat table no consumer could read until it was nested.
 
 **Those schemas are deliberately not unified.** Their non-common fields have
 no reader, and rewriting them would change metadata already published on the
