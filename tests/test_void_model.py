@@ -110,6 +110,28 @@ class TestConvertEndToEnd:
         config = json.loads((out / "config.json").read_text())
         assert config["passes"] == ["void_pass1", "void_pass2"]
 
+    def test_writes_split_model_with_its_declared_source(self, tmp_path):
+        """Without this file `mlx-forge upload` cannot derive the repo name."""
+        out = tmp_path / "out"
+        convert(_args(_source_dir(tmp_path), out))
+
+        info = json.loads((out / "split_model.json").read_text())
+        assert info["source"] == void_model.METADATA.source == "netflix/void-model"
+        assert info["components"] == ["void_pass1", "void_pass2"]
+
+    def test_upload_can_derive_the_repo_name(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from mlx_forge.upload import derive_repo_id, load_model_metadata
+
+        out = tmp_path / "out"
+        convert(_args(_source_dir(tmp_path), out))
+        split_info, _ = load_model_metadata(out)
+
+        api = MagicMock()
+        api.whoami.return_value = {"name": "u"}
+        assert derive_repo_id(split_info, out, api=api) == "u/void-model-mlx"
+
     def test_values_round_trip(self, tmp_path):
         out = tmp_path / "out"
         convert(_args(_source_dir(tmp_path), out))
