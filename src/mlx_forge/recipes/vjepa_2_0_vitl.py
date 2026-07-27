@@ -507,8 +507,19 @@ def convert(args) -> None:  # noqa: C901
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
 
-    # Build split_model.json
-    split_info: dict[str, str] = {comp: f"{comp}.safetensors" for comp in components}
+    # Build split_model.json. The components mapping must be NESTED: the
+    # consumer (vjepa2_core_mlx.utils.weights._find_safetensors) resolves a
+    # component through manifest.get("components", {}) and never looks at the
+    # top-level keys. This recipe used to write a flat {component: filename}
+    # table, so the manifest was ignored entirely and every component fell
+    # through to the canonical encoder.safetensors — the probes and the
+    # predictor were not addressable at all.
+    split_info: dict = {
+        "format": "split",
+        "components": {comp: f"{comp}.safetensors" for comp in components},
+        "quantized": bool(args.quantize),
+        **METADATA.as_split_fields(),
+    }
     write_split_model(output_dir, split_info)
     print("Saved split_model.json")
 
