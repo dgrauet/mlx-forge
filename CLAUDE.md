@@ -71,6 +71,10 @@ Use the shared helpers rather than re-deriving them:
 - `convert.copy_required_files()` — pipeline-file copies that fail loudly on a
   missing required file.
 
+Before adding or changing a recipe, read [docs/recipe-anatomy.md](docs/recipe-anatomy.md):
+it separates what a recipe must do differently (upstream-imposed) from what it
+must not (the shared layer), and lists the metadata still passed by CLI flag.
+
 ## Critical Rules
 
 ### Memory Management

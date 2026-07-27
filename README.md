@@ -234,6 +234,12 @@ PyTorch stores conv weights as `(O, I, ...)` while MLX expects channels-last `(O
 - Explicit `gc.collect()` + `mx.clear_cache()` between components
 - Each weight tensor is individually materialized before quantization to prevent OOM from accumulated lazy computation graphs
 
+## Understanding the Codebase
+
+- [Recipe anatomy](docs/recipe-anatomy.md) — what varies between recipes and
+  why: the six axes upstream forces, the shared layer everything else must use,
+  and the metadata gaps that remain.
+
 ## Model-Specific Documentation
 
 Each recipe has its own detailed guide with architecture, key mapping, known gotchas, and validation details:
