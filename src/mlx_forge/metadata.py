@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 #: they already write, and downstream consumers of the old shape keep working.
 SPLIT_MODEL_KEYS = (
     "recipe",
+    "variant",
     "source",
     "base_model",
     "license",
@@ -36,6 +37,10 @@ class RecipeMetadata:
         name: The recipe's registry key, e.g. "ernie-image-pe". Written into
             split_model.json as `recipe`, which is what lets `upload` find the
             declaration again for a directory converted long ago.
+        variant: Which variant of the model this directory holds, when the
+            recipe converts more than one — ernie-image publishes an "sft" and
+            a "turbo" build from different upstream repos. Optional: most
+            recipes have a single output and leave it None.
         source: Where the weights come from, as prose — it may name a
             subfolder or a non-Hub origin ("baidu/ERNIE-Image-Turbo/pe",
             "facebookresearch/vjepa2 (app/vjepa_2_1)"). Basis for the
@@ -57,23 +62,30 @@ class RecipeMetadata:
 
     name: str
     source: str
+    variant: str | None = None
     base_model: str | None = None
     license: str | None = None
     links: list[str] = field(default_factory=list)
     usage_url: str | None = None
     cli_snippet: str | None = None
 
-    def with_source(self, source: str) -> RecipeMetadata:
-        """Same declaration with a different origin.
+    def for_variant(self, variant: str, source: str | None = None) -> RecipeMetadata:
+        """This declaration as it applies to one variant of the model.
 
-        For recipes whose upstream depends on a flag — ernie-image publishes
-        from ERNIE-Image-SFT or -Turbo depending on --variant.
+        ernie-image publishes an "sft" and a "turbo" build, each from its own
+        upstream repo, so the variant usually comes with a source.
         """
+        return replace(self, variant=variant, source=source or self.source)
+
+    def with_source(self, source: str) -> RecipeMetadata:
+        """Same declaration with a different origin, variant unchanged."""
         return replace(self, source=source)
 
     def as_split_fields(self) -> dict:
         """The subset to persist in split_model.json, omitting empty values."""
         out: dict = {"recipe": self.name, "source": self.source}
+        if self.variant:
+            out["variant"] = self.variant
         if self.base_model:
             out["base_model"] = self.base_model
         if self.license:

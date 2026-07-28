@@ -623,7 +623,9 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
 
     split_model: dict[str, Any] = {
         "model_type": "hunyuan3d-2.1",
-        **METADATA.as_split_fields(),
+        # The two stages are exclusive builds of the same model, so the stage
+        # is this directory's variant.
+        **METADATA.for_variant(args.stage).as_split_fields(),
         "components": {name: f"{name}.safetensors" for name in config["components"]},
     }
     if args.quantize:

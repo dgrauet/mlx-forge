@@ -426,8 +426,7 @@ def convert(args) -> None:
 
     split_info: dict = {
         "format": "split",
-        **METADATA.with_source(repo_id).as_split_fields(),
-        "variant": variant,
+        **METADATA.for_variant(variant, repo_id).as_split_fields(),
         "components": COMPONENTS,
     }
     if args.quantize:

@@ -98,3 +98,55 @@ class TestBackfill:
         complete = {**void_model.METADATA.as_split_fields()}
         assert backfill_from_recipe(tmp_path, complete) == complete
         assert not (tmp_path / "split_model.json").exists()
+
+
+class TestVariant:
+    """`variant` is optional: only recipes with more than one build set it."""
+
+    def test_absent_by_default(self):
+        from mlx_forge.recipes import void_model
+
+        assert void_model.METADATA.variant is None
+        assert "variant" not in void_model.METADATA.as_split_fields()
+
+    def test_for_variant_records_it(self):
+        from mlx_forge.recipes import ernie_image
+
+        fields = ernie_image.METADATA.for_variant("sft", ernie_image.REPO_SFT).as_split_fields()
+        assert fields["variant"] == "sft"
+        assert fields["source"] == ernie_image.REPO_SFT
+
+    def test_for_variant_keeps_the_source_when_none_is_given(self):
+        from mlx_forge.recipes import hunyuan3d_21
+
+        fields = hunyuan3d_21.METADATA.for_variant("paint").as_split_fields()
+        assert fields["variant"] == "paint"
+        assert fields["source"] == hunyuan3d_21.METADATA.source
+
+    def test_the_base_declaration_is_untouched(self):
+        """for_variant must not mutate the module-level declaration."""
+        from mlx_forge.recipes import ernie_image
+
+        ernie_image.METADATA.for_variant("sft", ernie_image.REPO_SFT)
+        assert ernie_image.METADATA.variant is None
+        assert ernie_image.METADATA.source == ernie_image.REPO_TURBO
+
+    def test_each_variant_keeps_its_own_source(self):
+        from mlx_forge.recipes import ernie_image
+
+        sft = ernie_image.METADATA.for_variant("sft", ernie_image.REPO_SFT)
+        turbo = ernie_image.METADATA.for_variant("turbo", ernie_image.REPO_TURBO)
+        assert sft.source != turbo.source
+
+    def test_backfill_does_not_invent_a_variant(self, tmp_path):
+        """The declaration has none, so an existing directory must not gain one."""
+        manifest = {"source": "netflix/void-model"}
+        (tmp_path / "split_model.json").write_text(json.dumps(manifest))
+
+        assert "variant" not in backfill_from_recipe(tmp_path, manifest)
+
+    def test_a_recorded_variant_survives_backfill(self, tmp_path):
+        manifest = {"source": "baidu/ERNIE-Image", "variant": "sft"}
+        (tmp_path / "split_model.json").write_text(json.dumps(manifest))
+
+        assert backfill_from_recipe(tmp_path, manifest)["variant"] == "sft"
