@@ -29,11 +29,11 @@ class RecipeMetadata:
             subfolder or a non-Hub origin ("baidu/ERNIE-Image-Turbo/pe",
             "facebookresearch/vjepa2 (app/vjepa_2_1)"). Basis for the
             auto-derived repo name.
-        base_model: The upstream **Hub repo id**, when one exists. The card's
-            front-matter `base_model` must resolve on the Hub, which `source`
-            does not always do: ".../pe" is a subfolder, not a repo. Leave None
-            to reuse `source` when it is itself a valid id, or to emit nothing
-            when no Hub repo exists.
+        base_model: Only when the Hub repo is NOT the one `source` names —
+            vjepa-2.0 converts from Meta's source tree but its weights
+            correspond to `facebook/vjepa2-vitl-fpc64-256`. Otherwise leave
+            None: the repo is derived from `source`, dropping any subfolder or
+            variant inside it.
         license: SPDX identifier for the card front-matter. Declared here
             because the CLI default ("other") silently downgraded it on every
             refresh — 13 of the 21 published repos carry apache-2.0 or mit.
@@ -76,13 +76,26 @@ class RecipeMetadata:
 
 
 def is_hub_repo_id(value: str | None) -> bool:
-    """Whether `value` can be used as a card `base_model`.
-
-    A Hub repo id is exactly "owner/name". `source` is prose and often is not
-    one — "baidu/ERNIE-Image-Turbo/pe" points at a subfolder,
-    "facebookresearch/vjepa2 (app/vjepa_2_1)" at a source tree.
-    """
+    """Whether `value` is exactly a Hub repo id, "owner/name"."""
     if not value:
         return False
     parts = value.split("/")
     return len(parts) == 2 and all(parts) and not any(c in value for c in " ()")
+
+
+def hub_repo_from_source(source: str | None) -> str | None:
+    """The Hub repo a `source` refers to, ignoring anything inside it.
+
+    base_model names the remote repository, not the variant or subfolder taken
+    from it: "baidu/ERNIE-Image-Turbo/pe" is published from
+    "baidu/ERNIE-Image-Turbo". Returns None when `source` does not name a Hub
+    repo at all — "facebookresearch/vjepa2 (app/vjepa_2_1)" is a source tree,
+    and an unresolvable base_model is worse than none.
+    """
+    if not source:
+        return None
+    parts = source.split("/")
+    if len(parts) < 2:
+        return None
+    candidate = "/".join(parts[:2])
+    return candidate if is_hub_repo_id(candidate) else None

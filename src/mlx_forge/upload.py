@@ -18,7 +18,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
 from .convert import SPLIT_MODEL_FILENAME, write_split_model
-from .metadata import is_hub_repo_id
+from .metadata import hub_repo_from_source
 from .quantize import format_bytes
 
 
@@ -160,7 +160,7 @@ def generate_model_card(
     # front-matter base_model that does not resolve is worse than none.
     source = split_info.get("source", "")
     if base_model is None:
-        base_model = split_info.get("base_model") or (source if is_hub_repo_id(source) else None)
+        base_model = split_info.get("base_model") or hub_repo_from_source(source)
     if transformer_variants is None:
         transformer_variants = list(split_info.get("transformer_variants", []) or [])
 

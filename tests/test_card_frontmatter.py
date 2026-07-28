@@ -13,7 +13,7 @@ import importlib
 
 import pytest
 
-from mlx_forge.metadata import RecipeMetadata, is_hub_repo_id
+from mlx_forge.metadata import RecipeMetadata, hub_repo_from_source, is_hub_repo_id
 from mlx_forge.recipes import AVAILABLE_RECIPES
 from mlx_forge.upload import generate_model_card
 
@@ -51,7 +51,39 @@ class TestIsHubRepoId:
         assert not is_hub_repo_id(value)
 
 
+class TestHubRepoFromSource:
+    """base_model names the remote repo, whatever variant lives inside it."""
+
+    @pytest.mark.parametrize(
+        "source,expected",
+        [
+            ("baidu/ERNIE-Image-Turbo/pe", "baidu/ERNIE-Image-Turbo"),
+            ("Lightricks/LTX-2.3", "Lightricks/LTX-2.3"),
+            ("netflix/void-model", "netflix/void-model"),
+            ("org/repo/a/b/c", "org/repo"),
+        ],
+    )
+    def test_drops_anything_inside_the_repo(self, source, expected):
+        assert hub_repo_from_source(source) == expected
+
+    @pytest.mark.parametrize(
+        "source", ["facebookresearch/vjepa2 (app/vjepa_2_1)", "netflix-void", "", None]
+    )
+    def test_returns_none_when_no_repo_is_named(self, source):
+        assert hub_repo_from_source(source) is None
+
+
 class TestBaseModelResolution:
+    def test_subfolder_source_resolves_to_its_repo(self, tmp_path):
+        """No declaration needed: /pe is inside baidu/ERNIE-Image-Turbo."""
+        card = generate_model_card(
+            tmp_path,
+            split_info={"source": "baidu/ERNIE-Image-Turbo/pe"},
+            config={},
+            repo_id="u/m",
+        )
+        assert _front_matter(card)["base_model"] == "baidu/ERNIE-Image-Turbo"
+
     def test_declared_base_model_wins_over_prose_source(self, tmp_path):
         card = generate_model_card(
             tmp_path,
