@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6](https://github.com/dgrauet/mlx-forge/compare/v0.4.5...v0.4.6) (2026-07-28)
+
+
+### Features
+
+* **metadata:** record the variant a directory holds, when there is one ([#67](https://github.com/dgrauet/mlx-forge/issues/67)) ([258adff](https://github.com/dgrauet/mlx-forge/commit/258adff8bb725c382144b09ba3b3b0a4911b3487))
+* **upload:** bind a converted directory back to its recipe ([#66](https://github.com/dgrauet/mlx-forge/issues/66)) ([6f1d725](https://github.com/dgrauet/mlx-forge/commit/6f1d72530c9010093d00592629436e8c140b0b7e))
+
+
+### Bug Fixes
+
+* **upload:** declare base_model and license so a card refresh cannot degrade them ([#64](https://github.com/dgrauet/mlx-forge/issues/64)) ([37493c8](https://github.com/dgrauet/mlx-forge/commit/37493c878e31025c877f38ebecdd1f461d7d98fa))
+
 ## [0.4.5](https://github.com/dgrauet/mlx-forge/compare/v0.4.4...v0.4.5) (2026-07-27)
 
 
