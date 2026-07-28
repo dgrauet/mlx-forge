@@ -139,6 +139,7 @@ ALL_CHECKPOINT_FILES = TRANSFORMER_FILES + TEXT_ENCODER_FILES + VAE_FILES + CONF
 
 
 METADATA = RecipeMetadata(
+    name="ernie-image",
     source=REPO_TURBO,
     license="apache-2.0",
 )

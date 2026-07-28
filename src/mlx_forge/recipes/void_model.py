@@ -62,6 +62,7 @@ _PASS_SIZE_MB = 9_500  # ~9.5 GB each
 
 
 METADATA = RecipeMetadata(
+    name="void-model",
     source=REPO_ID,
     license="apache-2.0",
 )

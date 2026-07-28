@@ -17,6 +17,8 @@ from __future__ import annotations
 import argparse
 from typing import Protocol
 
+from ..metadata import RecipeMetadata
+
 AVAILABLE_RECIPES = {
     "ideogram-4": "mlx_forge.recipes.ideogram_4",
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
@@ -56,3 +58,31 @@ class RecipeModule(Protocol):
 def missing_recipe_attrs(module: object, command: str) -> list[str]:
     """Return the attributes `module` lacks to serve `command` (empty if complete)."""
     return [attr for attr in COMMAND_REQUIREMENTS[command] if not hasattr(module, attr)]
+
+
+def resolve_recipe_metadata(split_info: dict) -> RecipeMetadata | None:
+    """Find the declaration behind a converted directory.
+
+    `convert` writes the recipe name into split_model.json, so a directory
+    produced today says which recipe made it. Directories converted before that
+    key existed are matched on `source` instead, which is unique across recipes
+    — that is what lets an old model_dir still pick up a license or a
+    base_model declared since.
+
+    Returns None when neither works (e.g. ernie-image converted with
+    --variant sft, whose source is the SFT repo rather than the recipe's
+    declared one); callers then fall back to whatever the manifest holds.
+    """
+    import importlib
+
+    name = split_info.get("recipe")
+    if name in AVAILABLE_RECIPES:
+        return importlib.import_module(AVAILABLE_RECIPES[name]).METADATA
+
+    source = split_info.get("source")
+    if source:
+        for module_path in AVAILABLE_RECIPES.values():
+            metadata = getattr(importlib.import_module(module_path), "METADATA", None)
+            if metadata is not None and metadata.source == source:
+                return metadata
+    return None

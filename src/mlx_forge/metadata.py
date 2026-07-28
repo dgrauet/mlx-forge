@@ -17,7 +17,15 @@ from dataclasses import dataclass, field, replace
 
 #: Keys carried through split_model.json. Additive: recipes keep whatever else
 #: they already write, and downstream consumers of the old shape keep working.
-SPLIT_MODEL_KEYS = ("source", "base_model", "license", "links", "usage_url", "cli_snippet")
+SPLIT_MODEL_KEYS = (
+    "recipe",
+    "source",
+    "base_model",
+    "license",
+    "links",
+    "usage_url",
+    "cli_snippet",
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +33,9 @@ class RecipeMetadata:
     """What a recipe knows about its own publication.
 
     Args:
+        name: The recipe's registry key, e.g. "ernie-image-pe". Written into
+            split_model.json as `recipe`, which is what lets `upload` find the
+            declaration again for a directory converted long ago.
         source: Where the weights come from, as prose — it may name a
             subfolder or a non-Hub origin ("baidu/ERNIE-Image-Turbo/pe",
             "facebookresearch/vjepa2 (app/vjepa_2_1)"). Basis for the
@@ -44,6 +55,7 @@ class RecipeMetadata:
             actually exists, and remember it now persists across refreshes.
     """
 
+    name: str
     source: str
     base_model: str | None = None
     license: str | None = None
@@ -61,7 +73,7 @@ class RecipeMetadata:
 
     def as_split_fields(self) -> dict:
         """The subset to persist in split_model.json, omitting empty values."""
-        out: dict = {"source": self.source}
+        out: dict = {"recipe": self.name, "source": self.source}
         if self.base_model:
             out["base_model"] = self.base_model
         if self.license:

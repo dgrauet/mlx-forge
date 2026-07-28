@@ -332,6 +332,7 @@ def _run_upload(args) -> None:
     from huggingface_hub import HfApi
 
     from .upload import (
+        backfill_from_recipe,
         derive_repo_id,
         generate_model_card,
         load_model_metadata,
@@ -368,6 +369,10 @@ def _run_upload(args) -> None:
         )
 
     print(f"Repo ID: {repo_id}")
+
+    # A directory converted before a metadata field existed carries a manifest
+    # without it; recover it from the recipe rather than publishing the default.
+    split_info = backfill_from_recipe(model_dir, split_info)
 
     # Record anything the operator supplied, so a later --card-only refresh
     # does not silently drop it.

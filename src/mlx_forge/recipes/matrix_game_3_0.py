@@ -132,6 +132,7 @@ _DIT_SEQUENTIAL_MAP: list[tuple[str, str]] = [
 
 
 METADATA = RecipeMetadata(
+    name="matrix-game-3.0",
     source=REPO_ID,
     license="other",
     links=["Code: https://github.com/dgrauet/Matrix-Game-mlx"],

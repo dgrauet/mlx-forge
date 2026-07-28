@@ -91,6 +91,7 @@ _PE_SIZE_MB = 7700  # ~7.1 GB fp16 single-shard safetensors
 
 
 METADATA = RecipeMetadata(
+    name="ernie-image-pe",
     source=REPO_SOURCE + "/pe",
     license="apache-2.0",
 )

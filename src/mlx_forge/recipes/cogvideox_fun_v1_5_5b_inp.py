@@ -121,6 +121,7 @@ _SKIP_QUANTIZE_COMPONENTS = {"vae"}
 
 
 METADATA = RecipeMetadata(
+    name="cogvideox-fun-v1.5-5b-inp",
     source=REPO_ID,
     license="apache-2.0",
 )

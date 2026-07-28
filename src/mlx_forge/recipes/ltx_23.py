@@ -117,6 +117,7 @@ VARIANT_FILENAMES = {
 
 
 METADATA = RecipeMetadata(
+    name="ltx-2.3",
     source="Lightricks/LTX-2.3",
     license="other",
 )

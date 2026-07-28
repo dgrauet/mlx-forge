@@ -165,4 +165,7 @@ def test_declared_metadata_reaches_split_model(recipe_name: str):
 
 
 def test_metadata_without_optional_fields_stays_minimal():
-    assert RecipeMetadata(source="a/b").as_split_fields() == {"source": "a/b"}
+    assert RecipeMetadata(name="r", source="a/b").as_split_fields() == {
+        "recipe": "r",
+        "source": "a/b",
+    }

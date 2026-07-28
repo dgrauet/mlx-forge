@@ -133,6 +133,7 @@ _KNOWN_PREFIXES = ("module.", "encoder.", "target_encoder.", "backbone.")
 
 
 METADATA = RecipeMetadata(
+    name="vjepa-2.1-vitl",
     source="facebookresearch/vjepa2 (app/vjepa_2_1)",
     license="mit",
 )

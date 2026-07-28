@@ -76,6 +76,7 @@ PAINT_FILES = [
 
 
 METADATA = RecipeMetadata(
+    name="hunyuan3d-2.1",
     source=HF_REPO_ID,
     license="other",
 )

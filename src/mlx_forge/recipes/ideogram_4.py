@@ -124,6 +124,7 @@ _ALL_HF_FILES = (
 
 
 METADATA = RecipeMetadata(
+    name="ideogram-4",
     source=REPO_ID,
 )
 

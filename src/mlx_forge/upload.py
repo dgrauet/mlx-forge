@@ -251,6 +251,38 @@ def iter_model_files(model_dir: Path) -> list[Path]:
     )
 
 
+def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
+    """Fill in card metadata the manifest predates, from the recipe declaration.
+
+    A directory converted before a field existed carries a manifest without it,
+    so refreshing its card would publish the default instead of the declared
+    value — a license reverting to "other", for instance. The recipe is
+    identified by the `recipe` key, or by `source` for older directories.
+
+    Only absent keys are filled: whatever the manifest already says wins, and
+    the operator's flags win over both.
+
+    Returns:
+        The updated split_info (unchanged, and nothing written, if there is
+        nothing to add or no recipe can be identified).
+    """
+    from .recipes import resolve_recipe_metadata
+
+    metadata = resolve_recipe_metadata(split_info)
+    if metadata is None:
+        return split_info
+
+    declared = metadata.as_split_fields()
+    new = {k: v for k, v in declared.items() if k not in split_info}
+    if not new:
+        return split_info
+
+    merged = {**split_info, **new}
+    write_split_model(model_dir, merged)
+    print(f"Backfilled from the {metadata.name} recipe: {', '.join(sorted(new))}")
+    return merged
+
+
 def persist_card_metadata(
     model_dir: Path,
     split_info: dict,
