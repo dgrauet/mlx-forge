@@ -26,6 +26,7 @@ SPLIT_MODEL_KEYS = (
     "links",
     "usage_url",
     "cli_snippet",
+    "usage_note",
 )
 
 
@@ -41,6 +42,11 @@ class RecipeMetadata:
             recipe converts more than one — ernie-image publishes an "sft" and
             a "turbo" build from different upstream repos. Optional: most
             recipes have a single output and leave it None.
+        known_sources: Every upstream this recipe converts from, when its
+            variants come from different repos. Used to recognise a directory
+            by its `source` when the manifest predates the `recipe` key —
+            ernie-image writes the SFT repo for --variant sft, which is not the
+            declaration's own source.
         source: Where the weights come from, as prose — it may name a
             subfolder or a non-Hub origin ("baidu/ERNIE-Image-Turbo/pe",
             "facebookresearch/vjepa2 (app/vjepa_2_1)"). Basis for the
@@ -55,18 +61,24 @@ class RecipeMetadata:
             refresh — 13 of the 21 published repos carry apache-2.0 or mit.
         links: Related projects, each "Label: URL".
         usage_url: Inference project that consumes these weights.
+        usage_note: Clause appended after the project link, before the period —
+            "a native MLX inference pipeline for LTX-2.3 on Apple Silicon".
         cli_snippet: Bash shown in the card's Usage section. Published
             verbatim on the Hub — only reference a package or command that
             actually exists, and remember it now persists across refreshes.
+            `{repo_id}` is substituted with the target repo at render time, so
+            one declaration covers a model's bf16/q8/q4 repos.
     """
 
     name: str
     source: str
     variant: str | None = None
+    known_sources: tuple[str, ...] = ()
     base_model: str | None = None
     license: str | None = None
     links: list[str] = field(default_factory=list)
     usage_url: str | None = None
+    usage_note: str | None = None
     cli_snippet: str | None = None
 
     def for_variant(self, variant: str, source: str | None = None) -> RecipeMetadata:
@@ -94,6 +106,8 @@ class RecipeMetadata:
             out["links"] = list(self.links)
         if self.usage_url:
             out["usage_url"] = self.usage_url
+        if self.usage_note:
+            out["usage_note"] = self.usage_note
         if self.cli_snippet:
             out["cli_snippet"] = self.cli_snippet
         return out

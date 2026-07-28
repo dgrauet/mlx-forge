@@ -65,6 +65,12 @@ METADATA = RecipeMetadata(
     name="void-model",
     source=REPO_ID,
     license="apache-2.0",
+    usage_url="https://github.com/dgrauet/void-model-mlx",
+    links=[
+        "void-model-mlx (inference): https://github.com/dgrauet/void-model-mlx",
+        "VideoX-Fun-mlx (engine): https://github.com/dgrauet/VideoX-Fun-mlx",
+        "Base model weights: https://huggingface.co/dgrauet/CogVideoX-Fun-V1.5-5b-InP-mlx",
+    ],
 )
 
 

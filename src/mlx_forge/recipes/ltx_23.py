@@ -120,6 +120,12 @@ METADATA = RecipeMetadata(
     name="ltx-2.3",
     source="Lightricks/LTX-2.3",
     license="other",
+    usage_url="https://github.com/dgrauet/ltx-2-mlx",
+    usage_note="a native MLX inference pipeline for LTX-2.3 on Apple Silicon",
+    links=[
+        "Code: https://github.com/dgrauet/ltx-2-mlx",
+        "ComfyUI compatible custom nodes: https://github.com/dgrauet/ComfyUI-LTXVideo-mlx",
+    ],
 )
 
 

@@ -141,7 +141,21 @@ ALL_CHECKPOINT_FILES = TRANSFORMER_FILES + TEXT_ENCODER_FILES + VAE_FILES + CONF
 METADATA = RecipeMetadata(
     name="ernie-image",
     source=REPO_TURBO,
+    known_sources=(REPO_SFT, REPO_TURBO),
     license="apache-2.0",
+    usage_url="https://github.com/dgrauet/ernie-image-mlx",
+    links=[
+        "mlx-forge (conversion): https://github.com/dgrauet/mlx-forge",
+        "mlx-arsenal (reusable MLX ops): https://github.com/dgrauet/mlx-arsenal",
+        "mlx-porting (Claude Code skill): https://github.com/dgrauet/claude-skill-mlx-porting",
+    ],
+    cli_snippet=(
+        "pip install ernie-image-mlx\n"
+        "ernie-image-mlx generate \\\n"
+        '    -p "一只黑白相间的中华田园犬" \\\n'
+        "    --repo-id {repo_id} \\\n"
+        "    -o dog.png"
+    ),
 )
 
 

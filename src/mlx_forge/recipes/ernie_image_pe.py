@@ -94,6 +94,19 @@ METADATA = RecipeMetadata(
     name="ernie-image-pe",
     source=REPO_SOURCE + "/pe",
     license="apache-2.0",
+    usage_url="https://github.com/dgrauet/ernie-image-mlx",
+    links=[
+        "mlx-forge (conversion): https://github.com/dgrauet/mlx-forge",
+        "mlx-arsenal (reusable MLX ops): https://github.com/dgrauet/mlx-arsenal",
+        "mlx-porting (Claude Code skill): https://github.com/dgrauet/claude-skill-mlx-porting",
+    ],
+    cli_snippet=(
+        "pip install ernie-image-mlx\n"
+        "ernie-image-mlx generate \\\n"
+        '    -p "a black and white chinese farm dog" \\\n'
+        "    --pe-repo-id {repo_id} \\\n"
+        "    -o dog.png"
+    ),
 )
 
 

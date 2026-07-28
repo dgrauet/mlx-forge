@@ -36,7 +36,7 @@ Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge).
 ## Usage
 
 {% if usage_url -%}
-These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ usage_url }}).
+These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ usage_url }}){% if usage_note %}, {{ usage_note }}{% endif %}.
 
 {% endif -%}
 {% if cli_snippet -%}

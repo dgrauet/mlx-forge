@@ -79,6 +79,12 @@ METADATA = RecipeMetadata(
     name="hunyuan3d-2.1",
     source=HF_REPO_ID,
     license="other",
+    usage_url="https://github.com/dgrauet/Hunyuan3D-2.1-mlx",
+    links=[
+        "Code: https://github.com/dgrauet/Hunyuan3D-2.1-mlx",
+        "Upstream model: https://huggingface.co/tencent/Hunyuan3D-2.1",
+        "Paper: https://arxiv.org/pdf/2506.15442",
+    ],
 )
 
 

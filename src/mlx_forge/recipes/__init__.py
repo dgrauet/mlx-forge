@@ -83,6 +83,8 @@ def resolve_recipe_metadata(split_info: dict) -> RecipeMetadata | None:
     if source:
         for module_path in AVAILABLE_RECIPES.values():
             metadata = getattr(importlib.import_module(module_path), "METADATA", None)
-            if metadata is not None and metadata.source == source:
+            if metadata is None:
+                continue
+            if source == metadata.source or source in metadata.known_sources:
                 return metadata
     return None

@@ -124,6 +124,12 @@ METADATA = RecipeMetadata(
     name="cogvideox-fun-v1.5-5b-inp",
     source=REPO_ID,
     license="apache-2.0",
+    usage_url="https://github.com/dgrauet/VideoX-Fun-mlx",
+    links=[
+        "VideoX-Fun-mlx (inference code): https://github.com/dgrauet/VideoX-Fun-mlx",
+        "mlx-forge (conversion tool): https://github.com/dgrauet/mlx-forge",
+        "mlx-arsenal (MLX utilities): https://github.com/dgrauet/mlx-arsenal",
+    ],
 )
 
 

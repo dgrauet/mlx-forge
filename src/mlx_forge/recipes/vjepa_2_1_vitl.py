@@ -136,6 +136,12 @@ METADATA = RecipeMetadata(
     name="vjepa-2.1-vitl",
     source="facebookresearch/vjepa2 (app/vjepa_2_1)",
     license="mit",
+    usage_url="https://github.com/dgrauet/vjepa2-mlx",
+    links=[
+        "Upstream (Meta): https://github.com/facebookresearch/vjepa2",
+        "MLX inference port: https://github.com/dgrauet/vjepa2-mlx",
+        "Source checkpoint: https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitl_dist_vitG_384.pt",
+    ],
 )
 
 

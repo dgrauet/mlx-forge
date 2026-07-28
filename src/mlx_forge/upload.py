@@ -204,7 +204,8 @@ def generate_model_card(
         quantized=quantized,
         bits=bits,
         usage_url=usage_url,
-        cli_snippet=cli_snippet,
+        cli_snippet=(cli_snippet or "").format(repo_id=repo_id) or None,
+        usage_note=split_info.get("usage_note"),
         links=links or [],
         model_files=model_files,
     )
