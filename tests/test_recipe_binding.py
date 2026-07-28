@@ -29,14 +29,18 @@ def test_declared_name_matches_the_registry_key(recipe_name: str):
 
 @pytest.mark.parametrize("recipe_name", RECIPE_NAMES)
 def test_resolves_by_the_recipe_key(recipe_name: str):
-    assert resolve_recipe_metadata({"recipe": recipe_name}).name == recipe_name
+    resolved = resolve_recipe_metadata({"recipe": recipe_name})
+    assert resolved is not None
+    assert resolved.name == recipe_name
 
 
 @pytest.mark.parametrize("recipe_name", RECIPE_NAMES)
 def test_resolves_by_source_for_older_directories(recipe_name: str):
     """Manifests written before the `recipe` key still carry a unique source."""
     metadata = importlib.import_module(AVAILABLE_RECIPES[recipe_name]).METADATA
-    assert resolve_recipe_metadata({"source": metadata.source}).name == recipe_name
+    resolved = resolve_recipe_metadata({"source": metadata.source})
+    assert resolved is not None
+    assert resolved.name == recipe_name
 
 
 class TestResolutionLimits:
@@ -47,12 +51,11 @@ class TestResolutionLimits:
         assert resolve_recipe_metadata({}) is None
 
     def test_unknown_recipe_key_falls_back_to_source(self):
-        assert (
-            resolve_recipe_metadata(
-                {"recipe": "deleted-recipe", "source": "netflix/void-model"}
-            ).name
-            == "void-model"
+        resolved = resolve_recipe_metadata(
+            {"recipe": "deleted-recipe", "source": "netflix/void-model"}
         )
+        assert resolved is not None
+        assert resolved.name == "void-model"
 
 
 class TestBackfill:
