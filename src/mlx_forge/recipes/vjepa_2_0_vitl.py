@@ -168,6 +168,8 @@ _PROBE_SKIP_QUANT = (
 
 METADATA = RecipeMetadata(
     source="facebookresearch/vjepa2",
+    base_model="facebook/vjepa2-vitl-fpc64-256",
+    license="mit",
 )
 
 

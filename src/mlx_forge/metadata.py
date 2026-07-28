@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 
 #: Keys carried through split_model.json. Additive: recipes keep whatever else
 #: they already write, and downstream consumers of the old shape keep working.
-SPLIT_MODEL_KEYS = ("source", "links", "usage_url", "cli_snippet")
+SPLIT_MODEL_KEYS = ("source", "base_model", "license", "links", "usage_url", "cli_snippet")
 
 
 @dataclass(frozen=True)
@@ -25,9 +25,18 @@ class RecipeMetadata:
     """What a recipe knows about its own publication.
 
     Args:
-        source: Upstream repo or origin, e.g. "Skywork/Matrix-Game-3.0".
-            Becomes `base_model` in the model card front-matter, and the basis
-            for the auto-derived repo name.
+        source: Where the weights come from, as prose — it may name a
+            subfolder or a non-Hub origin ("baidu/ERNIE-Image-Turbo/pe",
+            "facebookresearch/vjepa2 (app/vjepa_2_1)"). Basis for the
+            auto-derived repo name.
+        base_model: The upstream **Hub repo id**, when one exists. The card's
+            front-matter `base_model` must resolve on the Hub, which `source`
+            does not always do: ".../pe" is a subfolder, not a repo. Leave None
+            to reuse `source` when it is itself a valid id, or to emit nothing
+            when no Hub repo exists.
+        license: SPDX identifier for the card front-matter. Declared here
+            because the CLI default ("other") silently downgraded it on every
+            refresh — 13 of the 21 published repos carry apache-2.0 or mit.
         links: Related projects, each "Label: URL".
         usage_url: Inference project that consumes these weights.
         cli_snippet: Bash shown in the card's Usage section. Published
@@ -36,6 +45,8 @@ class RecipeMetadata:
     """
 
     source: str
+    base_model: str | None = None
+    license: str | None = None
     links: list[str] = field(default_factory=list)
     usage_url: str | None = None
     cli_snippet: str | None = None
@@ -51,6 +62,10 @@ class RecipeMetadata:
     def as_split_fields(self) -> dict:
         """The subset to persist in split_model.json, omitting empty values."""
         out: dict = {"source": self.source}
+        if self.base_model:
+            out["base_model"] = self.base_model
+        if self.license:
+            out["license"] = self.license
         if self.links:
             out["links"] = list(self.links)
         if self.usage_url:
@@ -58,3 +73,16 @@ class RecipeMetadata:
         if self.cli_snippet:
             out["cli_snippet"] = self.cli_snippet
         return out
+
+
+def is_hub_repo_id(value: str | None) -> bool:
+    """Whether `value` can be used as a card `base_model`.
+
+    A Hub repo id is exactly "owner/name". `source` is prose and often is not
+    one — "baidu/ERNIE-Image-Turbo/pe" points at a subfolder,
+    "facebookresearch/vjepa2 (app/vjepa_2_1)" at a source tree.
+    """
+    if not value:
+        return False
+    parts = value.split("/")
+    return len(parts) == 2 and all(parts) and not any(c in value for c in " ()")

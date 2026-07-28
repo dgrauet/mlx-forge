@@ -161,8 +161,11 @@ def build_parser() -> argparse.ArgumentParser:
     upload_parser.add_argument(
         "--license",
         type=str,
-        default="other",
-        help="License for model card (default: other)",
+        default=None,
+        help=(
+            "SPDX license for the model card. Defaults to the one the recipe "
+            "declares, then to 'other'. Passing it explicitly overrides both."
+        ),
     )
     upload_parser.add_argument(
         "--base-model",

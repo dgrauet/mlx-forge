@@ -92,6 +92,8 @@ _PE_SIZE_MB = 7700  # ~7.1 GB fp16 single-shard safetensors
 
 METADATA = RecipeMetadata(
     source=REPO_SOURCE + "/pe",
+    base_model=REPO_SOURCE,  # source points at the /pe subfolder, not a repo
+    license="apache-2.0",
 )
 
 

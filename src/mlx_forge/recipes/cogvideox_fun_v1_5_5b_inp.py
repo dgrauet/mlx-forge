@@ -122,6 +122,7 @@ _SKIP_QUANTIZE_COMPONENTS = {"vae"}
 
 METADATA = RecipeMetadata(
     source=REPO_ID,
+    license="apache-2.0",
 )
 
 

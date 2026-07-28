@@ -18,6 +18,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
 from .convert import SPLIT_MODEL_FILENAME, write_split_model
+from .metadata import is_hub_repo_id
 from .quantize import format_bytes
 
 
@@ -122,7 +123,7 @@ def generate_model_card(
     config: dict,
     repo_id: str,
     base_model: str | None = None,
-    license_id: str = "other",
+    license_id: str | None = None,
     usage_url: str | None = None,
     links: list[str] | None = None,
     cli_snippet: str | None = None,
@@ -138,7 +139,9 @@ def generate_model_card(
         config: Parsed config.json contents.
         repo_id: Target HF repo ID (used in card title).
         base_model: Base model HF ID (default: read from split_info).
-        license_id: SPDX license identifier.
+        license_id: SPDX identifier. None falls back to the recipe's declared
+            license, then to "other" — passing the CLI default unconditionally
+            used to downgrade apache-2.0/mit cards on every refresh.
         usage_url: Optional URL to an inference project that uses these weights.
         links: Optional list of related project links in "Label: URL" format.
         cli_snippet: Optional bash snippet to include in the Usage section.
@@ -152,9 +155,12 @@ def generate_model_card(
 
     from jinja2 import Environment
 
+    # `source` is prose and is not always a Hub repo id — ".../pe" is a
+    # subfolder, "facebookresearch/vjepa2 (app/vjepa_2_1)" a source tree. A
+    # front-matter base_model that does not resolve is worse than none.
     source = split_info.get("source", "")
     if base_model is None:
-        base_model = source or None
+        base_model = split_info.get("base_model") or (source if is_hub_repo_id(source) else None)
     if transformer_variants is None:
         transformer_variants = list(split_info.get("transformer_variants", []) or [])
 
@@ -191,7 +197,7 @@ def generate_model_card(
     return template.render(
         repo_id=repo_id,
         base_model=base_model,
-        license_id=license_id,
+        license_id=license_id or split_info.get("license") or "other",
         transformer_variants=transformer_variants,
         lora_files=lora_files or [],
         model_version=model_version,

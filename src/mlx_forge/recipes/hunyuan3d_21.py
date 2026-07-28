@@ -77,6 +77,7 @@ PAINT_FILES = [
 
 METADATA = RecipeMetadata(
     source=HF_REPO_ID,
+    license="other",
 )
 
 

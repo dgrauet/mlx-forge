@@ -138,7 +138,10 @@ ALL_CHECKPOINT_FILES = TRANSFORMER_FILES + TEXT_ENCODER_FILES + VAE_FILES + CONF
 # ---------------------------------------------------------------------------
 
 
-METADATA = RecipeMetadata(source=REPO_TURBO)
+METADATA = RecipeMetadata(
+    source=REPO_TURBO,
+    license="apache-2.0",
+)
 
 
 def _sanitize_transformer_key(key: str) -> str:
