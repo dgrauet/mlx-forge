@@ -400,3 +400,34 @@ class TestCardExcludesHubPlumbing:
         )
         assert ".DS_Store" not in card
         assert "tokenizer/spiece.model" in card
+
+
+class TestCardOnlyListingProvenance:
+    """In --card-only nothing local is uploaded, so the remote is the truth."""
+
+    def test_remote_sizes_win_over_a_divergent_local_build(self, tmp_path):
+        from mlx_forge.cli import _card_file_listing
+
+        model_dir = _model_dir(tmp_path)  # local transformer.safetensors is 10 bytes
+        api = _api()
+        info = api.model_info.return_value
+        info.siblings = [MagicMock(rfilename="transformer.safetensors", size=999)]
+
+        listing = _card_file_listing(api, "test/repo", model_dir, card_only=True)
+
+        assert listing["transformer.safetensors"] == 999, (
+            "a local directory holding another build must not set the published size"
+        )
+
+    def test_a_full_upload_still_prefers_the_local_build(self, tmp_path):
+        from mlx_forge.cli import _card_file_listing
+
+        model_dir = _model_dir(tmp_path)
+        api = _api()
+        api.model_info.return_value.siblings = [
+            MagicMock(rfilename="transformer.safetensors", size=999)
+        ]
+
+        listing = _card_file_listing(api, "test/repo", model_dir, card_only=False)
+
+        assert listing["transformer.safetensors"] == 10, "the local files are what goes up"
