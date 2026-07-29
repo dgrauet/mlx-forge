@@ -23,6 +23,7 @@ import tempfile
 
 from huggingface_hub import HfApi, hf_hub_download
 
+from mlx_forge.cli import _remote_variants
 from mlx_forge.upload import backfill_from_recipe, generate_model_card
 
 api = HfApi()
@@ -49,6 +50,9 @@ for m in sorted(api.list_models(author=AUTHOR), key=lambda x: x.id):
 
     d = pathlib.Path(tempfile.mkdtemp())
     split_info = backfill_from_recipe(d, dict(split_info))
+    # Mirror the CLI exactly, including the remote-derived variant lists —
+    # otherwise this tool reports losses a real refresh would not produce.
+    variants, loras = _remote_variants(api, repo)
     genere = generate_model_card(
         d,
         split_info=split_info,
@@ -58,22 +62,35 @@ for m in sorted(api.list_models(author=AUTHOR), key=lambda x: x.id):
         usage_url=split_info.get("usage_url"),
         links=split_info.get("links"),
         cli_snippet=split_info.get("cli_snippet"),
+        transformer_variants=variants,
+        lora_files=loras,
     )
     diff = list(
         difflib.unified_diff(
             publie.splitlines(), genere.splitlines(), "publie", "genere", lineterm="", n=0
         )
     )
-    pertes = [
-        line
-        for line in diff
-        if line.startswith("-") and not line.startswith("---") and line[1:].strip()
-    ]
-    ajouts = [
-        line
-        for line in diff
-        if line.startswith("+") and not line.startswith("+++") and line[1:].strip()
-    ]
+
+    def contenu(prefixe, entete):
+        return [
+            line
+            for line in diff
+            if line.startswith(prefixe) and not line.startswith(entete) and line[1:].strip()
+        ]
+
+    def cle(line: str) -> str:
+        # Same pairing the CLI uses: an entry whose size or value changed is a
+        # modification, not content disappearing.
+        body = line[1:]
+        if body.startswith("- `"):
+            return body.split("` (")[0]
+        if body.startswith("- **") and ":**" in body:
+            return body.split(":**", 1)[0]
+        return body
+
+    ajouts = contenu("+", "+++")
+    remplaces = {cle(line) for line in ajouts}
+    pertes = [line for line in contenu("-", "---") if cle(line) not in remplaces]
     pertes_totales += len(pertes)
     resume.append((repo.split("/")[-1], len(pertes), len(ajouts)))
     if pertes and "-v" in sys.argv:
