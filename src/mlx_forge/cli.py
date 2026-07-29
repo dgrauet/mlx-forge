@@ -411,7 +411,11 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
     # them on the entry name keeps the warning meaningful: it must fire on
     # content that disappears, not on a size that moved.
     def cle(line: str) -> str:
-        return line.split("` (")[0] if line.startswith("- `") else line
+        if line.startswith("- `"):  # a file entry: pair on the name, not the size
+            return line.split("` (")[0]
+        if line.startswith("- **") and ":**" in line:  # a metadata line: pair on the label
+            return line.split(":**", 1)[0]
+        return line
 
     ajoutees = {cle(line) for line in entrees("+", "+++")}
     perdues = [line for line in entrees("-", "---") if cle(line) not in ajoutees]

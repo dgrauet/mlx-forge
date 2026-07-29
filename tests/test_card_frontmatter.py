@@ -169,3 +169,46 @@ def test_metadata_without_optional_fields_stays_minimal():
         "recipe": "r",
         "source": "a/b",
     }
+
+
+class TestBlankLineBeforeSections:
+    """A markdown list must not run into the next heading.
+
+    The metadata block (transformer variants, model version, quantization) was
+    glued to `## Usage` when the generator moved to Jinja: `{% endif -%}` eats
+    the blank line. Checked in every shape, since a literal blank line in the
+    wrong place appears even when the block is absent.
+    """
+
+    def _card(self, tmp_path, **kwargs):
+        return generate_model_card(
+            tmp_path,
+            config=kwargs.pop("config", {}),
+            repo_id="u/m",
+            file_listing={"m.safetensors": 10},
+            **kwargs,
+        )
+
+    @pytest.mark.parametrize(
+        "split_info,config,usage_url",
+        [
+            (
+                {"source": "L/X", "transformer_variants": ["a", "b"]},
+                {"model_version": "2.3"},
+                "https://x/y",
+            ),
+            ({"source": "L/X", "transformer_variants": ["a"]}, {"model_version": "2.3"}, None),
+            ({"source": "L/X"}, {}, "https://x/y"),
+            ({"source": "L/X"}, {}, None),
+            ({"source": "L/X", "quantized": True, "quantization_bits": 8}, {}, None),
+        ],
+    )
+    def test_exactly_one_blank_line_before_the_first_heading(
+        self, tmp_path, split_info, config, usage_url
+    ):
+        card = self._card(tmp_path, split_info=split_info, config=config, usage_url=usage_url)
+        lines = card.splitlines()
+        i = next(k for k, line in enumerate(lines) if line.startswith("## "))
+
+        assert lines[i - 1] == "", "a list or paragraph is glued to the heading"
+        assert lines[i - 2] != "", "double blank line before the heading"
