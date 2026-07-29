@@ -308,6 +308,37 @@ def _run_generic_quantize(args) -> None:
     )
 
 
+def _remote_variants(api, repo_id: str) -> tuple[list[str] | None, list[str] | None]:
+    """Transformer variants and LoRAs as they exist on the remote.
+
+    A delta upload adds files this directory never had, so a refresh must read
+    the repo rather than the manifest. Returns (None, None) when the repo
+    cannot be queried, letting the card fall back to split_model.json.
+    """
+    from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
+
+    try:
+        info = api.model_info(repo_id)
+        remote_files = [s.rfilename for s in (info.siblings or [])]
+    except (RepositoryNotFoundError, HfHubHTTPError, OSError, ConnectionError):
+        return None, None
+
+    if not remote_files:
+        return None, None
+
+    variants = sorted(
+        v
+        for f in remote_files
+        if f.startswith("transformer-") and f.endswith(".safetensors")
+        for v in [f.removeprefix("transformer-").removesuffix(".safetensors")]
+        if v
+    )
+    loras = sorted(f for f in remote_files if "lora" in f and f.endswith(".safetensors"))
+    print(f"Detected variants on remote: {', '.join(variants) or '(none)'}")
+    print(f"Detected LoRAs on remote: {', '.join(loras) or '(none)'}")
+    return variants, loras
+
+
 def _card_file_listing(api, repo_id: str, model_dir, *, card_only: bool = False) -> dict[str, int]:
     """What the repo will contain: the remote listing plus what is about to go up.
 
@@ -369,11 +400,21 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
         for line in diff:
             print(line)
 
-    perdues = [
-        line
-        for line in diff
-        if line.startswith("-") and not line.startswith("---") and line[1:].strip()
-    ]
+    def entrees(prefixe, entete):
+        return [
+            line[1:]
+            for line in diff
+            if line.startswith(prefixe) and not line.startswith(entete) and line[1:].strip()
+        ]
+
+    # A file whose size changed shows as one removal plus one addition. Pairing
+    # them on the entry name keeps the warning meaningful: it must fire on
+    # content that disappears, not on a size that moved.
+    def cle(line: str) -> str:
+        return line.split("` (")[0] if line.startswith("- `") else line
+
+    ajoutees = {cle(line) for line in entrees("+", "+++")}
+    perdues = [line for line in entrees("-", "---") if cle(line) not in ajoutees]
     print(f"\n{'-' * 60}")
     if perdues:
         print(f"WARNING: {len(perdues)} line(s) would be REMOVED from the published card.")
@@ -455,6 +496,10 @@ def _run_upload(args) -> None:
     # delta upload the remote holds files this directory never had.
     file_listing = _card_file_listing(api, repo_id, model_dir, card_only=args.card_only)
 
+    # A refresh describes the repo as it is, including files a delta upload
+    # added that this directory never held.
+    variants, loras = _remote_variants(api, repo_id) if args.card_only else (None, None)
+
     # Generate and write model card
     card_content = generate_model_card(
         model_dir,
@@ -467,6 +512,8 @@ def _run_upload(args) -> None:
         links=args.link or split_info.get("links"),
         cli_snippet=args.cli_snippet or split_info.get("cli_snippet"),
         file_listing=file_listing,
+        transformer_variants=variants,
+        lora_files=loras,
     )
     if args.dry_run:
         _show_card_diff(api, repo_id, card_content, model_dir, card_only=args.card_only)

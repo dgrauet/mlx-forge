@@ -10,6 +10,7 @@ import json
 
 import mlx.core as mx
 
+from mlx_forge.cli import main
 from mlx_forge.convert import classify_keys, load_safetensors, process_component
 from mlx_forge.quantize import quantize_weights
 from mlx_forge.recipes.ltx_23 import (
@@ -522,8 +523,7 @@ class TestDeltaWorkflowEndToEnd:
     def test_delta_workflow_glue(self, tmp_path, capsys):
         import argparse
         import json
-        from pathlib import Path
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from mlx_forge.recipes import ltx_23
         from mlx_forge.upload import upload_model
@@ -589,22 +589,28 @@ class TestDeltaWorkflowEndToEnd:
         assert "transformer-distilled-1.1.safetensors" in uploaded
         assert "config.json" not in uploaded  # already on remote
 
-        # Stage 4: upload --card-only refreshes card with remote-derived variants
+        # Stage 4: `upload --card-only` refreshes the card from the remote.
+        # The card is assembled by the CLI, which owns every input; upload_model
+        # only pushes what is on disk, so this drives the CLI.
         api2 = MagicMock()
         info2 = MagicMock()
         info2.siblings = [
-            MagicMock(rfilename="transformer-distilled.safetensors"),
-            MagicMock(rfilename="transformer-distilled-1.1.safetensors"),
+            MagicMock(rfilename="transformer-distilled.safetensors", size=1),
+            MagicMock(rfilename="transformer-distilled-1.1.safetensors", size=1),
         ]
         api2.model_info.return_value = info2
         api2.create_repo.return_value = "https://huggingface.co/user/repo"
 
-        upload_model(tmp_path, api=api2, repo_id="user/repo", card_only=True)
+        with (
+            patch(
+                "sys.argv",
+                ["mlx-forge", "upload", str(tmp_path), "--repo-id", "user/repo", "--card-only"],
+            ),
+            patch("huggingface_hub.HfApi", return_value=api2),
+        ):
+            main()
 
-        readme_call = next(
-            c for c in api2.upload_file.call_args_list if c.kwargs["path_in_repo"] == "README.md"
-        )
-        readme_text = Path(readme_call.kwargs["path_or_fileobj"]).read_text()
+        readme_text = (tmp_path / "README.md").read_text()
         # Both remote variants must appear in the regenerated card
         assert "distilled" in readme_text
         assert "distilled-1.1" in readme_text
