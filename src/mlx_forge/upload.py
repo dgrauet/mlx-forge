@@ -62,9 +62,21 @@ def derive_repo_id(
     Returns:
         Repo ID string like "user/ltx-2.3-mlx-q8".
     """
-    # Extract model name from source (e.g. "Lightricks/LTX-2.3" -> "ltx-2.3")
+    # The recipe declaration names the build, and is what the published repo
+    # names encode. `source` is prose: its last segment can be a subfolder, so
+    # deriving from it turned "baidu/ERNIE-Image-Turbo/pe" into "pe-mlx" — a
+    # junk repo — and truncating to the parent repo would be worse still, since
+    # that is the sibling model's real repository.
     source = split_info.get("source", "")
-    if "/" in source:
+    recipe = split_info.get("recipe")
+    variant = split_info.get("variant")
+    if recipe:
+        model_name = "-".join(part for part in (recipe, variant) if part).lower()
+    elif re.search(r"-mlx(?:-q\d+)?$", model_dir.name):
+        # A manifest predating the `recipe` key: the directory the operator
+        # named is a better signal than a source that may point inside a repo.
+        model_name = model_dir.name.lower()
+    elif "/" in source:
         model_name = source.split("/")[-1].lower()
     else:
         model_name = source.lower() or model_dir.name
@@ -75,11 +87,16 @@ def derive_repo_id(
     # in the dir name: some recipes (e.g. vjepa2) record quantization only in the
     # dir name + a separate quantize_config.json, not in split_model.json. No-op
     # for source-derived names (they carry no -mlx suffix).
+    # Read the bits off the DIRECTORY, which is where they are encoded, rather
+    # than off model_name — which no longer carries the suffix when the recipe
+    # named it. Some recipes (vjepa2) record quantization nowhere else.
     dir_bits: int | None = None
+    dir_match = re.search(r"-mlx-q(\d+)$", model_dir.name)
+    if dir_match:
+        dir_bits = int(dir_match.group(1))
+
     suffix_match = re.search(r"-mlx(?:-q(\d+))?$", model_name)
     if suffix_match:
-        if suffix_match.group(1):
-            dir_bits = int(suffix_match.group(1))
         model_name = model_name[: suffix_match.start()]
 
     quantized = split_info.get("quantized", False)
