@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7](https://github.com/dgrauet/mlx-forge/compare/v0.4.6...v0.4.7) (2026-08-10)
+
+
+### Features
+
+* **cards:** generate the card from the recipe declaration, losslessly ([#68](https://github.com/dgrauet/mlx-forge/issues/68)) ([c46fd7e](https://github.com/dgrauet/mlx-forge/commit/c46fd7eb1874d2748cd4550c632c5f6f6efa8196))
+* **upload:** add --dry-run, and let --card-only work without local weights ([#70](https://github.com/dgrauet/mlx-forge/issues/70)) ([948bd24](https://github.com/dgrauet/mlx-forge/commit/948bd247bc5d023d4cd64a24cf68d32b548df59b))
+
+
+### Bug Fixes
+
+* **cards:** keep the blank line between the metadata list and the next heading ([#71](https://github.com/dgrauet/mlx-forge/issues/71)) ([870cf6d](https://github.com/dgrauet/mlx-forge/commit/870cf6d2dba76a672288d3fb84afc8ad484b5cce))
+* **scripts:** make the card checker mirror the CLI it is meant to predict ([#72](https://github.com/dgrauet/mlx-forge/issues/72)) ([a49cd8f](https://github.com/dgrauet/mlx-forge/commit/a49cd8f8b94f95e775f3d3a6f3b95db522824df0))
+* **upload:** derive the repo name from the recipe, not from a path segment ([#73](https://github.com/dgrauet/mlx-forge/issues/73)) ([d639cd6](https://github.com/dgrauet/mlx-forge/commit/d639cd64ed96e5f6b943756ab07317252ae9ad57))
+
 ## [0.4.6](https://github.com/dgrauet/mlx-forge/compare/v0.4.5...v0.4.6) (2026-07-28)
 
 
