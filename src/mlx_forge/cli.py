@@ -189,7 +189,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=None,
         metavar="'Label: URL'",
-        help="Related project link for model card (repeatable, format: 'Label: URL')",
+        help=(
+            "Extra related-project link for the model card, ADDED to the ones "
+            "the recipe declares (repeatable, format: 'Label: URL'). Use it for "
+            "what is true of this repo alone, typically its sibling builds "
+            "('q8 variant: https://huggingface.co/...'); a link true of every "
+            "build belongs in the recipe. Recorded in split_model.json so a "
+            "later --card-only refresh keeps it."
+        ),
     )
     upload_parser.add_argument(
         "--cli-snippet",
@@ -468,6 +475,7 @@ def _run_upload(args) -> None:
     from .convert import ensure_license_file
     from .upload import (
         backfill_from_recipe,
+        card_links,
         derive_repo_id,
         generate_model_card,
         load_model_metadata,
@@ -543,7 +551,8 @@ def _run_upload(args) -> None:
         base_model=args.base_model,
         license_id=args.license,
         usage_url=args.usage_url or split_info.get("usage_url"),
-        links=args.link or split_info.get("links"),
+        # The recipe's links plus this repo's own; --link adds, never replaces.
+        links=card_links(split_info, args.link),
         cli_snippet=args.cli_snippet or split_info.get("cli_snippet"),
         file_listing=file_listing,
         transformer_variants=variants,

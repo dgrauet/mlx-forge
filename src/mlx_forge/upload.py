@@ -336,6 +336,37 @@ def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
     return merged
 
 
+def sibling_links(split_info: dict, supplied: list[str] | None) -> list[str]:
+    """The operator's links that the recipe does not already declare.
+
+    Keeps the manifest holding only what is specific to this repo — its
+    "q8 variant: ..." siblings — rather than a frozen copy of the declaration.
+    Order is preserved and duplicates dropped, so passing a declared link again
+    is a no-op instead of printing it twice.
+    """
+    declared = list(split_info.get("links") or [])
+    seen = set(declared)
+    out = []
+    for link in supplied or []:
+        if link not in seen:
+            seen.add(link)
+            out.append(link)
+    return out
+
+
+def card_links(split_info: dict, supplied: list[str] | None = None) -> list[str]:
+    """Every link the card shows: the recipe's, then this repo's own.
+
+    The declaration comes first so the common links read the same across a
+    model's bf16/q8/q4 repos, with the siblings appended.
+    """
+    links = list(split_info.get("links") or [])
+    for link in [*(split_info.get("extra_links") or []), *(supplied or [])]:
+        if link not in links:
+            links.append(link)
+    return links
+
+
 def persist_card_metadata(
     model_dir: Path,
     split_info: dict,
@@ -355,7 +386,16 @@ def persist_card_metadata(
         The updated split_info (unchanged, and nothing written, if no metadata
         was supplied).
     """
-    supplied = {"usage_url": usage_url, "links": links, "cli_snippet": cli_snippet}
+    # Links are stored apart from the recipe's own, under `extra_links`. A repo
+    # needs the declared links PLUS its siblings ("q8 variant: ..."), which are
+    # true of that repo and of no other. Folding them into `links` would freeze
+    # a copy of the declaration in the manifest, so a link later added to the
+    # recipe would never reach the repos that once passed --link.
+    supplied = {
+        "usage_url": usage_url,
+        "extra_links": sibling_links(split_info, links),
+        "cli_snippet": cli_snippet,
+    }
     new = {k: v for k, v in supplied.items() if v and split_info.get(k) != v}
     if not new:
         return split_info
