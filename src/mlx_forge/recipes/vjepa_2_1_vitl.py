@@ -408,7 +408,12 @@ def convert(args) -> None:
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
 
-    # split_model.json so `mlx-forge upload` can derive the repo card.
+    # split_model.json so `mlx-forge upload` can derive the repo card. The
+    # declaration has to go in: without it the manifest names no recipe and no
+    # source, so `upload` cannot bind the directory back to this recipe and
+    # regenerates a card stripped of its license, links and usage. That is how
+    # dgrauet/vjepa-2.1-vitl-mlx came to have a manifest identifying nothing —
+    # reconverting it would have reproduced the same one.
     split_info = {
         "model_name": "vjepa-2.1-vitl-mlx",
         "components": {
@@ -416,6 +421,7 @@ def convert(args) -> None:
             PREDICTOR_COMPONENT: PREDICTOR_OUTPUT_FILENAME,
         },
         "quantized": bool(args.quantize),
+        **METADATA.as_split_fields(),
     }
     write_split_model(output_dir, split_info)
 
