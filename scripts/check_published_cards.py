@@ -24,7 +24,7 @@ import tempfile
 from huggingface_hub import HfApi, hf_hub_download
 
 from mlx_forge.cli import _remote_variants
-from mlx_forge.upload import backfill_from_recipe, generate_model_card
+from mlx_forge.upload import backfill_from_recipe, card_links, generate_model_card
 
 api = HfApi()
 pertes_totales = 0
@@ -60,7 +60,11 @@ for m in sorted(api.list_models(author=AUTHOR), key=lambda x: x.id):
         repo_id=repo,
         file_listing=listing,
         usage_url=split_info.get("usage_url"),
-        links=split_info.get("links"),
+        # card_links(), not split_info["links"]: the CLI renders the recipe's
+        # links followed by the repo's own `extra_links`, so reading only the
+        # declaration reported every sibling link as a loss the refresh would
+        # not cause. Same failure as #72 — this tool must mirror the CLI.
+        links=card_links(split_info),
         cli_snippet=split_info.get("cli_snippet"),
         transformer_variants=variants,
         lora_files=loras,
