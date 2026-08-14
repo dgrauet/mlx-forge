@@ -105,9 +105,29 @@ def test_the_front_matter_is_tagged(tmp_path):
 
 def test_a_per_build_note_is_published_verbatim(tmp_path):
     note = "**This is the 32 GB configuration**: peaks at ~23.7 GB.\nPSNR = 35.5 dB."
-    card = _quantized(tmp_path, notes=note)
+    card = _quantized(tmp_path, build_note=note)
 
     assert note in card
+
+
+def test_the_legacy_notes_table_is_not_mistaken_for_prose(tmp_path):
+    """Six published manifests use `notes` for a {component: explanation} map.
+
+    Rendering one as a paragraph raised UndefinedError and took the card down —
+    hence `build_note` for the prose, and a guard for the day both appear.
+    """
+    card = _quantized(
+        tmp_path,
+        notes={"vocoder": "Also contains BWE generator weights."},
+        build_note="Peaks at ~23.7 GB.",
+    )
+
+    assert "Peaks at ~23.7 GB." in card
+    assert "vocoder" not in card
+
+
+def test_a_non_string_build_note_is_ignored_rather_than_fatal(tmp_path):
+    assert "## Files" in _quantized(tmp_path, build_note={"unexpected": "shape"})
 
 
 def test_the_quantize_config_note_follows_the_snippet(tmp_path):

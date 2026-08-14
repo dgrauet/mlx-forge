@@ -249,7 +249,10 @@ def generate_model_card(
         quantization_scope=split_info.get("quantization_scope"),
         quantized_from=unquantized_repo(repo_id, bits),
         quantize_command=quantize_command(split_info, bits),
-        notes=split_info.get("notes"),
+        # build_note, not `notes`: six published manifests already use `notes`
+        # for a {component: explanation} table, and rendering one as prose
+        # crashed the card. Guarded as well, since the two keys will coexist.
+        build_note=(bn if isinstance(bn := split_info.get("build_note"), str) else None),
         usage_url=usage_url,
         cli_snippet=(cli_snippet or "").format(repo_id=repo_id) or None,
         usage_note=split_info.get("usage_note"),
@@ -442,7 +445,7 @@ def persist_card_metadata(
         "usage_url": usage_url,
         "extra_links": sibling_links(split_info, links),
         "cli_snippet": cli_snippet,
-        "notes": note,
+        "build_note": note,
     }
     new = {k: v for k, v in supplied.items() if v and split_info.get(k) != v}
     if not new:
