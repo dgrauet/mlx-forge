@@ -23,6 +23,9 @@ SPLIT_MODEL_KEYS = (
     "source",
     "base_model",
     "license",
+    "license_name",
+    "license_link",
+    "license_file",
     "links",
     "usage_url",
     "cli_snippet",
@@ -59,6 +62,23 @@ class RecipeMetadata:
         license: SPDX identifier for the card front-matter. Declared here
             because the CLI default ("other") silently downgraded it on every
             refresh — 13 of the 21 published repos carry apache-2.0 or mit.
+        license_name: Slug identifying the licence when `license` is "other",
+            which is the SPDX escape hatch and says nothing on its own. Mirror
+            the upstream repo's own value verbatim
+            ("ltx-2-community-license-agreement").
+        license_link: Where the licence text lives upstream. Same rule: copy
+            what the upstream card declares rather than inventing a URL.
+        license_file: Path(s), inside the upstream Hub repo, of the legal text
+            to ship next to the weights — usually "LICENSE". Converting and
+            quantising produces a derivative, and the community licences these
+            models ship under require passing the agreement on to whoever
+            receives it, so a link in the front-matter is not enough. Declaring
+            it makes `convert` fetch the files verbatim and `upload` refuse to
+            publish without them. Leave None for a licence that carries no such
+            obligation (apache-2.0, mit — the front-matter identifier suffices).
+            A tuple when the obligation covers more than the licence itself:
+            Hunyuan3D ships a Notice.txt alongside its LICENSE, and passing on
+            only half of what upstream attaches is not passing it on.
         links: Related projects, each "Label: URL".
         usage_url: Inference project that consumes these weights.
         usage_note: Clause appended after the project link, before the period —
@@ -76,6 +96,9 @@ class RecipeMetadata:
     known_sources: tuple[str, ...] = ()
     base_model: str | None = None
     license: str | None = None
+    license_name: str | None = None
+    license_link: str | None = None
+    license_file: str | tuple[str, ...] | None = None
     links: list[str] = field(default_factory=list)
     usage_url: str | None = None
     usage_note: str | None = None
@@ -102,6 +125,14 @@ class RecipeMetadata:
             out["base_model"] = self.base_model
         if self.license:
             out["license"] = self.license
+        if self.license_name:
+            out["license_name"] = self.license_name
+        if self.license_link:
+            out["license_link"] = self.license_link
+        if self.license_file:
+            # Always a list in the manifest, so readers need not handle both
+            # shapes; the declaration keeps the convenient scalar form.
+            out["license_file"] = list(license_files(self.license_file))
         if self.links:
             out["links"] = list(self.links)
         if self.usage_url:
@@ -111,6 +142,20 @@ class RecipeMetadata:
         if self.cli_snippet:
             out["cli_snippet"] = self.cli_snippet
         return out
+
+
+def license_files(declared: str | list | tuple | None) -> tuple[str, ...]:
+    """The declared licence paths, as a tuple, whichever shape they came in.
+
+    A recipe declares one path or several; the manifest stores a list; a
+    manifest written before the field existed has none. One reader for all
+    three, so no call site has to re-derive the distinction.
+    """
+    if not declared:
+        return ()
+    if isinstance(declared, str):
+        return (declared,)
+    return tuple(declared)
 
 
 def is_hub_repo_id(value: str | None) -> bool:

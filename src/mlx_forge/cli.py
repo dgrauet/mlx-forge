@@ -364,6 +364,19 @@ def _card_file_listing(api, repo_id: str, model_dir, *, card_only: bool = False)
         pass  # new repo, or offline: the local directory is the whole story
 
     if card_only and listing:
+        # ...except the files this mode does push. A refresh carries the licence
+        # copy up alongside the card, and a card whose Files section omits it
+        # would describe the repo as it was a second before.
+        from pathlib import Path
+
+        from .metadata import license_files
+        from .upload import load_model_metadata
+
+        declared = load_model_metadata(model_dir)[0].get("license_file")
+        for name in (Path(f).name for f in license_files(declared)):
+            local = model_dir / name
+            if local.exists():
+                listing[name] = local.stat().st_size
         return listing
 
     for p in iter_model_files(model_dir):
@@ -428,11 +441,14 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
         print("No content would be lost.")
 
     print("\nA real run would push:")
-    print("  README.md")
     if card_only:
-        if (model_dir / "split_model.json").exists():
-            print("  split_model.json")
+        # Asked of the same function the real run obeys, so this cannot drift.
+        from .upload import card_only_files
+
+        for name in card_only_files(model_dir):
+            print(f"  {name}")
     else:
+        print("  README.md")
         print(f"  every file in {model_dir} (see the Files section above)")
 
 
@@ -442,6 +458,7 @@ def _run_upload(args) -> None:
 
     from huggingface_hub import HfApi
 
+    from .convert import ensure_license_file
     from .upload import (
         backfill_from_recipe,
         derive_repo_id,
@@ -485,6 +502,12 @@ def _run_upload(args) -> None:
     # A directory converted before a metadata field existed carries a manifest
     # without it; recover it from the recipe rather than publishing the default.
     split_info = backfill_from_recipe(model_dir, split_info)
+
+    # Publishing a derivative of a community-licensed model obliges us to hand
+    # the recipient a copy of the agreement, so this runs before the file
+    # listing is built: the licence is part of what the card advertises, and a
+    # missing one stops the upload rather than being reported afterwards.
+    ensure_license_file(model_dir, split_info)
 
     # Record anything the operator supplied, so a later --card-only refresh
     # does not silently drop it.

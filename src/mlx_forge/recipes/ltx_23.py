@@ -119,7 +119,14 @@ VARIANT_FILENAMES = {
 METADATA = RecipeMetadata(
     name="ltx-2.3",
     source="Lightricks/LTX-2.3",
+    # Mirrors what Lightricks/LTX-2.3 declares. Converting to MLX and quantising
+    # makes our packs "Derivatives" under §1.5 of the LTX-2.x Community License,
+    # and §3.2 obliges us to give any third-party recipient a copy of the
+    # agreement — hence license_file, not just the link.
     license="other",
+    license_name="ltx-2-community-license-agreement",
+    license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+    license_file="LICENSE",
     usage_url="https://github.com/dgrauet/ltx-2-mlx",
     usage_note="a native MLX inference pipeline for LTX-2.3 on Apple Silicon",
     links=[

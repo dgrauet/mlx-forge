@@ -18,7 +18,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
 from .convert import SPLIT_MODEL_FILENAME, write_split_model
-from .metadata import hub_repo_from_source
+from .metadata import hub_repo_from_source, license_files
 from .quantize import format_bytes
 
 
@@ -159,6 +159,12 @@ def generate_model_card(
         license_id: SPDX identifier. None falls back to the recipe's declared
             license, then to "other" — passing the CLI default unconditionally
             used to downgrade apache-2.0/mit cards on every refresh.
+
+    The `license_name`/`license_link` front-matter fields and the License
+    section come from the manifest only: "other" is the SPDX escape hatch and
+    identifies nothing on its own, so a card claiming it without naming the
+    agreement tells a recipient neither what the terms are nor where to read
+    them. They mirror what the upstream repo declares.
         usage_url: Optional URL to an inference project that uses these weights.
         links: Optional list of related project links in "Label: URL" format.
         cli_snippet: Optional bash snippet to include in the Usage section.
@@ -215,6 +221,11 @@ def generate_model_card(
         repo_id=repo_id,
         base_model=base_model,
         license_id=license_id or split_info.get("license") or "other",
+        license_name=split_info.get("license_name"),
+        license_link=split_info.get("license_link"),
+        # The card points at the local copies, whose names are the upstream
+        # basenames — `license_file` may name a path inside the upstream repo.
+        license_files=[Path(f).name for f in license_files(split_info.get("license_file"))],
         transformer_variants=transformer_variants,
         lora_files=lora_files or [],
         model_version=model_version,
@@ -331,6 +342,26 @@ def persist_card_metadata(
     return merged
 
 
+def card_only_files(model_dir: Path) -> list[str]:
+    """Repo-relative names a `--card-only` refresh pushes, README first.
+
+    One function so `--dry-run` cannot advertise a different set than the real
+    run performs: the two used to state the list independently, and the dry run
+    kept claiming two files after the licence copy became a third.
+
+    Beyond the card: split_model.json, because metadata the operator supplied
+    would otherwise stay local and be lost by the next refresh; and the licence
+    copies, because this mode is how an already-published repo is brought up to
+    date, and a card linking to `./LICENSE` must not land in a repo without one.
+
+    README.md is always first and always listed: `--dry-run` asks before it is
+    written, and the upload writes it before pushing.
+    """
+    declared = load_model_metadata(model_dir)[0].get("license_file")
+    companions = [SPLIT_MODEL_FILENAME, *(Path(f).name for f in license_files(declared))]
+    return ["README.md", *(n for n in companions if (model_dir / n).exists())]
+
+
 def upload_model(
     model_dir: Path,
     *,
@@ -443,14 +474,12 @@ def upload_model(
                 repo_id=repo_id,
                 commit_message=commit_message,
             )
-            # Card metadata the operator just supplied lives in split_model.json;
-            # without this it would stay local and the next refresh would lose it.
-            split_path = model_dir / SPLIT_MODEL_FILENAME
-            if split_path.exists():
-                print(f"Uploading {SPLIT_MODEL_FILENAME} -> {repo_id}...")
+            for name in card_only_files(model_dir)[1:]:
+                path = model_dir / name
+                print(f"Uploading {name} -> {repo_id}...")
                 api.upload_file(
-                    path_or_fileobj=str(split_path),
-                    path_in_repo=SPLIT_MODEL_FILENAME,
+                    path_or_fileobj=str(path),
+                    path_in_repo=name,
                     repo_id=repo_id,
                     commit_message=commit_message,
                 )

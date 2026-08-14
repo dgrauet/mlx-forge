@@ -105,6 +105,31 @@ card. Operator flags still win for one-offs, and anything they pass
 This replaced metadata that lived only in CLI flags, which is why the published
 cards below track neither the recipe nor a rule.
 
+### Licence
+
+Converting and quantising produces a **derivative**, so what upstream attaches
+to its weights travels with ours. Three fields mirror the upstream repo's own
+declaration — never a paraphrase, never a guess:
+
+```python
+license="other",                    # SPDX id; "other" identifies nothing alone
+license_name="ltx-2-community-license-agreement",
+license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+license_file="LICENSE",             # or a tuple: ("LICENSE", "Notice.txt")
+```
+
+`license_file` is the one with teeth. The community licences (LTX-2.x §3.2,
+Tencent Hunyuan) oblige whoever distributes a derivative to give the recipient
+*a copy of the agreement*; a link in the front-matter does not discharge that.
+Declaring it makes `convert` fetch the file verbatim from upstream and `upload`
+**refuse to publish** without it. Leave it `None` for apache-2.0 or mit, which
+the SPDX identifier satisfies on its own.
+
+The fetch hangs off `write_split_model()`, the one function all ten recipes
+call, so a recipe cannot forget it. It is best-effort there (a Hub hiccup must
+not destroy a long conversion) and strict in the upload path, which is where the
+obligation actually binds.
+
 ### Evidence from the published cards
 
 Measured against the 21 repos under `dgrauet/` on the Hub (July 2026):

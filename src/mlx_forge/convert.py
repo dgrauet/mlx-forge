@@ -139,7 +139,74 @@ def write_split_model(output_dir: Path, info: dict) -> Path:
     path = output_dir / SPLIT_MODEL_FILENAME
     with open(path, "w") as f:
         json.dump(info, f, indent=2)
+    # Best effort here so a licence server hiccup cannot destroy a conversion
+    # that took twenty minutes. The obligation binds on distribution, so the
+    # blocking check lives in the upload path, which calls this strictly.
+    ensure_license_file(output_dir, info, strict=False)
     return path
+
+
+def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) -> list[Path]:
+    """Place the upstream licence text next to the weights, if any is declared.
+
+    Converting and quantising a model produces a derivative, and the community
+    licences these models ship under oblige whoever distributes one to hand the
+    recipient a copy of the agreement — a `license_link` in the card front-matter
+    does not discharge that. The recipe declares `license_file`; this fetches it
+    verbatim from the upstream repo. Never rewrite or summarise the text: a
+    paraphrase is not "a copy of this Agreement".
+
+    Called from `write_split_model`, which every recipe goes through, so no
+    recipe can forget it, and again from the upload path where `strict` applies.
+
+    Args:
+        output_dir: The converted model directory.
+        info: split_model.json contents; `license_file` names the path(s) inside
+            the upstream repo, `base_model`/`source` identify that repo.
+        strict: Abort on failure rather than warning. True when publishing.
+
+    Returns:
+        The local paths written, empty when nothing is declared or a fetch
+        failed in non-strict mode. Each lands at the repo root under its
+        basename, which is what the card links to.
+    """
+    from .metadata import hub_repo_from_source, license_files
+
+    declared = license_files(info.get("license_file"))
+    if not declared:
+        return []
+
+    def refuse(message: str) -> list[Path]:
+        if strict:
+            raise SystemExit(
+                f"ERROR: {message}\nThe licence obliges us to pass a copy on to "
+                "whoever receives these weights; refusing to publish without it."
+            )
+        print(f"  WARNING: {message}")
+        return []
+
+    missing = [
+        f for f in declared if not (p := output_dir / Path(f).name).exists() or not p.stat().st_size
+    ]
+    if not missing:
+        return [output_dir / Path(f).name for f in declared]
+
+    upstream = info.get("base_model") or hub_repo_from_source(info.get("source"))
+    if not upstream:
+        return refuse(
+            f"{output_dir} declares license_file={list(declared)} but names no "
+            "upstream Hub repo to fetch it from (set base_model in the recipe)"
+        )
+
+    for filename in missing:
+        try:
+            cached = hf_hub_download(repo_id=upstream, filename=filename)
+            shutil.copyfile(cached, output_dir / Path(filename).name)
+        except (HfHubHTTPError, OSError, ConnectionError, ValueError) as e:
+            return refuse(f"could not fetch {filename} from {upstream}: {e}")
+        print(f"  Licence: {filename} from {upstream} -> {Path(filename).name}")
+
+    return [output_dir / Path(f).name for f in declared]
 
 
 def print_output_summary(output_dir: Path, *, header: str | None = None) -> None:

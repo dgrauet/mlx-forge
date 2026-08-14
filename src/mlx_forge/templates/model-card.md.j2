@@ -1,6 +1,12 @@
 ---
 library_name: mlx
 license: {{ license_id }}
+{% if license_name -%}
+license_name: {{ license_name }}
+{% endif -%}
+{% if license_link -%}
+license_link: {{ license_link }}
+{% endif -%}
 {% if base_model -%}
 base_model: {{ base_model }}
 {% endif -%}
@@ -31,6 +37,15 @@ Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge).
 {% if quantized and bits -%}
 - **Quantization:** int{{ bits }}
 {% endif %}
+
+{% endif -%}
+{% if license_files -%}
+## License
+
+These weights are a derivative work and are distributed under the same terms as
+the model they were converted from. A verbatim copy ships with them as
+{% for f in license_files %}[`{{ f }}`](./{{ f }}){% if not loop.last %} and {% endif %}{% endfor %}{% if license_link %}, and the upstream text is at {{ license_link }}{% endif %}.
+Use of these weights is subject to it, including any restrictions it attaches.
 
 {% endif -%}
 {% if usage_url or cli_snippet -%}

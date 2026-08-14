@@ -78,7 +78,13 @@ PAINT_FILES = [
 METADATA = RecipeMetadata(
     name="hunyuan3d-2.1",
     source=HF_REPO_ID,
+    # Mirrors what tencent/Hunyuan3D-2.1 declares. Its community licence carries
+    # the same pass-it-on obligation as LTX's, and upstream attaches a Notice.txt
+    # to the agreement — shipping only the LICENSE would pass on half of it.
     license="other",
+    license_name="tencent-hunyuan-community",
+    license_link="https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE",
+    license_file=("LICENSE", "Notice.txt"),
     usage_url="https://github.com/dgrauet/Hunyuan3D-2.1-mlx",
     links=[
         "Code: https://github.com/dgrauet/Hunyuan3D-2.1-mlx",

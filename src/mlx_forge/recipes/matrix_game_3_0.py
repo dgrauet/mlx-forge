@@ -134,7 +134,11 @@ _DIT_SEQUENTIAL_MAP: list[tuple[str, str]] = [
 METADATA = RecipeMetadata(
     name="matrix-game-3.0",
     source=REPO_ID,
-    license="other",
+    # Skywork/Matrix-Game-3.0 declares apache-2.0. We carried "other", which
+    # understated a permissive licence and told recipients nothing; mirror the
+    # upstream identifier. apache-2.0 is satisfied by the identifier alone, so
+    # there is no license_file to ship.
+    license="apache-2.0",
     links=["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
 )
 
