@@ -481,6 +481,78 @@ def test_a_partial_copy_is_completed_not_assumed_done(tmp_path, monkeypatch):
     assert (tmp_path / "LICENSE").read_text() == "already here\n"
 
 
+def test_a_corrected_licence_reaches_an_already_converted_pack(tmp_path, monkeypatch):
+    """Correcting the recipe must reach packs converted before the correction.
+
+    matrix-game-3.0's published manifest records `license: other`, written when
+    the recipe said so; Skywork publishes apache-2.0. Under fill-only-what-is-
+    absent that stale value was unreachable — the source fix would never have
+    changed the repo.
+    """
+    from mlx_forge.upload import backfill_from_recipe
+
+    stale = {
+        "recipe": "matrix-game-3.0",
+        "source": "Skywork/Matrix-Game-3.0",
+        "license": "other",
+        "components": ["dit"],
+    }
+    (tmp_path / "split_model.json").write_text(json.dumps(stale))
+
+    merged = backfill_from_recipe(tmp_path, stale)
+
+    assert merged["license"] == "apache-2.0"
+    assert merged["components"] == ["dit"], "non-licence manifest content must survive"
+    assert json.loads((tmp_path / "split_model.json").read_text())["license"] == "apache-2.0"
+
+
+def test_the_manifest_still_wins_outside_the_licence(tmp_path):
+    """Recipe-wins is narrow: it must not overwrite what describes the build."""
+    from mlx_forge.upload import backfill_from_recipe
+
+    info = {
+        "recipe": "ltx-2.3",
+        "source": "Lightricks/LTX-2.3",
+        "usage_url": "https://example.invalid/operator-choice",
+    }
+    (tmp_path / "split_model.json").write_text(json.dumps(info))
+
+    merged = backfill_from_recipe(tmp_path, info)
+
+    assert merged["usage_url"] == "https://example.invalid/operator-choice"
+    assert merged["license_name"] == "ltx-2-community-license-agreement"
+
+
+def test_a_licence_field_no_longer_declared_is_dropped(tmp_path):
+    """A leftover license_name would keep naming an agreement that no longer applies."""
+    from mlx_forge.upload import backfill_from_recipe
+
+    info = {
+        "recipe": "matrix-game-3.0",
+        "source": "Skywork/Matrix-Game-3.0",
+        "license": "other",
+        "license_name": "some-community-license",
+    }
+    (tmp_path / "split_model.json").write_text(json.dumps(info))
+
+    merged = backfill_from_recipe(tmp_path, info)
+
+    assert merged["license"] == "apache-2.0"
+    assert "license_name" not in merged
+    assert "license_name" not in json.loads((tmp_path / "split_model.json").read_text())
+
+
+def test_backfill_writes_nothing_when_already_correct(tmp_path):
+    """Idempotent: a refresh of an up-to-date pack must not churn the manifest."""
+    from mlx_forge.upload import backfill_from_recipe
+
+    info = dict(load_recipe("ltx-2.3").METADATA.as_split_fields())
+    manifest = tmp_path / "split_model.json"
+
+    assert backfill_from_recipe(tmp_path, info) == info
+    assert not manifest.exists(), "nothing to change must mean nothing written"
+
+
 def test_no_stray_license_file_left_in_the_repo():
     """mlx-forge's own tree must not accumulate fetched licence copies."""
     root = Path(__file__).resolve().parents[1]

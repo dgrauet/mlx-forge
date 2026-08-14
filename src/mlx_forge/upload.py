@@ -159,17 +159,17 @@ def generate_model_card(
         license_id: SPDX identifier. None falls back to the recipe's declared
             license, then to "other" — passing the CLI default unconditionally
             used to downgrade apache-2.0/mit cards on every refresh.
+        usage_url: Optional URL to an inference project that uses these weights.
+        links: Optional list of related project links in "Label: URL" format.
+        cli_snippet: Optional bash snippet to include in the Usage section.
+        transformer_variants: Override for transformer variant list (default: read from split_info).
+        lora_files: Optional list of LoRA file names to include in the card.
 
     The `license_name`/`license_link` front-matter fields and the License
     section come from the manifest only: "other" is the SPDX escape hatch and
     identifies nothing on its own, so a card claiming it without naming the
     agreement tells a recipient neither what the terms are nor where to read
     them. They mirror what the upstream repo declares.
-        usage_url: Optional URL to an inference project that uses these weights.
-        links: Optional list of related project links in "Label: URL" format.
-        cli_snippet: Optional bash snippet to include in the Usage section.
-        transformer_variants: Override for transformer variant list (default: read from split_info).
-        lora_files: Optional list of LoRA file names to include in the card.
 
     Returns:
         Model card content as a string.
@@ -288,13 +288,19 @@ def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
     value — a license reverting to "other", for instance. The recipe is
     identified by the `recipe` key, or by `source` for older directories.
 
-    Only absent keys are filled: whatever the manifest already says wins, and
-    the operator's flags win over both.
+    Absent keys are filled and otherwise the manifest wins, because it describes
+    one converted directory — except for LICENSE_KEYS, where the recipe wins
+    outright. A licence is a fact about the upstream model rather than a
+    property of a build, so correcting our reading of it has to reach packs
+    converted before the correction; fill-only-what-is-absent left
+    matrix-game-3.0's stale `license: other` unreachable on the Hub. Operator
+    flags still win over both at render time.
 
     Returns:
         The updated split_info (unchanged, and nothing written, if there is
-        nothing to add or no recipe can be identified).
+        nothing to change or no recipe can be identified).
     """
+    from .metadata import LICENSE_KEYS
     from .recipes import resolve_recipe_metadata
 
     metadata = resolve_recipe_metadata(split_info)
@@ -302,13 +308,31 @@ def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
         return split_info
 
     declared = metadata.as_split_fields()
-    new = {k: v for k, v in declared.items() if k not in split_info}
-    if not new:
+    added = {k: v for k, v in declared.items() if k not in split_info}
+    corrected = {
+        k: v for k, v in declared.items() if k in LICENSE_KEYS and split_info.get(k, v) != v
+    }
+    # A licence field the recipe no longer declares is stale too: leaving a
+    # license_name behind after a model turns out to be plain apache-2.0 would
+    # keep naming an agreement that does not apply.
+    dropped = [k for k in LICENSE_KEYS if k in split_info and k not in declared]
+    if not (added or corrected or dropped):
         return split_info
 
-    merged = {**split_info, **new}
+    merged = {**split_info, **added, **corrected}
+    for key in dropped:
+        del merged[key]
     write_split_model(model_dir, merged)
-    print(f"Backfilled from the {metadata.name} recipe: {', '.join(sorted(new))}")
+
+    if added:
+        print(f"Backfilled from the {metadata.name} recipe: {', '.join(sorted(added))}")
+    for key in sorted(corrected):
+        print(
+            f"Corrected from the {metadata.name} recipe: "
+            f"{key} {split_info[key]!r} -> {merged[key]!r}"
+        )
+    if dropped:
+        print(f"Dropped (no longer declared by {metadata.name}): {', '.join(sorted(dropped))}")
     return merged
 
 

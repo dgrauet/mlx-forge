@@ -33,6 +33,16 @@ SPLIT_MODEL_KEYS = (
 )
 
 
+#: Keys the recipe is authoritative for, even against a manifest that already
+#: carries them. Everything else in the manifest describes one converted
+#: directory and wins, but a licence is a fact about the upstream model, not a
+#: property of a build: when we correct our reading of it, every pack must
+#: follow. matrix-game-3.0 recorded `license: other` where Skywork publishes
+#: apache-2.0, and a fill-only-what-is-absent rule left that stale value on the
+#: Hub forever — correcting the recipe would never have reached the repo.
+LICENSE_KEYS = ("license", "license_name", "license_link", "license_file")
+
+
 @dataclass(frozen=True)
 class RecipeMetadata:
     """What a recipe knows about its own publication.

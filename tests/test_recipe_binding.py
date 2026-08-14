@@ -81,11 +81,21 @@ class TestBackfill:
         assert stored["license"] == "apache-2.0"
 
     def test_manifest_values_win_over_the_declaration(self, tmp_path):
-        """A deliberate per-model override must not be reverted."""
-        manifest = {"source": "netflix/void-model", "license": "mit"}
+        """A deliberate per-model override must not be reverted.
+
+        Checked on usage_url, which `persist_card_metadata` really does write
+        back when the operator passes --usage-url. This test used to assert the
+        same of `license`, but nothing ever persists a licence into a manifest:
+        a value differing from the recipe is stale, not a choice, so the licence
+        is the one field where the recipe wins (see LICENSE_KEYS).
+        """
+        manifest = {"source": "netflix/void-model", "license": "apache-2.0"}
+        manifest["usage_url"] = "https://example.invalid/fork"
         (tmp_path / "split_model.json").write_text(json.dumps(manifest))
 
-        assert backfill_from_recipe(tmp_path, manifest)["license"] == "mit"
+        assert backfill_from_recipe(tmp_path, manifest)["usage_url"] == (
+            "https://example.invalid/fork"
+        )
 
     def test_unidentifiable_directory_is_left_alone(self, tmp_path):
         manifest = {"source": "someone/unknown"}
