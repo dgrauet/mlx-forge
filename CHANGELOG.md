@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8](https://github.com/dgrauet/mlx-forge/compare/v0.4.7...v0.4.8) (2026-08-14)
+
+
+### Features
+
+* **upload:** make --link add to the recipe's links instead of replacing them ([#78](https://github.com/dgrauet/mlx-forge/issues/78)) ([187e90e](https://github.com/dgrauet/mlx-forge/commit/187e90e3078737e8213da7a9146eaa3afb2bab65))
+
+
+### Bug Fixes
+
+* **cards:** ship the upstream licence with the weights it binds ([#74](https://github.com/dgrauet/mlx-forge/issues/74)) ([03e3a6f](https://github.com/dgrauet/mlx-forge/commit/03e3a6f7718548b74e211a4e55cc2ba97438b498))
+* **upload:** let a corrected licence reach already-converted packs ([#76](https://github.com/dgrauet/mlx-forge/issues/76)) ([9209483](https://github.com/dgrauet/mlx-forge/commit/92094835543044c3cc608640a656a835329e4d78))
+* **vjepa-2.1:** write the recipe declaration into the manifest ([#77](https://github.com/dgrauet/mlx-forge/issues/77)) ([08aa4b3](https://github.com/dgrauet/mlx-forge/commit/08aa4b3634c624fe8b5943a3d9c682fcd68174e0))
+
 ## [0.4.7](https://github.com/dgrauet/mlx-forge/compare/v0.4.6...v0.4.7) (2026-08-10)
 
 
