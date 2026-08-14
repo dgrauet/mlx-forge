@@ -577,6 +577,28 @@ def test_dry_run_reads_a_corrected_front_matter_value_as_a_change(tmp_path, monk
     assert "WARNING" not in out
 
 
+def test_dry_run_pairs_a_file_entry_that_gained_a_size(tmp_path, monkeypatch, capsys):
+    """A hand-written card lists files bare; the template always adds a size.
+
+    Pairing on "` (" left the two keys one backtick apart, so a file still in
+    the repo was reported as content disappearing.
+    """
+    from mlx_forge import cli
+
+    published = tmp_path / "published.md"
+    published.write_text("---\nlicense: mit\n---\n\n## Files\n\n- `config.json`\n")
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download", lambda *a, **kw: str(published), raising=True
+    )
+
+    regenerated = "---\nlicense: mit\n---\n\n## Files\n\n- `config.json` (365.00 B)\n"
+    cli._show_card_diff(None, "acme/demo-mlx", regenerated, tmp_path, card_only=True)
+
+    out = capsys.readouterr().out
+    assert "No content would be lost." in out
+    assert "WARNING" not in out
+
+
 def test_dry_run_still_warns_when_a_line_really_disappears(tmp_path, monkeypatch, capsys):
     """The pairing must not become a blanket excuse for every removal."""
     from mlx_forge import cli

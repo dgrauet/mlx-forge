@@ -199,6 +199,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     upload_parser.add_argument(
+        "--note",
+        type=str,
+        default=None,
+        help=(
+            "Paragraph shown under the model's opening lines, for what is "
+            "measured on this build alone — a memory footprint, a quality "
+            "figure. Recorded in split_model.json so a later --card-only "
+            "refresh keeps it. State only what you have actually measured: it "
+            "is published verbatim."
+        ),
+    )
+    upload_parser.add_argument(
         "--cli-snippet",
         type=str,
         default=None,
@@ -432,8 +444,13 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
     # them on the entry name keeps the warning meaningful: it must fire on
     # content that disappears, not on a size that moved.
     def cle(line: str) -> str:
-        if line.startswith("- `"):  # a file entry: pair on the name, not the size
-            return line.split("` (")[0]
+        if line.startswith("- `"):
+            # A file entry: pair on the backticked name, so a changed size is a
+            # change and not a loss. Splitting on "` (" failed when the
+            # published entry carried no size at all — hand-written cards list
+            # `config.json` bare — leaving the two keys one backtick apart and
+            # reporting a file that is still there as gone.
+            return line.split("`")[1]
         if line.startswith("- **") and ":**" in line:  # a metadata line: pair on the label
             return line.split(":**", 1)[0]
         # A front-matter field: pair on the key, so correcting a value reads as a
@@ -532,6 +549,7 @@ def _run_upload(args) -> None:
         usage_url=args.usage_url,
         links=args.link,
         cli_snippet=args.cli_snippet,
+        note=args.note,
     )
 
     # Describe the repo as it will be, not just the local directory: after a

@@ -19,7 +19,7 @@ from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
 from .convert import SPLIT_MODEL_FILENAME, write_split_model
 from .metadata import hub_repo_from_source, license_files
-from .quantize import format_bytes
+from .quantize import format_bytes, read_quantize_config
 
 
 def load_model_metadata(model_dir: Path) -> tuple[dict, dict]:
@@ -189,6 +189,18 @@ def generate_model_card(
 
     quantized = split_info.get("quantized", False)
     bits = split_info.get("quantization_bits")
+    group_size = split_info.get("quantization_group_size")
+
+    # quantize_config.json is written by the quantizer itself, so it is the
+    # authority on width and group size. Some recipes write the manifest before
+    # quantizing and never record either — void-model published three repos
+    # that way — and the group size lives nowhere else regardless.
+    qconfig = read_quantize_config(model_dir) or {}
+    if qconfig:
+        quantized = True
+        bits = bits or qconfig.get("bits")
+        group_size = group_size or qconfig.get("group_size")
+
     model_version = config.get("model_version")
 
     # Build the Files section from what the upload actually publishes — the
@@ -231,6 +243,13 @@ def generate_model_card(
         model_version=model_version,
         quantized=quantized,
         bits=bits,
+        group_size=group_size,
+        # Present only when the recipe says what its --quantize touches; that
+        # declaration is what opts a model into the fuller quantized card.
+        quantization_scope=split_info.get("quantization_scope"),
+        quantized_from=unquantized_repo(repo_id, bits),
+        quantize_command=quantize_command(split_info, bits),
+        notes=split_info.get("notes"),
         usage_url=usage_url,
         cli_snippet=(cli_snippet or "").format(repo_id=repo_id) or None,
         usage_note=split_info.get("usage_note"),
@@ -336,6 +355,33 @@ def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
     return merged
 
 
+def unquantized_repo(repo_id: str, bits: int | None) -> str | None:
+    """The bf16 repo a quantized build came from, or None if it is not one.
+
+    Derived from the house naming convention (`default_output_dir`), not
+    declared: "dgrauet/void-model-mlx-q8" is quantized from
+    "dgrauet/void-model-mlx". A declaration would be one more thing to keep in
+    step with a name the tool already controls.
+    """
+    if not bits:
+        return None
+    stripped = re.sub(rf"-q{bits}$", "", repo_id)
+    return stripped if stripped != repo_id else None
+
+
+def quantize_command(split_info: dict, bits: int | None) -> str | None:
+    """The `mlx-forge convert` line that produced a quantized build."""
+    recipe = split_info.get("recipe")
+    if not recipe or not bits:
+        return None
+    variant = split_info.get("variant")
+    parts = ["mlx-forge convert", recipe]
+    if variant:
+        parts.append(f"--variant {variant}")
+    parts.append(f"--quantize --bits {bits}")
+    return " ".join(parts)
+
+
 def sibling_links(split_info: dict, supplied: list[str] | None) -> list[str]:
     """The operator's links that the recipe does not already declare.
 
@@ -374,6 +420,7 @@ def persist_card_metadata(
     usage_url: str | None,
     links: list[str] | None,
     cli_snippet: str | None,
+    note: str | None = None,
 ) -> dict:
     """Store operator-supplied card metadata so a later refresh keeps it.
 
@@ -395,6 +442,7 @@ def persist_card_metadata(
         "usage_url": usage_url,
         "extra_links": sibling_links(split_info, links),
         "cli_snippet": cli_snippet,
+        "notes": note,
     }
     new = {k: v for k, v in supplied.items() if v and split_info.get(k) != v}
     if not new:

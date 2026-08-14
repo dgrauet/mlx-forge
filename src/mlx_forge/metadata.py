@@ -26,6 +26,7 @@ SPLIT_MODEL_KEYS = (
     "license_name",
     "license_link",
     "license_file",
+    "quantization_scope",
     "links",
     "usage_url",
     "cli_snippet",
@@ -89,6 +90,14 @@ class RecipeMetadata:
             A tuple when the obligation covers more than the licence itself:
             Hunyuan3D ships a Notice.txt alongside its LICENSE, and passing on
             only half of what upstream attaches is not passing it on.
+        quantization_scope: What this recipe's --quantize actually touches, as
+            prose — "transformer Linear weights only". Declaring it turns on the
+            card's quantized presentation: instead of "MLX format conversion of
+            X", a q8 repo opens with what was quantized, at which width and
+            group size, and from which bf16 repo. Left None the card keeps the
+            plain form, which is why this is opt-in per recipe rather than
+            automatic on `quantized`: switching every published quantized card
+            at once is a decision, not a side effect of touching the template.
         links: Related projects, each "Label: URL".
         usage_url: Inference project that consumes these weights.
         usage_note: Clause appended after the project link, before the period —
@@ -109,6 +118,7 @@ class RecipeMetadata:
     license_name: str | None = None
     license_link: str | None = None
     license_file: str | tuple[str, ...] | None = None
+    quantization_scope: str | None = None
     links: list[str] = field(default_factory=list)
     usage_url: str | None = None
     usage_note: str | None = None
@@ -143,6 +153,8 @@ class RecipeMetadata:
             # Always a list in the manifest, so readers need not handle both
             # shapes; the declaration keeps the convenient scalar form.
             out["license_file"] = list(license_files(self.license_file))
+        if self.quantization_scope:
+            out["quantization_scope"] = self.quantization_scope
         if self.links:
             out["links"] = list(self.links)
         if self.usage_url:

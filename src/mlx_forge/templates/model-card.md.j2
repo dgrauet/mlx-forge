@@ -15,10 +15,28 @@ tags:
   - mlx-forge
   - apple-silicon
   - safetensors
+{% if quantized and bits %}
+  - quantized
+  - int{{ bits }}
+{% endif -%}
 ---
 
 # {{ repo_id }}
 
+{% if quantization_scope and quantized and bits -%}
+Int{{ bits }} quantization ({% if group_size %}group_size {{ group_size }}, {% endif %}{{ quantization_scope }}) of
+{% if quantized_from %}[{{ quantized_from }}](https://huggingface.co/{{ quantized_from }}){% else %}the unquantized build{% endif %}{% if base_model %}, the MLX
+conversion of [{{ base_model }}](https://huggingface.co/{{ base_model }}){% endif %}.
+
+{% if quantize_command -%}
+Quantized with [mlx-forge](https://github.com/dgrauet/mlx-forge)
+(`{{ quantize_command }}`).
+
+{% else -%}
+Quantized with [mlx-forge](https://github.com/dgrauet/mlx-forge).
+
+{% endif -%}
+{% else -%}
 {% if base_model -%}
 MLX format conversion of [{{ base_model }}](https://huggingface.co/{{ base_model }}).
 {% else -%}
@@ -27,14 +45,21 @@ MLX format model.
 
 Converted with [mlx-forge](https://github.com/dgrauet/mlx-forge).
 
-{% if transformer_variants or model_version or (quantized and bits) -%}
+{% endif -%}
+{% if notes -%}
+{{ notes.rstrip() }}
+
+{% endif -%}
+
+{% set show_bits = quantized and bits and not quantization_scope -%}
+{% if transformer_variants or model_version or show_bits -%}
 {% if transformer_variants -%}
 - **Transformer variants:** {{ transformer_variants | join(", ") }}
 {% endif -%}
 {% if model_version -%}
 - **Model version:** {{ model_version }}
 {% endif -%}
-{% if quantized and bits -%}
+{% if show_bits -%}
 - **Quantization:** int{{ bits }}
 {% endif %}
 
@@ -52,13 +77,18 @@ Use of these weights is subject to it, including any restrictions it attaches.
 ## Usage
 
 {% if usage_url -%}
-These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ usage_url }}){% if usage_note %}, {{ usage_note }}{% endif %}.
+These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ usage_url }}){% if usage_note %}, {{ usage_note }}{% endif %}{{ ":" if cli_snippet else "." }}
 
 {% endif -%}
 {% if cli_snippet -%}
 ```bash
 {{ cli_snippet.rstrip() }}
 ```
+
+{% endif -%}
+{% if quantized and bits -%}
+Keep `quantize_config.json` next to the weights (the loader also infers
+bits/group_size from the weight shapes if it is missing).
 
 {% endif -%}
 {% endif -%}

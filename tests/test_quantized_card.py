@@ -1,0 +1,217 @@
+"""The quantized presentation of a model card.
+
+A q8 repo has more to say than "MLX format conversion of X": at which width and
+group size, over which weights, and from which bf16 build. The void-model cards
+said all of it by hand, which is why they were the last two the template could
+not reproduce.
+
+It is opt-in per recipe, through `quantization_scope`. Nine quantized repos are
+already published with the plain presentation and regenerate losslessly;
+switching them is a decision to take repo by repo, not a side effect of adding
+a template branch.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from mlx_forge.upload import generate_model_card, quantize_command, unquantized_repo
+
+SCOPE = "transformer Linear weights only"
+
+
+def _card(tmp_path, **split) -> str:
+    """A rendered card. usage_url/cli_snippet are call arguments, not manifest keys."""
+    repo = split.pop("_repo", "acme/demo-mlx-q8")
+    usage_url = split.pop("usage_url", None)
+    cli_snippet = split.pop("cli_snippet", None)
+    info = {"recipe": "demo", "source": "acme/Demo", "base_model": "acme/Demo", **split}
+    return generate_model_card(
+        tmp_path,
+        split_info=info,
+        config={},
+        repo_id=repo,
+        usage_url=usage_url,
+        cli_snippet=cli_snippet,
+        file_listing={"model.safetensors": 10},
+    )
+
+
+def _quantized(tmp_path, *, bits=8, **over) -> str:
+    return _card(
+        tmp_path,
+        quantized=True,
+        quantization_bits=bits,
+        quantization_group_size=64,
+        quantization_scope=SCOPE,
+        **over,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Derived, not declared
+# ---------------------------------------------------------------------------
+
+
+def test_the_bf16_repo_is_derived_from_the_name():
+    """The tool owns the naming convention; declaring it again would drift."""
+    assert unquantized_repo("dgrauet/void-model-mlx-q8", 8) == "dgrauet/void-model-mlx"
+    assert unquantized_repo("dgrauet/void-model-mlx-q4", 4) == "dgrauet/void-model-mlx"
+
+
+def test_an_unquantized_repo_has_no_bf16_counterpart():
+    assert unquantized_repo("dgrauet/void-model-mlx", None) is None
+    assert unquantized_repo("dgrauet/void-model-mlx", 8) is None
+
+
+def test_the_quantize_command_names_the_variant_when_there_is_one():
+    base = {"recipe": "ernie-image"}
+    assert quantize_command(base, 8) == "mlx-forge convert ernie-image --quantize --bits 8"
+    assert quantize_command({**base, "variant": "sft"}, 8) == (
+        "mlx-forge convert ernie-image --variant sft --quantize --bits 8"
+    )
+    assert quantize_command(base, None) is None
+    assert quantize_command({}, 8) is None
+
+
+# ---------------------------------------------------------------------------
+# The card
+# ---------------------------------------------------------------------------
+
+
+def test_the_opening_states_width_group_size_and_scope(tmp_path):
+    card = _quantized(tmp_path)
+
+    assert "Int8 quantization (group_size 64, transformer Linear weights only) of" in card
+    assert "[acme/demo-mlx](https://huggingface.co/acme/demo-mlx)" in card
+    assert "conversion of [acme/Demo](https://huggingface.co/acme/Demo)" in card
+    assert "MLX format conversion of" not in card, "the plain opening must be replaced"
+
+
+def test_the_command_that_produced_it_is_shown(tmp_path):
+    card = _quantized(tmp_path)
+    assert "`mlx-forge convert demo --quantize --bits 8`" in card
+
+
+def test_the_front_matter_is_tagged(tmp_path):
+    card = _quantized(tmp_path, bits=4)
+    front = card.split("---\n", 2)[1]
+
+    assert "  - quantized\n" in front
+    assert "  - int4\n" in front
+
+
+def test_a_per_build_note_is_published_verbatim(tmp_path):
+    note = "**This is the 32 GB configuration**: peaks at ~23.7 GB.\nPSNR = 35.5 dB."
+    card = _quantized(tmp_path, notes=note)
+
+    assert note in card
+
+
+def test_the_quantize_config_note_follows_the_snippet(tmp_path):
+    card = _quantized(tmp_path, usage_url="https://github.com/acme/run", cli_snippet="run it")
+
+    assert "Keep `quantize_config.json` next to the weights" in card
+    assert card.index("run it") < card.index("Keep `quantize_config.json`")
+
+
+def test_a_snippet_turns_the_usage_sentence_into_a_lead_in(tmp_path):
+    """It introduces the block that follows, so it ends in a colon."""
+    with_snippet = _quantized(tmp_path, usage_url="https://github.com/acme/run", cli_snippet="x")
+    without = _quantized(tmp_path, usage_url="https://github.com/acme/run")
+
+    assert "[run](https://github.com/acme/run):" in with_snippet
+    assert "[run](https://github.com/acme/run)." in without
+    # The blank line before the fence must survive Jinja's trim_blocks.
+    assert "):\n\n```bash" in with_snippet
+
+
+def test_the_redundant_quantization_bullet_is_dropped(tmp_path):
+    """The width is already in the opening sentence; twice is noise."""
+    assert "- **Quantization:** int8" not in _quantized(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Opt-in: the nine published plain cards must not move
+# ---------------------------------------------------------------------------
+
+
+def test_without_a_declared_scope_the_card_keeps_its_plain_form(tmp_path):
+    """Nine quantized repos regenerate losslessly today; they must keep doing so."""
+    card = _card(tmp_path, quantized=True, quantization_bits=8, quantization_group_size=64)
+
+    assert "MLX format conversion of [acme/Demo]" in card
+    assert "Converted with [mlx-forge]" in card
+    assert "- **Quantization:** int8" in card
+    assert "Int8 quantization (" not in card
+    assert "mlx-forge convert demo --quantize" not in card
+
+
+def test_an_unquantized_card_is_untouched(tmp_path):
+    card = _card(tmp_path, quantization_scope=SCOPE)
+
+    assert "MLX format conversion of [acme/Demo]" in card
+    assert "Int8 quantization" not in card
+    assert "  - quantized\n" not in card
+
+
+# ---------------------------------------------------------------------------
+# Where the numbers come from
+# ---------------------------------------------------------------------------
+
+
+def test_width_is_read_from_quantize_config_when_the_manifest_is_silent(tmp_path):
+    """void published three repos whose manifest predates any quantize flag.
+
+    quantize_config.json is written by the quantizer itself, so it is the
+    authority — and the group size lives nowhere else regardless.
+    """
+    (tmp_path / "quantize_config.json").write_text(
+        json.dumps({"quantization": {"bits": 4, "group_size": 32}})
+    )
+    card = _card(tmp_path, quantization_scope=SCOPE, _repo="acme/demo-mlx-q4")
+
+    assert "Int4 quantization (group_size 32, transformer Linear weights only)" in card
+    assert "  - int4\n" in card.split("---\n", 2)[1]
+
+
+def test_the_manifest_wins_over_quantize_config_for_the_width(tmp_path):
+    (tmp_path / "quantize_config.json").write_text(
+        json.dumps({"quantization": {"bits": 4, "group_size": 32}})
+    )
+    card = _card(
+        tmp_path,
+        quantized=True,
+        quantization_bits=8,
+        quantization_group_size=64,
+        quantization_scope=SCOPE,
+    )
+
+    assert "Int8 quantization (group_size 64," in card
+
+
+@pytest.mark.parametrize("recipe", ["void-model"])
+def test_void_declares_what_its_quantizer_touches(recipe):
+    import importlib
+
+    from mlx_forge.recipes import AVAILABLE_RECIPES
+
+    metadata = importlib.import_module(AVAILABLE_RECIPES[recipe]).METADATA
+    assert metadata.quantization_scope == SCOPE
+    assert metadata.as_split_fields()["quantization_scope"] == SCOPE
+
+
+def test_the_base_model_link_is_not_declared_by_the_void_recipe():
+    """It differs per build: bf16 pairs with bf16, q4 with the q8 base.
+
+    Declared, it put a base model on every quantized card that that card does
+    not use, next to the right one.
+    """
+    import importlib
+
+    from mlx_forge.recipes import AVAILABLE_RECIPES
+
+    metadata = importlib.import_module(AVAILABLE_RECIPES["void-model"]).METADATA
+    assert not any("Base model weights" in link for link in metadata.links)

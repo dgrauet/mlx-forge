@@ -65,11 +65,18 @@ METADATA = RecipeMetadata(
     name="void-model",
     source=REPO_ID,
     license="apache-2.0",
+    # should_quantize_transformer only accepts Linear .weight matrices; saying
+    # so opts this model's q4/q8 repos into the fuller quantized card.
+    quantization_scope="transformer Linear weights only",
     usage_url="https://github.com/dgrauet/void-model-mlx",
     links=[
         "void-model-mlx (inference): https://github.com/dgrauet/void-model-mlx",
         "VideoX-Fun-mlx (engine): https://github.com/dgrauet/VideoX-Fun-mlx",
-        "Base model weights: https://huggingface.co/dgrauet/CogVideoX-Fun-V1.5-5b-InP-mlx",
+        # The base-model link is NOT declared here: it differs per build. The
+        # bf16 weights pair with the bf16 CogVideoX, the q4 weights with the q8
+        # one. Declaring the bf16 link made every quantized card carry a base
+        # model it does not use, alongside the right one. It belongs in each
+        # repo's own --link.
     ],
 )
 
@@ -260,6 +267,21 @@ def convert(args) -> None:
             )
 
         write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
+
+        # The manifest above is written before quantizing, so it says nothing
+        # about it. Every published void repo went out that way, leaving the
+        # card unable to state its own width. Record it now that it is known.
+        write_split_model(
+            output_dir,
+            {
+                "format": "split",
+                "components": [Path(f).stem for f in PASS_FILES],
+                "quantized": True,
+                "quantization_bits": args.bits,
+                "quantization_group_size": args.group_size,
+                **METADATA.as_split_fields(),
+            },
+        )
 
     # -----------------------------------------------------------------------
     # Summary
