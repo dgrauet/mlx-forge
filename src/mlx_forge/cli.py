@@ -387,6 +387,7 @@ def _card_file_listing(api, repo_id: str, model_dir, *, card_only: bool = False)
 def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool) -> None:
     """Print what a real run would change on the remote, and stop there."""
     import difflib
+    import re
 
     from huggingface_hub import hf_hub_download
 
@@ -428,6 +429,12 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
             return line.split("` (")[0]
         if line.startswith("- **") and ":**" in line:  # a metadata line: pair on the label
             return line.split(":**", 1)[0]
+        # A front-matter field: pair on the key, so correcting a value reads as a
+        # change and not a loss. `license: other` -> `license: apache-2.0` was
+        # counted as content disappearing, and a warning that cries wolf on every
+        # corrected value is one nobody reads when it means it.
+        if re.match(r"^[A-Za-z_][\w-]*: ", line):
+            return line.split(":", 1)[0]
         return line
 
     ajoutees = {cle(line) for line in entrees("+", "+++")}

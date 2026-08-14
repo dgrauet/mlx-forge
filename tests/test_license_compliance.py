@@ -553,6 +553,45 @@ def test_backfill_writes_nothing_when_already_correct(tmp_path):
     assert not manifest.exists(), "nothing to change must mean nothing written"
 
 
+def test_dry_run_reads_a_corrected_front_matter_value_as_a_change(tmp_path, monkeypatch, capsys):
+    """A corrected value is not lost content, and must not warn as if it were.
+
+    `license: other` -> `license: apache-2.0` was counted as a line disappearing.
+    A warning that cries wolf on every correction is one nobody reads when it
+    means it — and it is the safety net standing between a refresh and a
+    degraded published card.
+    """
+    from mlx_forge import cli
+
+    published = tmp_path / "published.md"
+    published.write_text("---\nlibrary_name: mlx\nlicense: other\n---\n\n# demo\n")
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download", lambda *a, **kw: str(published), raising=True
+    )
+
+    regenerated = "---\nlibrary_name: mlx\nlicense: apache-2.0\n---\n\n# demo\n"
+    cli._show_card_diff(None, "acme/demo-mlx", regenerated, tmp_path, card_only=True)
+
+    out = capsys.readouterr().out
+    assert "No content would be lost." in out
+    assert "WARNING" not in out
+
+
+def test_dry_run_still_warns_when_a_line_really_disappears(tmp_path, monkeypatch, capsys):
+    """The pairing must not become a blanket excuse for every removal."""
+    from mlx_forge import cli
+
+    published = tmp_path / "published.md"
+    published.write_text("---\nlicense: mit\n---\n\n## Related Projects\n\n- **Code:** https://x\n")
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download", lambda *a, **kw: str(published), raising=True
+    )
+
+    cli._show_card_diff(None, "acme/demo-mlx", "---\nlicense: mit\n---\n", tmp_path, card_only=True)
+
+    assert "WARNING" in capsys.readouterr().out
+
+
 def test_no_stray_license_file_left_in_the_repo():
     """mlx-forge's own tree must not accumulate fetched licence copies."""
     root = Path(__file__).resolve().parents[1]
