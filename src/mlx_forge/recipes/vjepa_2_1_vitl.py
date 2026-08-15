@@ -137,6 +137,21 @@ METADATA = RecipeMetadata(
     source="facebookresearch/vjepa2 (app/vjepa_2_1)",
     license="mit",
     usage_url="https://github.com/dgrauet/vjepa2-mlx",
+    # Verbatim from the inference project's own README. Raw string: a
+    # trailing backslash must stay a shell continuation, not swallow its
+    # newline. {repo_id} is substituted at render time, so one
+    # declaration covers every build of the model.
+    cli_snippet=r"""
+git clone https://github.com/dgrauet/vjepa2-mlx.git && cd vjepa2-mlx
+uv pip install -e packages/vjepa2-core-mlx
+
+python - <<'PY'
+from vjepa2_core_mlx.utils.weights import from_pretrained
+
+encoder = from_pretrained("{repo_id}")   # or a local converted directory
+feats = encoder(clip)                    # clip: B, C, T, H, W (channels-first)
+PY
+""",
     links=[
         "Upstream (Meta): https://github.com/facebookresearch/vjepa2",
         "MLX inference port: https://github.com/dgrauet/vjepa2-mlx",

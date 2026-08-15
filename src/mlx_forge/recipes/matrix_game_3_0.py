@@ -144,6 +144,19 @@ METADATA = RecipeMetadata(
     # weights: matrix-game-3.0-mlx was the one published card with no Usage
     # section at all.
     usage_url="https://github.com/dgrauet/Matrix-Game-mlx",
+    # Verbatim from the inference project's own README. Raw string: a
+    # trailing backslash must stay a shell continuation, not swallow its
+    # newline. {repo_id} is substituted at render time, so one
+    # declaration covers every build of the model.
+    cli_snippet=r"""
+git clone https://github.com/dgrauet/Matrix-Game-mlx.git && cd Matrix-Game-mlx
+pip install -r requirements.txt
+
+# weights are downloaded from {repo_id} on first run
+python3 generate.py \
+  --prompt "A colorful, animated cityscape with a gas station and various buildings." \
+  --image demo_images/001/image.png
+""",
     links=["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
 )
 

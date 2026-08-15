@@ -82,7 +82,7 @@ These weights can be used with [{{ usage_url.rstrip("/").split("/")[-1] }}]({{ u
 {% endif -%}
 {% if cli_snippet -%}
 ```bash
-{{ cli_snippet.rstrip() }}
+{{ cli_snippet.strip("\n") }}
 ```
 
 {% endif -%}

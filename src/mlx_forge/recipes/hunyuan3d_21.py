@@ -86,6 +86,22 @@ METADATA = RecipeMetadata(
     license_link="https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE",
     license_file=("LICENSE", "Notice.txt"),
     usage_url="https://github.com/dgrauet/Hunyuan3D-2.1-mlx",
+    # Verbatim from the inference project's own README. Raw string: a
+    # trailing backslash must stay a shell continuation, not swallow its
+    # newline. {repo_id} is substituted at render time, so one
+    # declaration covers every build of the model.
+    cli_snippet=r"""
+pip install mlx mlx-arsenal safetensors Pillow trimesh scikit-image PyMCubes scipy
+git clone https://github.com/dgrauet/Hunyuan3D-2.1-mlx.git && cd Hunyuan3D-2.1-mlx
+
+python - <<'PY'
+from hy3dshape.hy3dshape.pipeline_mlx import ShapePipeline
+
+pipe = ShapePipeline.from_pretrained("{repo_id}")
+mesh = pipe("your_image.png", num_inference_steps=50, guidance_scale=7.5, octree_resolution=256)
+mesh.export("output.glb")
+PY
+""",
     links=[
         "Code: https://github.com/dgrauet/Hunyuan3D-2.1-mlx",
         "Upstream model: https://huggingface.co/tencent/Hunyuan3D-2.1",

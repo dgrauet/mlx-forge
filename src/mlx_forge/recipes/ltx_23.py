@@ -131,6 +131,17 @@ METADATA = RecipeMetadata(
     license_file="LICENSE",
     usage_url="https://github.com/dgrauet/ltx-2-mlx",
     usage_note="a native MLX inference pipeline for LTX-2.3 on Apple Silicon",
+    # Verbatim from the inference project's own README. Raw string: a
+    # trailing backslash must stay a shell continuation, not swallow its
+    # newline. {repo_id} is substituted at render time, so one
+    # declaration covers every build of the model.
+    cli_snippet=r"""
+git clone https://github.com/dgrauet/ltx-2-mlx.git && cd ltx-2-mlx
+uv sync --all-extras
+
+ltx-2-mlx generate -p "A sunset over the ocean" --distilled \
+    --model {repo_id} -o sunset.mp4
+""",
     links=[
         "Code: https://github.com/dgrauet/ltx-2-mlx",
         "ComfyUI compatible custom nodes: https://github.com/dgrauet/ComfyUI-LTXVideo-mlx",
