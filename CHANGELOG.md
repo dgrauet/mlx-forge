@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9](https://github.com/dgrauet/mlx-forge/compare/v0.4.8...v0.4.9) (2026-08-15)
+
+
+### Features
+
+* **cards:** give a quantized build a card that describes it ([#79](https://github.com/dgrauet/mlx-forge/issues/79)) ([ca25f1d](https://github.com/dgrauet/mlx-forge/commit/ca25f1d5c75bd7ac5847b3c40b099e84bdf2b511))
+* **recipes:** declare what each quantizer touches, and complete the card metadata ([#81](https://github.com/dgrauet/mlx-forge/issues/81)) ([11f18fe](https://github.com/dgrauet/mlx-forge/commit/11f18fefa7d603ac9b64a7f04d4dbce7b6ac6d0e))
+
 ## [0.4.8](https://github.com/dgrauet/mlx-forge/compare/v0.4.7...v0.4.8) (2026-08-14)
 
 
