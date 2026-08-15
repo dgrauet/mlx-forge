@@ -10,6 +10,7 @@ and a verbatim copy of it ships with the weights.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -400,6 +401,51 @@ def test_every_recipe_materialises_its_licence(tmp_path, monkeypatch):
     assert (out / "LICENSE").read_text() == "agreement\n"
     manifest = json.loads((out / "split_model.json").read_text())
     assert manifest["license_name"] == "ltx-2-community-license-agreement"
+
+
+def test_an_upload_persists_the_provenance_it_established(tmp_path, monkeypatch):
+    """Computing the record and not writing it leaves the next run blind.
+
+    ensure_license_file only updates the dict; persist_card_metadata writes
+    solely when the operator supplied something, so on a plain refresh the
+    provenance was worked out and then dropped — and the run after would go back
+    to trusting whatever file sat at that name.
+    """
+    from mlx_forge import cli
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "split_model.json").write_text(json.dumps(_ltx_split_info()))
+    (model_dir / "LICENSE").write_text("agreement\n")
+    (model_dir / "model.safetensors").write_bytes(b"\0")
+
+    src = tmp_path / "src"
+    src.write_text("agreement\n")
+    monkeypatch.setattr(convert, "hf_hub_download", lambda **kw: str(src))
+    monkeypatch.setattr(convert, "_upstream_revision", lambda repo: "deadbeef")
+
+    class FakeApi:
+        def model_info(self, *a, **kw):
+            return type("Info", (), {"siblings": [], "cardData": {}})()
+
+        def create_repo(self, **kw):
+            return "https://huggingface.co/dgrauet/ltx-2.3-mlx"
+
+        def upload_folder(self, **kw):
+            pass
+
+        def upload_file(self, **kw):
+            pass
+
+    monkeypatch.setattr("huggingface_hub.HfApi", lambda *a, **kw: FakeApi())
+    monkeypatch.setattr(
+        sys, "argv", ["mlx-forge", "upload", str(model_dir), "--repo-id", "dgrauet/ltx-2.3-mlx"]
+    )
+    cli.main()
+
+    stored = json.loads((model_dir / "split_model.json").read_text())
+    assert stored["license_provenance"]["LICENSE"]["sha256"] == _DIGEST
+    assert stored["license_provenance"]["LICENSE"]["repo"] == "Lightricks/LTX-2.3"
 
 
 def test_card_only_refresh_pushes_the_licence(tmp_path, monkeypatch):

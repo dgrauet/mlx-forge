@@ -489,7 +489,7 @@ def _run_upload(args) -> None:
 
     from huggingface_hub import HfApi
 
-    from .convert import ensure_license_file
+    from .convert import ensure_license_file, write_split_model
     from .upload import (
         backfill_from_recipe,
         backfill_quantization,
@@ -544,7 +544,14 @@ def _run_upload(args) -> None:
     # the recipient a copy of the agreement, so this runs before the file
     # listing is built: the licence is part of what the card advertises, and a
     # missing one stops the upload rather than being reported afterwards.
+    vouched_before = split_info.get("license_provenance")
     ensure_license_file(model_dir, split_info)
+    # ensure_license_file records the copy's origin into split_info but does not
+    # write; persist it here, or the next run would have nothing to check the
+    # file against and would go back to trusting whatever sits at that name.
+    if split_info.get("license_provenance") != vouched_before and not args.dry_run:
+        write_split_model(model_dir, split_info)
+        print("Recorded licence provenance in split_model.json")
 
     # Record anything the operator supplied, so a later --card-only refresh
     # does not silently drop it.
