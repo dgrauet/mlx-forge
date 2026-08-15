@@ -61,8 +61,12 @@ def gaps_for(repo: str, data: dict, siblings: list[str]) -> list[str]:
         out.append("no usage_url")
     if not card_links(split_info):
         out.append("no links")
+    # Reported apart: every other gap closes with a declaration, but a usage
+    # snippet is a command that has to actually work. Guessing one publishes a
+    # lie — an invented `pip install` reached a draft card once — so this is
+    # the operator's to supply, and the tool must not pretend otherwise.
     if not split_info.get("cli_snippet"):
-        out.append("no cli_snippet")
+        out.append("NEEDS-OPERATOR: no cli_snippet")
 
     if qconfig:
         # quantize_config.json is the quantizer's own record, so its presence
@@ -107,15 +111,22 @@ for repo, data in repos.items():
 
 width = max(len(name) for name, _, _ in rows)
 complete = 0
+derivable = 0
 for name, found, excused in rows:
     if not found:
         complete += 1
         suffix = f"  (expected: {', '.join(excused)})" if excused else ""
         print(f"   {name:<{width}}  complete{suffix}")
     else:
+        if all(g.startswith("NEEDS-OPERATOR") for g in found):
+            derivable += 1
         print(f"<< {name:<{width}}  " + "; ".join(found))
 
 print(f"\ncomplete: {complete}/{len(rows)}")
+print(f"complete but for a usage snippet only the operator can write: {complete + derivable}")
 for (name, gap), reason in sorted(EXPECTED_ABSENCES.items()):
     print(f"expected absence — {name}: {gap} ({reason})")
-sys.exit(1 if complete < len(rows) else 0)
+
+# Only the declarative gaps fail the run: the rest waits on a human-verified
+# command, and a check that can never pass is one nobody runs.
+sys.exit(1 if complete + derivable < len(rows) else 0)

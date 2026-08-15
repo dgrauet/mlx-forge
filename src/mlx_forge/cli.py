@@ -492,6 +492,7 @@ def _run_upload(args) -> None:
     from .convert import ensure_license_file
     from .upload import (
         backfill_from_recipe,
+        backfill_quantization,
         card_links,
         derive_repo_id,
         generate_model_card,
@@ -534,6 +535,10 @@ def _run_upload(args) -> None:
     # A directory converted before a metadata field existed carries a manifest
     # without it; recover it from the recipe rather than publishing the default.
     split_info = backfill_from_recipe(model_dir, split_info)
+
+    # Same idea for the build's own facts: the quantizer recorded them in
+    # quantize_config.json, and a manifest written before quantizing never did.
+    split_info = backfill_quantization(model_dir, split_info)
 
     # Publishing a derivative of a community-licensed model obliges us to hand
     # the recipient a copy of the agreement, so this runs before the file

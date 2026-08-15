@@ -416,6 +416,41 @@ def card_links(split_info: dict, supplied: list[str] | None = None) -> list[str]
     return links
 
 
+def backfill_quantization(model_dir: Path, split_info: dict) -> dict:
+    """Recover the quantization record from quantize_config.json.
+
+    The quantizer writes that file itself, so it is the authority on width and
+    group size; several recipes wrote the manifest before quantizing and never
+    recorded either, and the group size was recorded nowhere else at all. The
+    card can read the file when it sits next to the weights, but a --card-only
+    refresh works from metadata alone, so the manifest has to carry it.
+
+    Only absent keys are filled — the manifest describes this build, and
+    nothing here overrules what it already states.
+
+    Returns:
+        The updated split_info (unchanged, and nothing written, when the model
+        is not quantized or already says so).
+    """
+    qconfig = read_quantize_config(model_dir)
+    if not qconfig:
+        return split_info
+
+    recovered = {
+        "quantized": True,
+        "quantization_bits": qconfig.get("bits"),
+        "quantization_group_size": qconfig.get("group_size"),
+    }
+    new = {k: v for k, v in recovered.items() if v is not None and k not in split_info}
+    if not new:
+        return split_info
+
+    merged = {**split_info, **new}
+    write_split_model(model_dir, merged)
+    print(f"Recovered from quantize_config.json: {', '.join(sorted(new))}")
+    return merged
+
+
 def persist_card_metadata(
     model_dir: Path,
     split_info: dict,

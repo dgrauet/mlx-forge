@@ -197,6 +197,48 @@ def test_width_is_read_from_quantize_config_when_the_manifest_is_silent(tmp_path
     assert "  - int4\n" in card.split("---\n", 2)[1]
 
 
+def test_the_quantization_record_is_recovered_into_the_manifest(tmp_path):
+    """A --card-only refresh works from metadata alone, so the manifest must say it.
+
+    Nine published quantized repos recorded the width but never the group size,
+    which lived only in quantize_config.json next to the weights.
+    """
+    from mlx_forge.upload import backfill_quantization
+
+    (tmp_path / "quantize_config.json").write_text(
+        json.dumps({"quantization": {"bits": 8, "group_size": 64}})
+    )
+    info = {"recipe": "demo", "source": "acme/Demo", "quantized": True, "quantization_bits": 8}
+    (tmp_path / "split_model.json").write_text(json.dumps(info))
+
+    merged = backfill_quantization(tmp_path, info)
+
+    assert merged["quantization_group_size"] == 64
+    stored = json.loads((tmp_path / "split_model.json").read_text())
+    assert stored["quantization_group_size"] == 64
+
+
+def test_the_recovery_never_overrules_the_manifest(tmp_path):
+    """The manifest describes this build; quantize_config only fills its gaps."""
+    from mlx_forge.upload import backfill_quantization
+
+    (tmp_path / "quantize_config.json").write_text(
+        json.dumps({"quantization": {"bits": 4, "group_size": 32}})
+    )
+    info = {"quantized": True, "quantization_bits": 8, "quantization_group_size": 64}
+
+    assert backfill_quantization(tmp_path, info) == info
+    assert not (tmp_path / "split_model.json").exists()
+
+
+def test_an_unquantized_model_is_left_alone(tmp_path):
+    from mlx_forge.upload import backfill_quantization
+
+    info = {"recipe": "demo"}
+    assert backfill_quantization(tmp_path, info) is info
+    assert not (tmp_path / "split_model.json").exists()
+
+
 def test_the_manifest_wins_over_quantize_config_for_the_width(tmp_path):
     (tmp_path / "quantize_config.json").write_text(
         json.dumps({"quantization": {"bits": 4, "group_size": 32}})
