@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.10](https://github.com/dgrauet/mlx-forge/compare/v0.4.9...v0.4.10) (2026-08-15)
+
+
+### Bug Fixes
+
+* **cards:** link the shipped licence with a URL the Hub can resolve ([#84](https://github.com/dgrauet/mlx-forge/issues/84)) ([2c75b94](https://github.com/dgrauet/mlx-forge/commit/2c75b943250b915b485fa95108294b12b8ca4ef7))
+* **ltx-2.3:** link the licence text these weights were actually obtained under ([#82](https://github.com/dgrauet/mlx-forge/issues/82)) ([0cdef57](https://github.com/dgrauet/mlx-forge/commit/0cdef5775eebd7661f32a5cefb9aa4983224666b))
+
 ## [0.4.9](https://github.com/dgrauet/mlx-forge/compare/v0.4.8...v0.4.9) (2026-08-15)
 
 
