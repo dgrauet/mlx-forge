@@ -109,7 +109,6 @@ def test_ltx_23_mirrors_its_upstream_declaration():
 
     assert metadata.license == "other"
     assert metadata.license_name == "ltx-2-community-license-agreement"
-    assert metadata.license_link == "https://github.com/Lightricks/LTX-2/blob/main/LICENSE"
     assert metadata.license_file == "LICENSE"
     assert metadata.as_split_fields()["license_file"] == ["LICENSE"]
 
@@ -121,6 +120,32 @@ def test_ltx_23_mirrors_its_upstream_declaration():
 
 def _ltx_split_info() -> dict:
     return dict(load_recipe("ltx-2.3").METADATA.as_split_fields())
+
+
+def test_the_licence_link_shows_the_text_we_ship():
+    """The link and the shipped copy must be one document, not two.
+
+    Upstream's card declares github.com/Lightricks/LTX-2/blob/main/LICENSE —
+    a 404, because that file is LICENSE.md. And the .md is no longer the same
+    agreement: on 2026-08-11 GitHub gained an "LTX-2.x" text dated August 2026,
+    30938 bytes against the 21399 the Hub still publishes, with §6 AI
+    Regulations obligations the shipped copy does not contain. A card saying
+    "a verbatim copy ships with them, and the upstream text is at X" must not
+    have X be a different document.
+    """
+    metadata = load_recipe("ltx-2.3").METADATA
+
+    assert metadata.license_link == "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE"
+    assert "github.com/Lightricks/LTX-2/blob/main/LICENSE" not in (metadata.license_link or "")
+
+
+def test_a_recipe_shipping_a_licence_links_where_that_licence_lives():
+    """Whatever the URL, it must be the source of the file we distribute."""
+    for name in AVAILABLE_RECIPES:
+        metadata = getattr(load_recipe(name), "METADATA", None)
+        if metadata is None or not metadata.license_file:
+            continue
+        assert metadata.license_link, f"{name} ships a licence copy but links nowhere"
 
 
 def test_card_front_matter_names_and_links_the_agreement(tmp_path):
@@ -135,7 +160,7 @@ def test_card_front_matter_names_and_links_the_agreement(tmp_path):
 
     assert front["license"] == "other"
     assert front["license_name"] == "ltx-2-community-license-agreement"
-    assert front["license_link"] == "https://github.com/Lightricks/LTX-2/blob/main/LICENSE"
+    assert front["license_link"] == "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE"
 
 
 def test_card_body_points_at_the_shipped_copy(tmp_path):
@@ -150,7 +175,7 @@ def test_card_body_points_at_the_shipped_copy(tmp_path):
 
     assert "## License" in card
     assert "(./LICENSE)" in card
-    assert "https://github.com/Lightricks/LTX-2/blob/main/LICENSE" in card
+    assert "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE" in card
     # One licence, stated once: no competing SPDX id elsewhere in the body.
     body = card.split("---\n", 2)[2]
     assert "apache" not in body.lower() and "MIT" not in body

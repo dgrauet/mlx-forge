@@ -127,7 +127,15 @@ METADATA = RecipeMetadata(
     # ltx23_should_quantize: transformer_blocks Linear .weight only.
     quantization_scope="transformer block Linear weights only",
     license_name="ltx-2-community-license-agreement",
-    license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+    # Deliberately NOT the link upstream's own card declares
+    # (github.com/Lightricks/LTX-2/blob/main/LICENSE): that file is LICENSE.md,
+    # so the URL has always been a 404. Nor the corrected .md URL — on
+    # 2026-08-11 GitHub gained an "LTX-2.x" agreement dated August 11 2026,
+    # 30938 bytes against the 21399 still published on the Hub, adding §6 AI
+    # Regulations obligations and an Acceptable Use Policy by reference.
+    # This points at the exact text we ship, byte for byte: the agreement these
+    # weights were obtained under, and the one §3.2 obliges us to pass on.
+    license_link="https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
     license_file="LICENSE",
     usage_url="https://github.com/dgrauet/ltx-2-mlx",
     usage_note="a native MLX inference pipeline for LTX-2.3 on Apple Silicon",
