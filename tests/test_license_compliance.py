@@ -174,7 +174,10 @@ def test_card_body_points_at_the_shipped_copy(tmp_path):
     )
 
     assert "## License" in card
-    assert "(./LICENSE)" in card
+    # An absolute /blob/ URL, not `./LICENSE`: the Hub resolves a relative link
+    # to /tree/main/LICENSE, which is the directory route and 404s on a file.
+    assert "(https://huggingface.co/dgrauet/ltx-2.3-mlx/blob/main/LICENSE)" in card
+    assert "(./LICENSE)" not in card
     assert "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE" in card
     # One licence, stated once: no competing SPDX id elsewhere in the body.
     body = card.split("---\n", 2)[2]
@@ -409,7 +412,7 @@ def test_license_path_inside_upstream_repo_lands_at_the_root(tmp_path, monkeypat
         repo_id="acme/demo-mlx",
         file_listing={"LICENSE.txt": 10},
     )
-    assert "(./LICENSE.txt)" in card
+    assert "(https://huggingface.co/acme/demo-mlx/blob/main/LICENSE.txt)" in card
 
 
 def test_upstream_that_is_not_a_hub_repo_is_reported(tmp_path):
@@ -475,7 +478,8 @@ def test_hunyuan3d_ships_the_notice_with_the_licence(tmp_path, monkeypatch):
         repo_id="dgrauet/hunyuan3d-2.1-mlx",
         file_listing={"LICENSE": 10, "Notice.txt": 10},
     )
-    assert "(./LICENSE)" in card and "(./Notice.txt)" in card
+    blob = "https://huggingface.co/dgrauet/hunyuan3d-2.1-mlx/blob/main"
+    assert f"({blob}/LICENSE)" in card and f"({blob}/Notice.txt)" in card
 
 
 def test_matrix_game_mirrors_its_permissive_upstream():

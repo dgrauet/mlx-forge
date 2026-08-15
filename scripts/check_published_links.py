@@ -46,9 +46,14 @@ def structural_problems(repo: str, text: str, files: set[str]) -> list[str]:
     if text.count("```") % 2:
         out.append("unbalanced ``` code fence")
 
+    # A relative link is a defect even when the file exists: the Hub resolves
+    # `./LICENSE` to /tree/main/LICENSE, and /tree/ is for directories, so a
+    # file link 404s. Only /blob/main/ works, and this check used to stop at
+    # "the file is in the repo" — which it was, on four cards whose licence
+    # link had been dead since it was written.
     for target in sorted(set(re.findall(r"\]\(\./([^)]+)\)", text))):
-        if target not in files:
-            out.append(f"links ./{target}, which the repo does not contain")
+        known = "" if target in files else " (and the repo does not contain it)"
+        out.append(f"relative link ./{target}{known} — the Hub renders it as a 404 /tree/ URL")
 
     if "## Files" in text:
         listed = set(re.findall(r"^- `([^`]+)`", text.split("## Files", 1)[1], re.M))
