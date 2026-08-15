@@ -478,6 +478,7 @@ def convert(args) -> None:
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        split_info["quantization_group_size"] = args.group_size
         write_split_model(output_dir, split_info)
 
         write_quantize_config(

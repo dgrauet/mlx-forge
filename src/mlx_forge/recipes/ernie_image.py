@@ -143,6 +143,11 @@ METADATA = RecipeMetadata(
     source=REPO_TURBO,
     known_sources=(REPO_SFT, REPO_TURBO),
     license="apache-2.0",
+    # ernie_image_should_quantize: >=256x256 Linears, minus the small
+    # projections in _SKIP_QUANTIZE_KEYS; the vae is skipped wholesale.
+    quantization_scope=(
+        "attention and FFN Linear weights only, leaving the small projections and the VAE in bf16"
+    ),
     usage_url="https://github.com/dgrauet/ernie-image-mlx",
     links=[
         "mlx-forge (conversion): https://github.com/dgrauet/mlx-forge",
@@ -446,6 +451,7 @@ def convert(args) -> None:
     if args.quantize:
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        split_info["quantization_group_size"] = args.group_size
     write_split_model(output_dir, split_info)
 
     print("\n" + "=" * 60)

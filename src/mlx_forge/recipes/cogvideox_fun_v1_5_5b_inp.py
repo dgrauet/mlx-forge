@@ -124,6 +124,13 @@ METADATA = RecipeMetadata(
     name="cogvideox-fun-v1.5-5b-inp",
     source=REPO_ID,
     license="apache-2.0",
+    # should_quantize_transformer: 2D .weight in the transformer blocks,
+    # minus patch/position/timestep embeddings, norms and the output
+    # projection; text_encoder and vae are skipped wholesale.
+    quantization_scope=(
+        "transformer block Linear weights only, leaving the embeddings, "
+        "norms and the output projection in bf16"
+    ),
     usage_url="https://github.com/dgrauet/VideoX-Fun-mlx",
     links=[
         "VideoX-Fun-mlx (inference code): https://github.com/dgrauet/VideoX-Fun-mlx",
@@ -509,6 +516,7 @@ def convert(args) -> None:
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        split_info["quantization_group_size"] = args.group_size
         write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------

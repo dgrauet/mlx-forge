@@ -124,6 +124,8 @@ METADATA = RecipeMetadata(
     # and §3.2 obliges us to give any third-party recipient a copy of the
     # agreement — hence license_file, not just the link.
     license="other",
+    # ltx23_should_quantize: transformer_blocks Linear .weight only.
+    quantization_scope="transformer block Linear weights only",
     license_name="ltx-2-community-license-agreement",
     license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
     license_file="LICENSE",
@@ -920,6 +922,7 @@ def convert(args) -> None:
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        split_info["quantization_group_size"] = args.group_size
         write_split_model(output_dir, split_info)
 
         print("\nFinal files after quantization:")

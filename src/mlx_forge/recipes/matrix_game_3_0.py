@@ -139,6 +139,11 @@ METADATA = RecipeMetadata(
     # upstream identifier. apache-2.0 is satisfied by the identifier alone, so
     # there is no license_file to ship.
     license="apache-2.0",
+    # The same project the Related Projects link points at. Declared as the
+    # usage_url too, so the card actually tells a reader what runs these
+    # weights: matrix-game-3.0-mlx was the one published card with no Usage
+    # section at all.
+    usage_url="https://github.com/dgrauet/Matrix-Game-mlx",
     links=["Code: https://github.com/dgrauet/Matrix-Game-mlx"],
 )
 
@@ -682,6 +687,7 @@ def convert(args) -> None:
 
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        split_info["quantization_group_size"] = args.group_size
         # Also record it where validate() looks: gating the scales/biases checks
         # on quantize_config.json meant they never ran for this recipe.
         write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)

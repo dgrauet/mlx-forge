@@ -94,6 +94,9 @@ METADATA = RecipeMetadata(
     name="ernie-image-pe",
     source=REPO_SOURCE + "/pe",
     license="apache-2.0",
+    # ernie_image_pe_should_quantize: >=256x256 Linears plus embed_tokens,
+    # which MLX QuantizedEmbedding serves through as_linear.
+    quantization_scope="block Linear weights and the token embedding table",
     usage_url="https://github.com/dgrauet/ernie-image-mlx",
     links=[
         "mlx-forge (conversion): https://github.com/dgrauet/mlx-forge",
@@ -274,6 +277,7 @@ def convert(args) -> None:
     if args.quantize:
         split_info["quantized"] = True
         split_info["quantization_bits"] = args.bits
+        split_info["quantization_group_size"] = args.group_size
     write_split_model(output_dir, split_info)
 
     print("\n" + "=" * 60)

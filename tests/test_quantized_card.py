@@ -223,6 +223,60 @@ def test_void_declares_what_its_quantizer_touches(recipe):
     assert metadata.as_split_fields()["quantization_scope"] == SCOPE
 
 
+#: Recipes whose --quantize does something, and must therefore be able to say
+#: what. A recipe that never quantizes is not required to declare a scope.
+QUANTIZING_RECIPES = [
+    "cogvideox-fun-v1.5-5b-inp",
+    "ernie-image",
+    "ernie-image-pe",
+    "ltx-2.3",
+    "void-model",
+]
+
+
+@pytest.mark.parametrize("recipe", QUANTIZING_RECIPES)
+def test_a_quantizing_recipe_says_what_it_quantizes(recipe):
+    """Otherwise its q4/q8 cards can only say "MLX format conversion of X".
+
+    Nine published quantized repos carried exactly that: a card that never
+    mentioned the width it was quantized at, let alone over which weights.
+    """
+    import importlib
+
+    from mlx_forge.recipes import AVAILABLE_RECIPES
+
+    metadata = importlib.import_module(AVAILABLE_RECIPES[recipe]).METADATA
+
+    scope = metadata.quantization_scope
+    assert scope, f"{recipe} quantizes but does not declare a quantization_scope"
+    assert not scope.endswith("."), "it is spliced into a sentence, so it carries no full stop"
+    assert scope[0].islower(), "likewise it starts mid-sentence"
+
+
+@pytest.mark.parametrize("recipe", QUANTIZING_RECIPES)
+def test_the_declared_scope_reads_as_a_clause(recipe, tmp_path):
+    """It is spliced into "Int8 quantization (group_size 64, <scope>) of ..."."""
+    import importlib
+
+    from mlx_forge.recipes import AVAILABLE_RECIPES
+
+    metadata = importlib.import_module(AVAILABLE_RECIPES[recipe]).METADATA
+    card = generate_model_card(
+        tmp_path,
+        split_info={
+            **metadata.as_split_fields(),
+            "quantized": True,
+            "quantization_bits": 8,
+            "quantization_group_size": 64,
+        },
+        config={},
+        repo_id=f"acme/{metadata.name}-mlx-q8",
+        file_listing={},
+    )
+
+    assert f"Int8 quantization (group_size 64, {metadata.quantization_scope}) of" in card
+
+
 def test_the_base_model_link_is_not_declared_by_the_void_recipe():
     """It differs per build: bf16 pairs with bf16, q4 with the q8 base.
 
