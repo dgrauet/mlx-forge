@@ -136,18 +136,28 @@ def write_split_model(output_dir: Path, info: dict) -> Path:
     quantized} record). Imposing one schema would rewrite published metadata,
     which is a behaviour change, not a refactor.
     """
-    path = output_dir / SPLIT_MODEL_FILENAME
-    with open(path, "w") as f:
-        json.dump(info, f, indent=2)
+    # Before the dump, not after: ensure_license_file records where the licence
+    # copy came from into `info`, and that provenance belongs in the same write.
     # Best effort here so a licence server hiccup cannot destroy a conversion
     # that took twenty minutes. The obligation binds on distribution, so the
     # blocking check lives in the upload path, which calls this strictly.
     ensure_license_file(output_dir, info, strict=False)
+
+    path = output_dir / SPLIT_MODEL_FILENAME
+    with open(path, "w") as f:
+        json.dump(info, f, indent=2)
     return path
 
 
+def _sha256(path: Path) -> str:
+    """Content hash of a licence copy, which is what "verbatim" is checked on."""
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) -> list[Path]:
-    """Place the upstream licence text next to the weights, if any is declared.
+    """Place the upstream licence text next to the weights, and vouch for it.
 
     Converting and quantising a model produces a derivative, and the community
     licences these models ship under oblige whoever distributes one to hand the
@@ -156,18 +166,31 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
     verbatim from the upstream repo. Never rewrite or summarise the text: a
     paraphrase is not "a copy of this Agreement".
 
+    A copy is only worth shipping if we can say where it came from, so each one
+    is recorded in the manifest under `license_provenance`: the upstream repo,
+    its revision, and the content hash. That record is what makes this
+    idempotent rather than merely repeatable — a second run rehashes the local
+    file and stops, without a network call, and a file that does not match what
+    was recorded is reported instead of published. Before it existed, any file
+    sitting at the right name was accepted unconditionally: a licence dropped in
+    by hand, or left over from an upstream that has since revised its terms,
+    shipped under a card claiming it was a verbatim copy.
+
     Called from `write_split_model`, which every recipe goes through, so no
     recipe can forget it, and again from the upload path where `strict` applies.
 
     Args:
         output_dir: The converted model directory.
         info: split_model.json contents; `license_file` names the path(s) inside
-            the upstream repo, `base_model`/`source` identify that repo.
-        strict: Abort on failure rather than warning. True when publishing.
+            the upstream repo, `base_model`/`source` identify that repo. Updated
+            in place with `license_provenance`, which the caller persists — this
+            runs before the manifest is written, so the record lands in it.
+        strict: Abort on a mismatch or a failed fetch rather than warning. True
+            when publishing, which is where the obligation binds.
 
     Returns:
-        The local paths written, empty when nothing is declared or a fetch
-        failed in non-strict mode. Each lands at the repo root under its
+        The local paths, empty when nothing is declared or when a fetch or a
+        check failed in non-strict mode. Each lands at the repo root under its
         basename, which is what the card links to.
     """
     from .metadata import hub_repo_from_source, license_files
@@ -180,33 +203,81 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
         if strict:
             raise SystemExit(
                 f"ERROR: {message}\nThe licence obliges us to pass a copy on to "
-                "whoever receives these weights; refusing to publish without it."
+                "whoever receives these weights; refusing to publish an "
+                "unverified one."
             )
         print(f"  WARNING: {message}")
         return []
 
-    missing = [
-        f for f in declared if not (p := output_dir / Path(f).name).exists() or not p.stat().st_size
-    ]
-    if not missing:
-        return [output_dir / Path(f).name for f in declared]
-
     upstream = info.get("base_model") or hub_repo_from_source(info.get("source"))
-    if not upstream:
-        return refuse(
-            f"{output_dir} declares license_file={list(declared)} but names no "
-            "upstream Hub repo to fetch it from (set base_model in the recipe)"
-        )
+    provenance = dict(info.get("license_provenance") or {})
 
-    for filename in missing:
+    for filename in declared:
+        name = Path(filename).name
+        local = output_dir / name
+        recorded = provenance.get(name) or {}
+
+        if local.exists() and local.stat().st_size:
+            digest = _sha256(local)
+            if recorded.get("sha256") == digest:
+                continue  # vouched for already: no network, no rewrite
+            if recorded.get("sha256"):
+                return refuse(
+                    f"{local} does not match the copy recorded in the manifest "
+                    f"(expected sha256 {recorded['sha256'][:16]}, found {digest[:16]}); "
+                    "it was replaced from an undocumented source"
+                )
+            # No record yet: an older pack. Vouch for it against upstream rather
+            # than trusting a file whose origin nobody wrote down.
+        elif not upstream:
+            return refuse(
+                f"{output_dir} declares license_file={list(declared)} but names no "
+                "upstream Hub repo to fetch it from (set base_model in the recipe)"
+            )
+
+        if not upstream:
+            return refuse(
+                f"{local} has no recorded provenance and no upstream repo to check "
+                "it against (set base_model in the recipe)"
+            )
+
         try:
-            cached = hf_hub_download(repo_id=upstream, filename=filename)
-            shutil.copyfile(cached, output_dir / Path(filename).name)
+            cached = Path(hf_hub_download(repo_id=upstream, filename=filename))
+            revision = _upstream_revision(upstream)
         except (HfHubHTTPError, OSError, ConnectionError, ValueError) as e:
             return refuse(f"could not fetch {filename} from {upstream}: {e}")
-        print(f"  Licence: {filename} from {upstream} -> {Path(filename).name}")
+
+        digest = _sha256(cached)
+        if local.exists() and local.stat().st_size and _sha256(local) != digest:
+            return refuse(
+                f"{local} differs from {filename} in {upstream}. Either it came from "
+                "somewhere undocumented, or upstream has revised its terms since this "
+                "pack was built; both need a decision, not a silent overwrite"
+            )
+
+        if not local.exists() or not local.stat().st_size:
+            shutil.copyfile(cached, local)
+            print(f"  Licence: {filename} from {upstream} -> {name}")
+
+        provenance[name] = {"repo": upstream, "revision": revision, "sha256": digest}
+
+    if provenance != (info.get("license_provenance") or {}):
+        info["license_provenance"] = provenance
 
     return [output_dir / Path(f).name for f in declared]
+
+
+def _upstream_revision(repo_id: str) -> str | None:
+    """The upstream repo revision a licence copy was taken at, if resolvable."""
+    from huggingface_hub import HfApi
+
+    try:
+        revision = HfApi().model_info(repo_id).sha
+    except Exception:  # noqa: BLE001 — provenance is better partial than absent
+        return None
+    # The manifest is JSON: anything that is not a plain string — a stubbed API
+    # under test, a client that returns an object — must not reach the dump.
+    return revision if isinstance(revision, str) else None
 
 
 def print_output_summary(output_dir: Path, *, header: str | None = None) -> None:

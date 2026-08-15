@@ -44,6 +44,17 @@ def _front_matter(card: str) -> dict[str, str]:
     return out
 
 
+def _sha_of(text: str) -> str:
+    """The hash ensure_license_file records for a licence copy."""
+    import hashlib
+
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+#: sha256 of "agreement\n", the stand-in licence text used throughout.
+_DIGEST = _sha_of("agreement\n")
+
+
 # ---------------------------------------------------------------------------
 # The declaration
 # ---------------------------------------------------------------------------
@@ -251,19 +262,81 @@ def test_ensure_license_file_is_a_no_op_when_none_is_declared(tmp_path, monkeypa
     assert convert.ensure_license_file(tmp_path, {"source": "acme/Demo"}) == []
 
 
-def test_ensure_license_file_keeps_an_existing_copy(tmp_path, monkeypatch):
-    """Re-uploading must not re-fetch, and must not clobber what is there."""
+def test_a_vouched_copy_is_kept_without_touching_the_network(tmp_path, monkeypatch):
+    """This is the idempotence: recorded hash matches, so nothing happens.
+
+    Not merely "the file exists" — that was the hole. A hash recorded in the
+    manifest is what lets a second run stop early and still be sure.
+    """
 
     def explode(**kwargs):  # pragma: no cover - must never run
-        raise AssertionError("re-fetched a licence already present locally")
+        raise AssertionError("re-fetched a licence already vouched for")
 
     monkeypatch.setattr(convert, "hf_hub_download", explode)
 
-    (tmp_path / "LICENSE").write_text("already here\n")
-    written = convert.ensure_license_file(tmp_path, _ltx_split_info())
+    (tmp_path / "LICENSE").write_text("agreement\n")
+    info = _ltx_split_info()
+    info["license_provenance"] = {"LICENSE": {"repo": "x/y", "revision": None, "sha256": _DIGEST}}
+
+    written = convert.ensure_license_file(tmp_path, info)
 
     assert written == [tmp_path / "LICENSE"]
-    assert (tmp_path / "LICENSE").read_text() == "already here\n"
+    assert (tmp_path / "LICENSE").read_text() == "agreement\n"
+
+
+def test_a_copy_from_an_undocumented_source_is_refused(tmp_path, monkeypatch):
+    """The case this whole record exists for.
+
+    A licence replaced by hand, or left over from an upstream that has since
+    revised its terms, used to ship under a card claiming it was verbatim.
+    """
+
+    def explode(**kwargs):  # pragma: no cover - must never run
+        raise AssertionError("went to the network instead of reporting the mismatch")
+
+    monkeypatch.setattr(convert, "hf_hub_download", explode)
+
+    (tmp_path / "LICENSE").write_text("something else entirely\n")
+    info = _ltx_split_info()
+    info["license_provenance"] = {"LICENSE": {"repo": "x/y", "revision": None, "sha256": _DIGEST}}
+
+    with pytest.raises(SystemExit, match="undocumented source"):
+        convert.ensure_license_file(tmp_path, info)
+
+
+def test_an_unvouched_copy_is_checked_against_upstream(tmp_path, monkeypatch):
+    """A pack built before provenance existed: verify, do not assume."""
+    src = tmp_path / "src"
+    src.write_text("agreement\n")
+    monkeypatch.setattr(convert, "hf_hub_download", lambda **kw: str(src))
+    monkeypatch.setattr(convert, "_upstream_revision", lambda repo: "deadbeef")
+
+    (tmp_path / "LICENSE").write_text("agreement\n")
+    info = _ltx_split_info()
+    convert.ensure_license_file(tmp_path, info)
+
+    assert info["license_provenance"]["LICENSE"] == {
+        "repo": "Lightricks/LTX-2.3",
+        "revision": "deadbeef",
+        "sha256": _DIGEST,
+    }
+
+
+def test_an_unvouched_copy_that_upstream_disowns_is_reported(tmp_path, monkeypatch):
+    """Either it came from nowhere documented, or upstream revised its terms.
+
+    Both need a decision. Overwriting silently would hide an upstream change;
+    keeping it silently would ship a copy we cannot vouch for.
+    """
+    src = tmp_path / "src"
+    src.write_text("the August revision\n")
+    monkeypatch.setattr(convert, "hf_hub_download", lambda **kw: str(src))
+
+    (tmp_path / "LICENSE").write_text("the January text\n")
+
+    with pytest.raises(SystemExit, match="differs from"):
+        convert.ensure_license_file(tmp_path, _ltx_split_info())
+    assert (tmp_path / "LICENSE").read_text() == "the January text\n", "must not overwrite"
 
 
 def test_ensure_license_file_refuses_to_publish_without_one(tmp_path, monkeypatch):
@@ -504,9 +577,17 @@ def test_a_partial_copy_is_completed_not_assumed_done(tmp_path, monkeypatch):
         return str(src)
 
     monkeypatch.setattr(convert, "hf_hub_download", fake)
-    convert.ensure_license_file(tmp_path, dict(metadata.as_split_fields()))
+    info = dict(metadata.as_split_fields())
+    info["license_provenance"] = {
+        "LICENSE": {
+            "repo": "tencent/Hunyuan3D-2.1",
+            "revision": None,
+            "sha256": _sha_of("already here\n"),
+        }
+    }
+    convert.ensure_license_file(tmp_path, info)
 
-    assert fetched == ["Notice.txt"]
+    assert fetched == ["Notice.txt"], "the vouched LICENSE must not be re-fetched"
     assert (tmp_path / "LICENSE").read_text() == "already here\n"
 
 
