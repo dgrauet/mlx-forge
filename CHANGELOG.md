@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.11](https://github.com/dgrauet/mlx-forge/compare/v0.4.10...v0.4.11) (2026-08-15)
+
+
+### Features
+
+* **license:** record where each licence copy came from, and check it ([#85](https://github.com/dgrauet/mlx-forge/issues/85)) ([ec50f5d](https://github.com/dgrauet/mlx-forge/commit/ec50f5d23fa08305ecf7841a4c433584c8588a93))
+
 ## [0.4.10](https://github.com/dgrauet/mlx-forge/compare/v0.4.9...v0.4.10) (2026-08-15)
 
 
