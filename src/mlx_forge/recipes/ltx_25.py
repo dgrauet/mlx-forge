@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import mlx.core as mx
 
@@ -285,3 +286,72 @@ def sanitize_duration_head_key(key: str) -> str | None:
 def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
     """Whether an upscaler tensor is a conv weight needing the layout swap."""
     return "conv" in key.lower() and key.endswith(".weight") and weight.ndim >= 3
+
+
+# ---------------------------------------------------------------------------
+# Quantisation — two components, different rules
+# ---------------------------------------------------------------------------
+
+from ..quantize import write_quantize_config  # noqa: E402
+from .ltx_25_text_encoder import should_quantize_gemma  # noqa: E402
+
+QUANTIZED_COMPONENTS = {
+    "transformer": "transformer_blocks Linear weights",
+    "text_encoder": "Gemma-4 attention and MLP Linear weights",
+}
+
+
+def ltx25_should_quantize(key: str, weight: mx.array) -> bool:
+    """Only transformer_blocks Linear weights — LTX-2.3's rule, unchanged."""
+    bare_key = key.replace("transformer.", "", 1)
+    return (
+        "transformer_blocks" in bare_key
+        and bare_key.endswith(".weight")
+        and weight.ndim == 2
+        and not bare_key.endswith(".scales")
+        and not bare_key.endswith(".biases")
+    )
+
+
+def write_ltx25_quantize_config(output_dir: Path, *, bits: int, group_size: int) -> Path:
+    """Record how this pack was quantised, per component.
+
+    LTX-2.3 records a single `only_transformer_blocks` flag, which cannot
+    describe two components quantised under different rules. The runtime has to
+    rebuild each without guessing.
+    """
+    return write_quantize_config(
+        output_dir,
+        bits=bits,
+        group_size=group_size,
+        components=dict(QUANTIZED_COMPONENTS),
+    )
+
+
+__all__ = [
+    "METADATA",
+    "UPSTREAM_REPO",
+    "SourceFile",
+    "SOURCE_FILES",
+    "classify_video_vae_key",
+    "sanitize_vae_decoder_key",
+    "sanitize_vae_encoder_key",
+    "classify_audio_key",
+    "sanitize_audio_vae_key",
+    "sanitize_vocoder_key",
+    "UPSTREAM_TRANSFORMERS",
+    "VARIANT_FILENAMES",
+    "classify_dit_key",
+    "sanitize_transformer_key",
+    "sanitize_connector_key",
+    "maybe_transpose",
+    "UPSCALER_FILES",
+    "DURATION_HEAD_FILE",
+    "LORA_FILES",
+    "classify_duration_head_key",
+    "sanitize_duration_head_key",
+    "QUANTIZED_COMPONENTS",
+    "ltx25_should_quantize",
+    "write_ltx25_quantize_config",
+    "should_quantize_gemma",
+]
