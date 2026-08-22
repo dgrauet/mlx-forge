@@ -311,22 +311,27 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
             except (HfHubHTTPError, OSError, ConnectionError, ValueError) as e:
                 return refuse(f"could not fetch {filename} from {upstream}: {e}")
 
-        digest = _sha256(cached)
-        if local.exists() and local.stat().st_size and _sha256(local) != digest:
-            return refuse(
-                f"{local} differs from {filename} in {upstream}. Either it came from "
-                "somewhere undocumented, or upstream has revised its terms since this "
-                "pack was built; both need a decision, not a silent overwrite"
-            )
+        try:
+            digest = _sha256(cached)
+            if local.exists() and local.stat().st_size and _sha256(local) != digest:
+                return refuse(
+                    f"{local} differs from {filename} in {upstream}. Either it came from "
+                    "somewhere undocumented, or upstream has revised its terms since this "
+                    "pack was built; both need a decision, not a silent overwrite"
+                )
 
-        if not local.exists() or not local.stat().st_size:
-            shutil.copyfile(cached, local)
-            print(f"  Licence: {filename} from {upstream} -> {name}")
+            if not local.exists() or not local.stat().st_size:
+                shutil.copyfile(cached, local)
+                print(f"  Licence: {filename} from {upstream} -> {name}")
 
-        provenance[name] = {"repo": upstream, "revision": revision, "sha256": digest}
-
-        if github:
-            cached.unlink(missing_ok=True)
+            provenance[name] = {"repo": upstream, "revision": revision, "sha256": digest}
+        finally:
+            if github:
+                # `cached` is a scratch copy for the GitHub path only (the Hub
+                # path's `cached` is the shared hf_hub_download cache, which is
+                # not ours to delete). Clean it up on every exit from this
+                # block, including the mismatch refusal above.
+                cached.unlink(missing_ok=True)
 
     if provenance != (info.get("license_provenance") or {}):
         info["license_provenance"] = provenance

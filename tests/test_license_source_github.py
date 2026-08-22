@@ -139,3 +139,27 @@ class TestFetchFromGithub:
         (tmp_path / "LICENSE").write_bytes(LICENCE_TEXT)
         ensure_license_file(tmp_path, info, strict=False)
         assert calls == []
+
+    def test_a_mismatch_against_an_unrecorded_local_copy_leaves_no_scratch_file(
+        self, tmp_path, monkeypatch
+    ):
+        # The "older pack, vouch against upstream" case: a local LICENSE
+        # exists with no recorded provenance, and the freshly fetched GitHub
+        # copy does not match it. The refusal must not leave the `.fetched`
+        # scratch file behind in the model directory.
+        monkeypatch.setattr(
+            convert_mod,
+            "fetch_github_license",
+            lambda repo, path: (LICENCE_TEXT, "abc123"),
+        )
+        info = {
+            "source": "Lightricks/LTX-2.5",
+            "license_file": ["LICENSE"],
+            "license_source": "github:Lightricks/LTX-2/LICENSE",
+        }
+        (tmp_path / "LICENSE").write_bytes(b"something else entirely\n")
+
+        with pytest.raises(SystemExit, match="differs"):
+            ensure_license_file(tmp_path, info)
+
+        assert list(tmp_path.glob(".*.fetched")) == []
