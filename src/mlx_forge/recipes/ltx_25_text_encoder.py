@@ -1,0 +1,108 @@
+"""LTX-2.5's Gemma-4 12B unified text encoder.
+
+Upstream ships it inside the LTX-2.5 repo under a name of its own —
+`gemma4-12b-with-proj-ltx-2.5` — because it is not a stock Gemma: it is an LTX
+fine-tune with vision and audio branches, whose architecture string is
+`Gemma4UnifiedForConditionalGeneration`. It therefore belongs to this recipe
+rather than to a general Gemma conversion.
+
+Its checkpoint carries five files as U8 tensors, the tokenizer among them at
+32 MB. They are extracted to real files: nothing downstream can read a
+tokenizer out of a safetensors entry.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import mlx.core as mx
+
+TEXT_ENCODER_FILE = "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"
+
+#: U8 tensor key -> the filename it becomes. `hf_asset__X` carries its own
+#: filename after the prefix; `tokenizer_json` predates that convention.
+ASSET_FILENAMES = {
+    "tokenizer_json": "tokenizer.json",
+    "hf_asset__tokenizer_config.json": "tokenizer_config.json",
+    "hf_asset__chat_template.jinja": "chat_template.jinja",
+    "hf_asset__generation_config.json": "generation_config.json",
+    "hf_asset__processor_config.json": "processor_config.json",
+}
+
+_UNQUANTISED_PREFIXES = (
+    "vision_model.",
+    "text_embedding_projection.",
+    "audio_projector.",
+    "multi_modal_projector.",
+)
+
+_QUANTISED_SUFFIXES = (
+    ".self_attn.q_proj.weight",
+    ".self_attn.k_proj.weight",
+    ".self_attn.v_proj.weight",
+    ".self_attn.o_proj.weight",
+    ".mlp.gate_proj.weight",
+    ".mlp.up_proj.weight",
+    ".mlp.down_proj.weight",
+)
+
+
+def classify_text_encoder_key(key: str) -> str | None:
+    """Route a text-encoder key to `text_encoder` or `text_encoder_asset`."""
+    if key in ASSET_FILENAMES:
+        return "text_encoder_asset"
+    return "text_encoder"
+
+
+def sanitize_text_encoder_key(key: str) -> str | None:
+    """Convert a Gemma-4 weight key to MLX format.
+
+    Upstream already uses the flat HuggingFace naming mlx-lm expects, so the
+    only work is refusing the asset tensors, which are files and not weights.
+    """
+    if key in ASSET_FILENAMES:
+        return None
+    return key
+
+
+def extract_assets(weights: dict[str, mx.array], output_dir: Path) -> list[Path]:
+    """Write the five U8 asset tensors out as real files.
+
+    Raises:
+        SystemExit: An asset is missing. A pack whose tokenizer silently failed
+            to extract loads and then produces nonsense; stopping here is the
+            cheaper failure.
+    """
+    missing = [name for key, name in ASSET_FILENAMES.items() if key not in weights]
+    if missing:
+        raise SystemExit(
+            "ERROR: the text encoder checkpoint is missing embedded assets: "
+            + ", ".join(sorted(missing))
+        )
+
+    written: list[Path] = []
+    for key, filename in ASSET_FILENAMES.items():
+        payload = bytes(memoryview(weights[key].astype(mx.uint8)))
+        target = output_dir / filename
+        target.write_bytes(payload)
+        print(f"  Extracted {filename} ({len(payload) / 1024:.0f} KB)")
+        written.append(target)
+    return written
+
+
+def should_quantize_gemma(key: str, weight: mx.array) -> bool:
+    """Only the transformer stack's Linear weights.
+
+    Excluded on purpose: the embedding table (Gemma is a feature extractor
+    here, so a quantised table shifts the starting point of every layer and the
+    error surfaces as drifting conditioning, not as slightly worse text), the
+    six projectors (the whole conditioning passes through them, for a
+    negligible weight), and the vision branch (nine tensors).
+    """
+    if key.startswith(_UNQUANTISED_PREFIXES):
+        return False
+    if key.endswith((".scales", ".biases")):
+        return False
+    if weight.ndim != 2:
+        return False
+    return key.endswith(_QUANTISED_SUFFIXES)
