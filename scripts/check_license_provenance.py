@@ -3,7 +3,9 @@
 `ensure_license_file` records a copy's origin and hash in the manifest, which
 makes a local check cheap: rehash the file, compare, done. What that record
 cannot do on its own is notice when the *upstream* text changes — the copy still
-matches what we wrote down, because we wrote down the old one.
+matches what we wrote down, because we wrote down the old one. "Upstream" here
+may be a Hub repo or a GitHub repository: LTX-2.5's agreement is published only
+on GitHub, so a Hub-only check would never see it at all.
 
 That is not hypothetical. Lightricks published an "LTX-2.x" agreement on
 2026-08-11, 30938 bytes against the 21399 the Hub still serves, adding §6 AI
@@ -24,11 +26,13 @@ Maintenance tool, not a test: network access and a HF login, so CI skips it.
 """
 
 import hashlib
+import hashlib as _hashlib
 import json
 import sys
 
 from huggingface_hub import HfApi, hf_hub_download
 
+from mlx_forge.convert import fetch_github_license, parse_license_source
 from mlx_forge.metadata import hub_repo_from_source, license_files
 
 AUTHOR = sys.argv[sys.argv.index("--author") + 1] if "--author" in sys.argv else "dgrauet"
@@ -55,7 +59,12 @@ for model in sorted(api.list_models(author=AUTHOR), key=lambda m: m.id):
     if not declared:
         continue
 
-    upstream = split_info.get("base_model") or hub_repo_from_source(split_info.get("source"))
+    github = parse_license_source(split_info.get("license_source"))
+    upstream = (
+        f"github:{github[0]}"
+        if github
+        else (split_info.get("base_model") or hub_repo_from_source(split_info.get("source")))
+    )
     provenance = split_info.get("license_provenance") or {}
     problems, drifts = [], []
 
@@ -72,7 +81,14 @@ for model in sorted(api.list_models(author=AUTHOR), key=lambda m: m.id):
         elif recorded != shipped:
             problems.append(f"{name}: does not match its recorded provenance")
 
-        current = digest(upstream, path) if upstream else None
+        if github:
+            try:
+                content, _ = fetch_github_license(github[0], path)
+                current = _hashlib.sha256(content).hexdigest()
+            except Exception:  # noqa: BLE001 — an unreachable text is an unknown one here
+                current = None
+        else:
+            current = digest(upstream, path) if upstream else None
         if current is None:
             problems.append(f"{name}: cannot read {path} from {upstream} to compare")
         elif current != shipped:
