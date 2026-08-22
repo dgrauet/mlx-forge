@@ -17,6 +17,7 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | Model | Recipe | Status |
 |-------|--------|--------|
 | [LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (22B video DiT) | `ltx-2.3` | Stable |
+| [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) (gated; pre-split video+audio DiT, 2 video VAEs, upscalers) | `ltx-2.5` | Stable |
 | [Ideogram 4](https://huggingface.co/ideogram-ai/ideogram-4-fp8) (FP8 text-to-image DiT) | `ideogram-4` | Stable |
 | [Matrix-Game 3.0](https://huggingface.co/Skywork/Matrix-Game-3.0) (interactive world model: DiT ×2 + UMT5-XXL + 3 VAEs) | `matrix-game-3.0` | Stable |
 | [CogVideoX-Fun 1.5](https://huggingface.co/alibaba-pai/CogVideoX-Fun-V1.5-5b-InP) (5B image-to-video inpainting) | `cogvideox-fun-v1.5-5b-inp` | Stable |

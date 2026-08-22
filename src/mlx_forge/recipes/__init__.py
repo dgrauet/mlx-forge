@@ -22,6 +22,7 @@ from ..metadata import RecipeMetadata
 AVAILABLE_RECIPES = {
     "ideogram-4": "mlx_forge.recipes.ideogram_4",
     "ltx-2.3": "mlx_forge.recipes.ltx_23",
+    "ltx-2.5": "mlx_forge.recipes.ltx_25",
     "matrix-game-3.0": "mlx_forge.recipes.matrix_game_3_0",
     "cogvideox-fun-v1.5-5b-inp": "mlx_forge.recipes.cogvideox_fun_v1_5_5b_inp",
     "void-model": "mlx_forge.recipes.void_model",

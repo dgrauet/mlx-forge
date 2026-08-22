@@ -37,6 +37,8 @@ src/mlx_forge/
 └── recipes/         # Model-specific conversion logic
     ├── __init__.py             # Registry (AVAILABLE_RECIPES) + recipe contract
     ├── ltx_23.py                # LTX-2.3: 22B video DiT
+    ├── ltx_25.py                # LTX-2.5: pre-split video+audio DiT, VAEs, upscalers
+    ├── ltx_25_text_encoder.py   # LTX-2.5's Gemma-4 text encoder converter
     ├── ideogram_4.py            # Ideogram 4: FP8 text-to-image DiT
     ├── matrix_game_3_0.py       # Matrix-Game 3.0: interactive world model
     ├── cogvideox_fun_v1_5_5b_inp.py  # CogVideoX-Fun 1.5 5B (image-to-video)
@@ -163,6 +165,7 @@ the full model:
    Idempotent. Re-running always produces a card matching the current remote
    state, regardless of what the local model_dir contains.
 
-Currently the only recipe that supports `--skip-shared` is `ltx-2.3`. Other
+Currently the only recipes that support `--skip-shared` are `ltx-2.3` and
+`ltx-2.5`. Other
 recipes can opt in by mirroring the LTX-2.3 implementation pattern (see
 `src/mlx_forge/recipes/ltx_23.py`, search for `skip_shared`).
