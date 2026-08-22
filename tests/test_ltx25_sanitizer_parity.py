@@ -11,9 +11,9 @@ The one difference for those two is the source prefix: 2.3's monolith names a
 VAE weight `vae.decoder.…`, while 2.5's per-role file names it `decoder.…`.
 The test bridges that and asserts everything downstream of it is identical.
 
-The vocoder is the deliberate exception: `test_vocoder` below asserts a
-*divergence* from 2.3, not parity with it — see `sanitize_vocoder_key`'s
-docstring for why.
+The vocoder is the deliberate exception:
+`test_vocoder_deliberately_diverges_from_2_3` below asserts a *divergence*
+from 2.3, not parity with it — see `sanitize_vocoder_key`'s docstring for why.
 """
 
 import json
