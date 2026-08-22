@@ -63,6 +63,23 @@ defects were found in the process — the copies had drifted:
 That is the argument for using the shared layer: not line count, but that
 independent copies diverge silently.
 
+The same argument applies one level up, to numbers a recipe derives by hand
+rather than reuses. LTX-2.5's `validate()` checks each component's tensor
+count against a hand-written table, `EXPECTED_TENSOR_COUNTS`. Two of upstream's
+files fold a pair of statistics tensors into both halves of a component split,
+and the table was built by eyeballing `encoder.`/`decoder.` prefixes rather than
+from the full picture, so it undercounted both pairs by exactly the tensors it
+never went looking for. Nothing caught this in fifteen rounds of task and
+review, because the table's own test suite built its fixture packs *from* the
+table — a hand-written number checked against itself always agrees. What
+finally caught it was reconciling the table against `tensor_count` in the
+fixture `scripts/harvest_ltx25_keys.py` produces from upstream's own
+safetensors headers — evidence a recipe's own code never touches, and so
+cannot make agree with itself by construction. **A recipe's expected-tensor-count
+table (or any other hand-derived per-component number `validate()` checks
+against) must be reconciled against a harvested fixture, not merely restated
+by its own tests.**
+
 ---
 
 ## Recipe map

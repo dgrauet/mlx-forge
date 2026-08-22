@@ -353,10 +353,14 @@ class TestValidate:
         assert "tokenizer.json" in capsys.readouterr().out
 
     def test_the_two_vaes_are_told_apart_by_tensor_count(self, tmp_path):
-        # 84 against 310: the two video VAE decoders differ by 226 tensors,
+        # 86 against 312: the two video VAE decoders differ by 226 tensors,
         # so swapping the files is detectable without loading a single weight.
-        assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_conv"] == 84
-        assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_av"] == 310
+        # These restate the constants rather than deriving them — that is
+        # exactly the gap test_video_vae_counts_reconcile_with_the_fixture
+        # (tests/test_ltx25_keys.py) closes, by checking them against the
+        # harvested upstream tensor_count instead.
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_conv"] == 86
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_av"] == 312
         assert ltx_25.EXPECTED_TENSOR_COUNTS["duration_head"] == 15
 
 

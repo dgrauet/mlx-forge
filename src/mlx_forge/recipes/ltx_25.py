@@ -126,15 +126,55 @@ def classify_video_vae_key(key: str, suffix: str) -> str | None:
     component is ever named plainly: a pack whose `vae_decoder.safetensors`
     could be either architecture is a silent mis-load waiting to happen.
 
-    per_channel_statistics belongs to both halves and is reported as the
-    decoder's here; the encoder picks it up through its own sanitizer, which is
-    how LTX-2.3 does it and why neither ships a separate stats file.
+    per_channel_statistics belongs to both halves, but a classifier hands each
+    key to exactly one component, so this routes it to the decoder only; the
+    caller (`_share_video_vae_statistics`, in the `convert()` loop) is what
+    gives the encoder its own copy afterwards, before either output file is
+    written. LTX-2.3 reaches the same result differently: it classifies these
+    keys into a third component, `vae_shared_stats`, and `process_shared_stats`
+    appends them to the decoder and encoder files after both already exist on
+    disk (load, add the key, re-save — each file twice). That shape fits 2.3,
+    which processes its monolith through a `component -> keys` dict per whole
+    checkpoint; per-file classification here means encoder and decoder keys
+    are already sitting in the same in-memory `keys_by_component` before
+    either is written, so duplicating the keys there is simpler than 2.3's
+    read-modify-write.
     """
     if key.startswith("encoder."):
         return f"vae_encoder{suffix}"
     if key.startswith("decoder.") or key.startswith("per_channel_statistics."):
         return f"vae_decoder{suffix}"
     return None
+
+
+def _share_video_vae_statistics(
+    keys_by_component: dict[str, list[str]], components: tuple[str, ...]
+) -> None:
+    """Give the encoder its own copy of the decoder's per_channel_statistics keys.
+
+    `classify_video_vae_key` can only route a key to one component, so it
+    hands `per_channel_statistics.*` to the decoder alone. Both halves need
+    the statistics — an encoder without them is missing the normalisation its
+    LTX-2.3 counterpart carries, which for the image/video conditioning path
+    is a load failure or unnormalised latents, not a naming nit. This
+    duplicates those keys into the encoder's list before `process_component`
+    writes either file, called from `convert()` right after `classify_keys`.
+
+    A no-op for any `components` tuple that is not a video VAE's
+    `(vae_encoder*, vae_decoder*)` pair: every other source's components are
+    named otherwise, so `encoder_name`/`decoder_name` stay `None`.
+    """
+    encoder_name = next((c for c in components if c.startswith("vae_encoder")), None)
+    decoder_name = next((c for c in components if c.startswith("vae_decoder")), None)
+    if encoder_name is None or decoder_name is None:
+        return
+    stats_keys = [
+        key
+        for key in keys_by_component.get(decoder_name, [])
+        if key.startswith("per_channel_statistics.")
+    ]
+    if stats_keys:
+        keys_by_component.setdefault(encoder_name, []).extend(stats_keys)
 
 
 def sanitize_vae_decoder_key(key: str) -> str | None:
@@ -815,6 +855,7 @@ def convert(args) -> None:
             # is what lets classify_keys take a non-optional callable.
             assert source.classify is not None, f"{source.path} has neither classify nor converter"
             keys_by_component = classify_keys(weights, source.classify)
+            _share_video_vae_statistics(keys_by_component, source.components)
             for component_name, keys in keys_by_component.items():
                 if component_name == "connector" and not write_connector:
                     continue
@@ -917,15 +958,21 @@ def convert(args) -> None:
 #: expose the same `encoder.`/`decoder.` prefixes), but the decoder tensor
 #: counts differ by 226 — a swapped pair is detectable without loading a
 #: single weight.
+#: The two video VAE pairs each sum to their file's harvested `tensor_count`
+#: plus 2: `_share_video_vae_statistics` duplicates the 2 `per_channel_statistics`
+#: tensors into the encoder, so they are written into both output files and
+#: counted in both entries here (conv: 170 + 2 = 86 + 86; av: 396 + 2 = 86 + 312).
+#: `test_video_vae_counts_reconcile_with_the_fixture` pins this against
+#: tests/fixtures/ltx_25_keys.json rather than trusting the arithmetic by eye.
 #: Covers every entry in SHARED_COMPONENTS (test_covers_every_shared_component
 #: pins this). text_encoder's 681 is the checkpoint's 686 tensors minus the 5
 #: U8 assets `sanitize_text_encoder_key` refuses, both harvested from
 #: tests/fixtures/ltx_25_keys.json; the two upscalers hold 72 each.
 EXPECTED_TENSOR_COUNTS = {
-    "vae_encoder_conv": 84,
-    "vae_decoder_conv": 84,
-    "vae_encoder_av": 84,
-    "vae_decoder_av": 310,
+    "vae_encoder_conv": 86,
+    "vae_decoder_conv": 86,
+    "vae_encoder_av": 86,
+    "vae_decoder_av": 312,
     "audio_vae": 102,
     "vocoder": 1227,
     "duration_head": 15,

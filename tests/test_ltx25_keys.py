@@ -8,7 +8,10 @@ import mlx.core as mx
 import pytest
 
 from mlx_forge.recipes.ltx_25 import (
+    EXPECTED_TENSOR_COUNTS,
+    SOURCE_FILES,
     UPSCALER_FILES,
+    _share_video_vae_statistics,
     classify_audio_key,
     classify_dit_key,
     classify_duration_head_key,
@@ -84,11 +87,67 @@ class TestVideoVaeClassification:
         assert unclassified == []
 
     def test_stats_go_to_both_halves(self, ltx25_keys):
-        # 2.3 ships no vae_shared_stats file: the statistics are folded into
-        # the encoder and the decoder under different names. Same here.
-        key = "per_channel_statistics.mean-of-means"
-        assert sanitize_vae_decoder_key(key) == "per_channel_statistics.mean"
-        assert sanitize_vae_encoder_key(key) == "per_channel_statistics._mean_of_means"
+        # C1 (see .superpowers/sdd/2026-08-22-ltx-2.5-recipe/final-review.md):
+        # the old version of this test only called the two sanitizers and
+        # never asked classify_video_vae_key where a stats key actually goes
+        # — it asserted a property the code did not have, and survived
+        # fifteen task reviews doing it. classify_video_vae_key can only route
+        # a key to one component, so it hands per_channel_statistics.* to the
+        # decoder alone; _share_video_vae_statistics is what gives the
+        # encoder its own copy afterwards. This drives the real pipeline —
+        # classification, then that duplication step, then both sanitizers —
+        # against real fixture keys, so it fails if either half regresses.
+        classify = partial(classify_video_vae_key, suffix="_conv")
+        keys_by_component: dict[str, list[str]] = {}
+        for key in ltx25_keys[VAE_CONV]["keys"]:
+            comp = classify(key)
+            if comp:
+                keys_by_component.setdefault(comp, []).append(key)
+
+        stats_key = "per_channel_statistics.mean-of-means"
+        assert stats_key in keys_by_component["vae_decoder_conv"]
+        assert stats_key not in keys_by_component.get("vae_encoder_conv", [])
+
+        _share_video_vae_statistics(keys_by_component, ("vae_encoder_conv", "vae_decoder_conv"))
+
+        # Duplicated into the encoder, not moved out of the decoder.
+        assert stats_key in keys_by_component["vae_encoder_conv"]
+        assert stats_key in keys_by_component["vae_decoder_conv"]
+
+        assert sanitize_vae_decoder_key(stats_key) == "per_channel_statistics.mean"
+        assert sanitize_vae_encoder_key(stats_key) == "per_channel_statistics._mean_of_means"
+
+    def test_share_video_vae_statistics_is_a_noop_off_video_vae_components(self):
+        # Any other source's components — e.g. the DiT's ("transformer",
+        # "connector") — must pass through untouched: neither name starts
+        # with "vae_encoder"/"vae_decoder", so there is nothing to duplicate.
+        keys_by_component = {"transformer": ["a.weight"], "connector": ["b.weight"]}
+        before = {k: list(v) for k, v in keys_by_component.items()}
+        _share_video_vae_statistics(keys_by_component, ("transformer", "connector"))
+        assert keys_by_component == before
+
+
+class TestExpectedTensorCounts:
+    """EXPECTED_TENSOR_COUNTS reconciled against the harvested upstream headers.
+
+    The validate() test suite (tests/test_ltx25_sources.py) builds its fixture
+    packs *from* EXPECTED_TENSOR_COUNTS, so those tests can never catch the
+    constants disagreeing with what convert() actually writes — that is
+    exactly how C1a survived. This test is the other half: it checks the
+    constants against ltx_25_keys.json's independently harvested
+    `tensor_count`, which comes from upstream's own safetensors headers, not
+    from this recipe's code.
+    """
+
+    def test_video_vae_counts_reconcile_with_the_fixture(self, ltx25_keys):
+        # _share_video_vae_statistics duplicates the 2 per_channel_statistics
+        # tensors into the encoder, so each pair is written with 2 more
+        # tensors, combined, than the upstream file actually carries.
+        for source in SOURCE_FILES:
+            if source.path not in (VAE_CONV, VAE_AV):
+                continue
+            total = sum(EXPECTED_TENSOR_COUNTS[c] for c in source.components)
+            assert total == ltx25_keys[source.path]["tensor_count"] + 2, source.path
 
 
 class TestAudioClassification:
