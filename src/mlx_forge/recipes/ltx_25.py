@@ -239,13 +239,26 @@ def sanitize_audio_vae_key(key: str) -> str | None:
 def sanitize_vocoder_key(key: str) -> str | None:
     """Convert a vocoder key to MLX format.
 
-    Uses replace() rather than a single prefix strip to match LTX-2.3's
-    sanitizer byte for byte: some vocoder submodules are themselves named
-    "vocoder" (e.g. "vocoder.vocoder.act_post.act.alpha"), so the two
-    approaches diverge on those keys, and parity with 2.3 is the point.
+    A single prefix strip, not LTX-2.3's `key.replace("vocoder.", "")`. The
+    vocoder file holds two sibling generators of identical internal
+    structure — the main HiFiGAN-style one, named `vocoder`, and a
+    bandwidth-extension one, named `bwe_generator` — under a shared
+    `vocoder.` container: `vocoder.vocoder.act_post...` and
+    `vocoder.bwe_generator.act_post...`. `replace()` strips every occurrence
+    of "vocoder.", so it flattens the first generator to the component root
+    (`act_post...`) while its sibling keeps its name one level down
+    (`bwe_generator.act_post...`) — two parallel modules land at different
+    depths, and no MLX module tree can mirror upstream that way. A single
+    strip keeps both at the same depth: `vocoder.act_post...` and
+    `bwe_generator.act_post...`.
+
+    2.3's sanitizer keeps `replace()` regardless — its published packs and
+    the ComfyUI nodes that load them already depend on the flattened names,
+    so fixing it there is a breaking change to a shipped artefact. 2.5 has no
+    runtime yet, so getting it right costs nothing here.
     """
     if key.startswith("vocoder."):
-        return key.replace("vocoder.", "")
+        return key[len("vocoder.") :]
     return None
 
 
