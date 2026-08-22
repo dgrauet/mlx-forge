@@ -4,12 +4,17 @@ import json
 from functools import partial
 from pathlib import Path
 
+import mlx.core as mx
 import pytest
 
 from mlx_forge.recipes.ltx_25 import (
     classify_audio_key,
+    classify_dit_key,
     classify_video_vae_key,
+    maybe_transpose,
     sanitize_audio_vae_key,
+    sanitize_connector_key,
+    sanitize_transformer_key,
     sanitize_vae_decoder_key,
     sanitize_vae_encoder_key,
     sanitize_vocoder_key,
@@ -96,3 +101,92 @@ class TestAudioClassification:
         )
         assert sanitize_vocoder_key("vocoder.ups.0.weight") == "ups.0.weight"
         assert sanitize_vocoder_key("audio_vae.decoder.conv_in.conv.bias") is None
+
+
+class TestDitClassification:
+    def test_every_dit_key_is_classified(self, ltx25_keys):
+        unclassified = [k for k in ltx25_keys[DIT]["keys"] if classify_dit_key(k) is None]
+        assert unclassified == []
+
+    def test_connectors_are_separated_from_the_transformer(self):
+        assert (
+            classify_dit_key("model.diffusion_model.video_embeddings_connector.0.weight")
+            == "connector"
+        )
+        assert (
+            classify_dit_key("model.diffusion_model.audio_embeddings_connector.0.weight")
+            == "connector"
+        )
+        assert (
+            classify_dit_key("model.diffusion_model.transformer_blocks.0.attn1.to_q.weight")
+            == "transformer"
+        )
+
+    def test_per_block_prompt_tables_stay_in_the_transformer(self, ltx25_keys):
+        # 366 keys contain "prompt" or "connector" as a substring; only the two
+        # *_embeddings_connector stacks are actually the connector.
+        key = "model.diffusion_model.transformer_blocks.0.prompt_scale_shift_table"
+        assert key in ltx25_keys[DIT]["keys"]
+        assert classify_dit_key(key) == "transformer"
+
+    def test_text_projection_is_not_the_dit_s_business(self):
+        # In 2.5 it lives in the text encoder file, unlike 2.3.
+        assert classify_dit_key("text_embedding_projection.video_aggregate_embed.weight") is None
+
+
+class TestDitSanitisation:
+    def test_no_pytorch_idiom_survives(self, ltx25_keys):
+        for key in ltx25_keys[DIT]["keys"]:
+            if classify_dit_key(key) != "transformer":
+                continue
+            out = sanitize_transformer_key(key)
+            assert not out.startswith("model.diffusion_model."), key
+            assert ".net." not in out, key
+            assert ".to_out.0." not in out, key
+            assert ".linear_1." not in out and ".linear_2." not in out, key
+
+    def test_sanitisation_is_injective_over_the_real_keys(self, ltx25_keys):
+        # Two upstream keys collapsing to one output silently drops a tensor.
+        transformer = [k for k in ltx25_keys[DIT]["keys"] if classify_dit_key(k) == "transformer"]
+        assert len({sanitize_transformer_key(k) for k in transformer}) == len(transformer)
+
+    def test_known_renames(self):
+        base = "model.diffusion_model.transformer_blocks.0"
+        assert sanitize_transformer_key(f"{base}.attn1.to_out.0.weight") == (
+            "transformer_blocks.0.attn1.to_out.weight"
+        )
+        assert sanitize_transformer_key(f"{base}.ff.net.0.proj.weight") == (
+            "transformer_blocks.0.ff.proj_in.weight"
+        )
+        assert sanitize_transformer_key(f"{base}.ff.net.2.weight") == (
+            "transformer_blocks.0.ff.proj_out.weight"
+        )
+
+    def test_connector_only_loses_the_container_prefix(self):
+        assert (
+            sanitize_connector_key(
+                "model.diffusion_model.video_embeddings_connector.0.attn.to_q.weight"
+            )
+            == "video_embeddings_connector.0.attn.to_q.weight"
+        )
+
+
+class TestTransposition:
+    def test_the_transformer_is_never_transposed(self):
+        w = mx.zeros((4, 8))
+        assert maybe_transpose(
+            "transformer_blocks.0.attn1.to_q.weight", w, "transformer"
+        ).shape == (
+            4,
+            8,
+        )
+
+    def test_a_vae_conv_weight_goes_channels_last(self):
+        w = mx.zeros((16, 8, 3, 3, 3))  # (O, I, D, H, W)
+        out = maybe_transpose("decoder.conv_in.conv.weight", w, "vae_decoder_conv")
+        assert out.shape == (16, 3, 3, 3, 8)
+
+    def test_a_vocoder_upsample_is_a_conv_transpose(self):
+        w = mx.zeros((8, 16, 4))  # (I, O, K)
+        out = maybe_transpose("ups.0.weight", w, "vocoder")
+        assert out.shape == (16, 4, 8)

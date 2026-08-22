@@ -17,7 +17,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import mlx.core as mx
+
 from ..metadata import RecipeMetadata
+from ..transpose import transpose_conv
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -171,3 +174,76 @@ def sanitize_vocoder_key(key: str) -> str | None:
     if key.startswith("vocoder."):
         return key.replace("vocoder.", "")
     return None
+
+
+# ---------------------------------------------------------------------------
+# DiT — the 22B transformer and its connectors
+# ---------------------------------------------------------------------------
+
+UPSTREAM_TRANSFORMERS = {
+    "dev": "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
+    "distilled": "diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+}
+
+VARIANT_FILENAMES = {
+    "dev": "transformer-dev.safetensors",
+    "distilled": "transformer-distilled.safetensors",
+}
+
+_CONNECTOR_STACKS = ("video_embeddings_connector.", "audio_embeddings_connector.")
+
+
+def classify_dit_key(key: str) -> str | None:
+    """Route a DiT key to `transformer` or `connector`.
+
+    Only the two `*_embeddings_connector` stacks are the connector. 366 DiT
+    keys contain "prompt" or "connector" as a substring — the per-block
+    `prompt_scale_shift_table` buffers among them — and every one of those
+    belongs to the transformer.
+    """
+    if not key.startswith("model.diffusion_model."):
+        return None
+    suffix = key[len("model.diffusion_model.") :]
+    if suffix.startswith(_CONNECTOR_STACKS):
+        return "connector"
+    return "transformer"
+
+
+def sanitize_transformer_key(key: str) -> str:
+    """Convert a DiT key to MLX format."""
+    k = key.replace("model.diffusion_model.", "")
+    k = k.replace(".to_out.0.", ".to_out.")
+    k = k.replace(".ff.net.0.proj.", ".ff.proj_in.")
+    k = k.replace(".ff.net.2.", ".ff.proj_out.")
+    k = k.replace(".audio_ff.net.0.proj.", ".audio_ff.proj_in.")
+    k = k.replace(".audio_ff.net.2.", ".audio_ff.proj_out.")
+    k = k.replace(".linear_1.", ".linear1.")
+    k = k.replace(".linear_2.", ".linear2.")
+    return k
+
+
+def sanitize_connector_key(key: str) -> str:
+    """Convert a connector key to MLX format: only the container prefix goes."""
+    return key.replace("model.diffusion_model.", "")
+
+
+def _is_conv_buffer(key: str, value: mx.array) -> bool:
+    """A register_buffer with conv-like layout — vocoder filters and STFT bases."""
+    if value.ndim < 3:
+        return False
+    suffix = key.rsplit(".", 1)[-1]
+    return suffix == "filter" or suffix.endswith("_basis")
+
+
+def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
+    """Transpose conv weights from PyTorch to MLX layout when the key is one."""
+    if component in ("transformer", "connector", "text_encoder"):
+        return value  # all Linear
+    if _is_conv_buffer(key, value):
+        return transpose_conv(value)
+    is_conv = (
+        "conv" in key.lower() or (component == "vocoder" and "ups" in key)
+    ) and "weight" in key
+    if not is_conv:
+        return value
+    return transpose_conv(value, is_conv_transpose=component == "vocoder" and "ups" in key)
