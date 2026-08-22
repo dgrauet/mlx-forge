@@ -285,8 +285,20 @@ def sanitize_duration_head_key(key: str) -> str | None:
 
 
 def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
-    """Whether an upscaler tensor is a conv weight needing the layout swap."""
-    return "conv" in key.lower() and key.endswith(".weight") and weight.ndim >= 3
+    """Whether an upscaler tensor is a conv weight needing the layout swap.
+
+    Matches ltx_23.py's rule (rank >= 3 and a `.weight`), not a name match:
+    both LTX-2.5 upscalers have a `upsampler.0.weight` that is a real Conv2d
+    ([4096, 1024, 3, 3]) or Conv3d ([1024, 512, 3, 3, 3]) weight but does not
+    contain "conv" in its key, so a substring check on the name misses it.
+    Every rank>=3 tensor in both upscaler checkpoints is in fact a `.weight`,
+    so the plain suffix check is sufficient; there is no `.kernel`-style fixed
+    buffer in either file the way ltx_23's BlurDownsample has, so unlike
+    ltx_23 there is no branch for one here.
+    """
+    if weight.ndim < 3:
+        return False
+    return key.endswith(".weight")
 
 
 # ---------------------------------------------------------------------------

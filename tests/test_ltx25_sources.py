@@ -9,6 +9,7 @@ from mlx_forge.recipes.ltx_25 import (
     QUANTIZED_COMPONENTS,
     SOURCE_FILES,
     UPSTREAM_TRANSFORMERS,
+    _is_upscaler_conv_weight,
     download_size_mb,
     ltx25_should_quantize,
     output_size_mb,
@@ -102,3 +103,18 @@ class TestFootprint:
         assert download_size_mb(["dev"], skip_shared=False) < download_size_mb(
             ["dev", "distilled"], skip_shared=False
         )
+
+
+class TestUpscalerConvWeight:
+    # Real shapes from the live spatial/temporal upscaler safetensors headers.
+    def test_conv2d_upsampler_weight_is_caught(self):
+        assert _is_upscaler_conv_weight("upsampler.0.weight", mx.zeros((4096, 1024, 3, 3)))
+
+    def test_conv3d_upsampler_weight_is_caught(self):
+        assert _is_upscaler_conv_weight("upsampler.0.weight", mx.zeros((1024, 512, 3, 3, 3)))
+
+    def test_2d_weight_is_not_a_conv(self):
+        assert not _is_upscaler_conv_weight("initial_norm.weight", mx.zeros((1024, 1024)))
+
+    def test_rank3_non_weight_tensor_is_not_a_conv(self):
+        assert not _is_upscaler_conv_weight("some.bias", mx.zeros((3, 3, 3)))
