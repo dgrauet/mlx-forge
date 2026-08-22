@@ -14,6 +14,9 @@ than being maintained separately and drifting.
 
 from __future__ import annotations
 
+import gc
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -21,6 +24,18 @@ from pathlib import Path
 
 import mlx.core as mx
 
+from ..convert import (
+    add_common_convert_args,
+    classify_keys,
+    default_output_dir,
+    download_hf_files,
+    ensure_license_file,
+    fmt_size,
+    print_output_summary,
+    process_component,
+    quantize_component,
+    write_split_model,
+)
 from ..metadata import RecipeMetadata
 from ..quantize import write_quantize_config
 from ..transpose import transpose_conv
@@ -306,6 +321,19 @@ def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
     return key.endswith(".weight")
 
 
+def transpose_upscaler_weight(key: str, value: mx.array, component: str) -> mx.array:
+    """Transform for the two upscaler components: transpose by rank, not by name.
+
+    `maybe_transpose` cannot serve these: its conv detection is a substring
+    match on the key ("conv" in key.lower()), and the upscalers' conv weight is
+    named `upsampler.0.weight`, which that substring check misses. See
+    `_is_upscaler_conv_weight` for why rank is the only reliable signal here.
+    """
+    if _is_upscaler_conv_weight(key, value):
+        return transpose_conv(value)
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Quantisation — two components, different rules
 # ---------------------------------------------------------------------------
@@ -341,6 +369,30 @@ def write_ltx25_quantize_config(output_dir: Path, *, bits: int, group_size: int)
         group_size=group_size,
         components=dict(QUANTIZED_COMPONENTS),
     )
+
+
+#: The sanitizer for each component `classify_dit_key`/`classify_video_vae_key`/etc.
+#: can produce. `ltx_23.py` keeps the same shape as a module-level SANITIZERS
+#: dict; the upscalers' checkpoints have bare keys, so their sanitizer is the
+#: identity function.
+SANITIZERS: dict[str, Callable[[str], str | None]] = {
+    "vae_encoder_conv": sanitize_vae_encoder_key,
+    "vae_decoder_conv": sanitize_vae_decoder_key,
+    "vae_encoder_av": sanitize_vae_encoder_key,
+    "vae_decoder_av": sanitize_vae_decoder_key,
+    "audio_vae": sanitize_audio_vae_key,
+    "vocoder": sanitize_vocoder_key,
+    "duration_head": sanitize_duration_head_key,
+    "spatial_upscaler_x2_v1_0": lambda key: key,
+    "temporal_upscaler_x2_v1_0": lambda key: key,
+    "transformer": sanitize_transformer_key,
+    "connector": sanitize_connector_key,
+}
+
+#: Which upstream transformer file a variant name maps to, inverted — used to
+#: pick VARIANT_FILENAMES's output name while iterating SOURCE_FILES, which
+#: only carries the path.
+_TRANSFORMER_VARIANT_BY_PATH = {path: variant for variant, path in UPSTREAM_TRANSFORMERS.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +518,248 @@ def output_size_mb(variants: list[str], *, skip_shared: bool) -> int:
     return total - extra_variants * _CONNECTOR_SIZE_MB
 
 
+# ---------------------------------------------------------------------------
+# Licence and connector checks
+# ---------------------------------------------------------------------------
+
+
+def read_header_metadata(path: Path) -> dict:
+    """The `__metadata__` mapping of a local safetensors file.
+
+    Read from the header alone — the file may be 42 GB.
+    """
+    with open(path, "rb") as handle:
+        length = int.from_bytes(handle.read(8), "little")
+        header = json.loads(handle.read(length))
+    return header.get("__metadata__", {})
+
+
+def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
+    """Check the LICENSE we ship against the one the weights carry.
+
+    LTX-2.5 publishes no LICENSE on the Hub, so the copy comes from GitHub.
+    This is what makes that defensible: the text we distribute is provably the
+    agreement attached to the weights we converted.
+
+    The comparison is normalised — `strip()` per line, both ends — because the
+    two renderings differ by leading/trailing whitespace and a final newline
+    (34 441 bytes on GitHub against 34 562 embedded, same 580 lines). That is a
+    weaker guarantee than byte equality, and it is stated here rather than only
+    in a design document: whitespace is not terms, but a check that tolerates
+    anything tolerates too much, so nothing else is normalised away.
+
+    Raises:
+        SystemExit: The checkpoint carries no licence, or its text differs.
+    """
+    embedded = header_metadata.get("license")
+    if not embedded:
+        raise SystemExit(
+            "ERROR: this checkpoint carries no licence in its safetensors metadata, "
+            "so the copy we ship cannot be checked against it. Refusing to convert."
+        )
+
+    shipped_lines = [line.strip() for line in license_path.read_text().splitlines()]
+    embedded_lines = [line.strip() for line in embedded.splitlines()]
+    if shipped_lines != embedded_lines:
+        raise SystemExit(
+            f"ERROR: {license_path} does not match the agreement embedded in the weights. "
+            "Either upstream revised its terms, or the copy came from somewhere "
+            "undocumented; both need a decision, not a silent overwrite."
+        )
+
+
+def connector_fingerprint(weights: dict) -> str:
+    """A hash of the connector tensors, used to compare two DiT variants.
+
+    LTX-2.3 extracts shared components from the first variant only, assuming
+    dev and distilled agree. The assumption has never been checked. Here it is,
+    for a few seconds against a 42 GB file.
+    """
+    digest = hashlib.sha256()
+    for key in sorted(k for k in weights if classify_dit_key(k) == "connector"):
+        digest.update(key.encode())
+        digest.update(bytes(memoryview(weights[key].astype(mx.float32))))
+    return digest.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Conversion
+# ---------------------------------------------------------------------------
+
+
+def add_convert_args(parser) -> None:
+    """Register `mlx-forge convert ltx-2.5` arguments."""
+    add_common_convert_args(
+        parser,
+        output_default="./models/ltx-2.5-mlx[-q<bits>]",
+        quantize_help="Quantize transformer block and text-encoder Linear weights",
+        dry_run_help="Preview the plan, with download and output footprints, downloading nothing",
+    )
+    parser.add_argument(
+        "--variant",
+        action="append",
+        choices=sorted(UPSTREAM_TRANSFORMERS),
+        help="Transformer variant to convert; repeat for several (default: both)",
+    )
+    parser.add_argument(
+        "--skip-shared",
+        action="store_true",
+        help="Convert only the transformers, for the delta workflow",
+    )
+    parser.add_argument(
+        "--lora",
+        action="append",
+        choices=sorted(LORA_FILES),
+        help="LoRA to sync, copied as-is (default: all)",
+    )
+
+
+def _dry_run(args, output_dir: Path, variants: list[str]) -> None:
+    """Print the plan and what it will cost, without downloading anything."""
+    download = download_size_mb(variants, skip_shared=args.skip_shared)
+    output = output_size_mb(variants, skip_shared=args.skip_shared)
+    print(f"\nWould convert {UPSTREAM_REPO} -> {output_dir}")
+    print(f"  variants: {', '.join(variants)}")
+    for source in _selected_sources(variants, skip_shared=args.skip_shared):
+        print(f"  {fmt_size(source.size_mb):>10}  {source.path} -> {', '.join(source.components)}")
+    print(f"\n  download: {fmt_size(download)}")
+    print(f"  output:   {fmt_size(output)} (bf16)")
+    print(f"  free space needed: {fmt_size(download + output)}")
+
+
+def convert(args) -> None:
+    """Convert LTX-2.5 to MLX, one upstream file at a time."""
+    variants = args.variant or sorted(UPSTREAM_TRANSFORMERS)
+    output_dir = (
+        Path(args.output)
+        if args.output
+        else default_output_dir("ltx-2.5", quantize=args.quantize, bits=args.bits)
+    )
+
+    if args.dry_run:
+        _dry_run(args, output_dir, variants)
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    download_dir = output_dir / ".source"
+
+    # Built once and carried through the whole run: ensure_license_file records
+    # license_provenance into this same dict, and write_split_model below must
+    # see that record rather than a fresh dict that never received it — a
+    # throwaway `info` here would silently drop the provenance from the
+    # manifest, and, since a fresh dict carries no prior record, would also
+    # make ensure_license_file refetch from GitHub on every source file.
+    info = dict(METADATA.as_split_fields())
+
+    connector_seen: str | None = None
+    for source in _selected_sources(variants, skip_shared=args.skip_shared):
+        download_hf_files(UPSTREAM_REPO, [source.path], download_dir)
+        local = download_dir / source.path
+        header_metadata = read_header_metadata(local)
+
+        # The licence travels with the weights: check it against what we ship,
+        # on the first file, before any of the long work.
+        license_path = output_dir / "LICENSE"
+        if not license_path.exists():
+            ensure_license_file(output_dir, info)
+        verify_embedded_license(header_metadata, license_path)
+
+        if source.converter is not None:
+            source.converter(local, output_dir, header_metadata)
+        else:
+            weights = mx.load(str(local))
+
+            # The connector is written from the first variant that carries
+            # it; the second variant only compares its fingerprint against
+            # the first, never rewriting the file the first one wrote.
+            write_connector = False
+            if "connector" in source.components:
+                fingerprint = connector_fingerprint(weights)
+                if connector_seen is None:
+                    connector_seen = fingerprint
+                    write_connector = True
+                elif fingerprint != connector_seen:
+                    raise SystemExit(
+                        "ERROR: the dev and distilled transformers carry different "
+                        "connectors; this recipe writes one, which would be wrong "
+                        "for the other. Convert them into separate directories."
+                    )
+
+            keys_by_component = classify_keys(weights, source.classify)
+            for component_name, keys in keys_by_component.items():
+                if component_name == "connector" and not write_connector:
+                    continue
+
+                transform = (
+                    transpose_upscaler_weight
+                    if component_name in UPSCALER_FILES
+                    else maybe_transpose
+                )
+                output_filename = None
+                if component_name == "transformer":
+                    variant = _TRANSFORMER_VARIANT_BY_PATH[source.path]
+                    output_filename = VARIANT_FILENAMES[variant]
+
+                process_component(
+                    weights,
+                    component_name,
+                    keys,
+                    output_dir,
+                    component_prefix=component_name,
+                    sanitizer=SANITIZERS[component_name],
+                    transform=transform,
+                    output_filename=output_filename,
+                )
+
+            # The upscalers carry their own config in the checkpoint's
+            # __metadata__["config"], not in a separate file upstream.
+            if source.path in UPSCALER_FILES.values():
+                config = header_metadata.get("config")
+                if config:
+                    component_name = source.components[0]
+                    config_path = output_dir / f"{component_name}_config.json"
+                    with open(config_path, "w") as handle:
+                        json.dump(json.loads(config), handle, indent=2)
+
+            del weights
+            gc.collect()
+            mx.clear_cache()
+
+    if args.quantize:
+        for variant in variants:
+            quantize_component(
+                output_dir,
+                f"transformer ({variant})",
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=ltx25_should_quantize,
+                filename=VARIANT_FILENAMES[variant],
+            )
+        if not args.skip_shared:
+            quantize_component(
+                output_dir,
+                "text_encoder",
+                bits=args.bits,
+                group_size=args.group_size,
+                should_quantize=should_quantize_gemma,
+            )
+        write_ltx25_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
+
+    # Reuse the same `info` the loop above passed to ensure_license_file, so
+    # its license_provenance record reaches the manifest instead of being
+    # computed into a dict nobody writes.
+    info.update(
+        {
+            "transformer_variants": variants,
+            "quantized": bool(args.quantize),
+            "quantization_bits": args.bits if args.quantize else None,
+            "delta": bool(args.skip_shared),
+        }
+    )
+    write_split_model(output_dir, info)
+    print_output_summary(output_dir, header="LTX-2.5 conversion complete")
+
+
 __all__ = [
     "METADATA",
     "UPSTREAM_REPO",
@@ -496,4 +790,11 @@ __all__ = [
     "ltx25_should_quantize",
     "write_ltx25_quantize_config",
     "should_quantize_gemma",
+    "SANITIZERS",
+    "transpose_upscaler_weight",
+    "read_header_metadata",
+    "verify_embedded_license",
+    "connector_fingerprint",
+    "add_convert_args",
+    "convert",
 ]

@@ -1,5 +1,6 @@
 """SOURCE_FILES invariants, output-name guards, and the quantisation record."""
 
+import hashlib
 import json
 
 import mlx.core as mx
@@ -10,9 +11,11 @@ from mlx_forge.recipes.ltx_25 import (
     SOURCE_FILES,
     UPSTREAM_TRANSFORMERS,
     _is_upscaler_conv_weight,
+    connector_fingerprint,
     download_size_mb,
     ltx25_should_quantize,
     output_size_mb,
+    verify_embedded_license,
     write_ltx25_quantize_config,
 )
 
@@ -118,3 +121,50 @@ class TestUpscalerConvWeight:
 
     def test_rank3_non_weight_tensor_is_not_a_conv(self):
         assert not _is_upscaler_conv_weight("some.bias", mx.zeros((3, 3, 3)))
+
+
+AUGUST = "  LTX-2.x Community License Agreement   \n  License date: August 11, 2026  \n"
+
+
+class TestConnectorFingerprint:
+    _KEY = "model.diffusion_model.video_embeddings_connector.proj.weight"
+
+    def test_differs_when_a_connector_tensor_differs(self):
+        base = {self._KEY: mx.zeros((4, 4))}
+        changed = {self._KEY: mx.ones((4, 4))}
+        assert connector_fingerprint(base) != connector_fingerprint(changed)
+
+    def test_ignores_non_connector_tensors(self):
+        base = {self._KEY: mx.zeros((4, 4))}
+        with_extra = dict(base)
+        with_extra["model.diffusion_model.transformer_blocks.0.attn.weight"] = mx.ones((8, 8))
+        assert connector_fingerprint(base) == connector_fingerprint(with_extra)
+
+    def test_matches_a_hand_computed_digest_for_a_single_tensor(self):
+        weights = {self._KEY: mx.zeros((2,))}
+        expected = hashlib.sha256()
+        expected.update(self._KEY.encode())
+        expected.update(bytes(memoryview(mx.zeros((2,)).astype(mx.float32))))
+        assert connector_fingerprint(weights) == expected.hexdigest()
+
+
+class TestEmbeddedLicenceCheck:
+    def test_accepts_a_text_differing_only_in_trailing_space(self, tmp_path):
+        # What we ship is GitHub's bytes (34 441); what the weights carry is
+        # 34 562. The 580 lines are identical once trailing space is removed.
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("LTX-2.x Community License Agreement\nLicense date: August 11, 2026\n")
+        verify_embedded_license({"license": AUGUST}, shipped)  # must not raise
+
+    def test_rejects_a_text_whose_words_differ(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("LTX-2 Community License Agreement\nLicense date: January 5, 2026\n")
+        with pytest.raises(SystemExit, match="does not match the agreement"):
+            verify_embedded_license({"license": AUGUST}, shipped)
+
+    def test_a_checkpoint_carrying_no_licence_is_not_a_pass(self, tmp_path):
+        # Silence must not read as agreement.
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("anything\n")
+        with pytest.raises(SystemExit, match="carries no licence"):
+            verify_embedded_license({}, shipped)
