@@ -586,6 +586,58 @@ def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
         )
 
 
+def _verify_license_if_carried(header_metadata: dict, license_path: Path) -> bool:
+    """Verify the licence against one file's metadata, if that file carries one.
+
+    Not every LTX-2.5 checkpoint embeds the licence text: of the nine
+    SOURCE_FILES entries, the temporal upscaler (`['config']`) and the text
+    encoder (`['format', 'gemma_config']`) do not, only seven do. Demanding it
+    of every file — `verify_embedded_license`'s original per-file contract —
+    means `convert()` cannot finish a real run: it aborts on the temporal
+    upscaler after several components have already been downloaded and
+    written.
+
+    `verify_embedded_license` itself is unchanged: given a metadata mapping
+    that does carry a licence, it still raises on a mismatch exactly as
+    before. What moves is the decision to call it at all — skip a file with
+    no `license` key rather than treating its absence as a failure here;
+    `_require_license_verified` is where "silence must not read as agreement"
+    now applies, at the level of the whole run rather than of one file.
+
+    Returns:
+        True if this file's metadata carried a licence (and it verified —
+        a mismatch still raises `SystemExit`, it does not return False).
+        False if this file carries no licence to check, so `convert()`
+        should move on without treating that as a failure.
+    """
+    if not header_metadata.get("license"):
+        return False
+    verify_embedded_license(header_metadata, license_path)
+    return True
+
+
+def _require_license_verified(verified_any: bool, license_path: Path) -> None:
+    """Abort if nothing in the run ever verified `license_path` against a checkpoint.
+
+    The run-level half of the guarantee `_verify_license_if_carried` leaves
+    open: skipping a file with no licence in its metadata is fine as long as
+    some *other* file in the pack did carry one and got checked. A pack where
+    nothing ever did is a `LICENSE` nobody verified — silence must not read as
+    agreement, at this level exactly as it did at the single-file level
+    before this function existed.
+
+    Raises:
+        SystemExit: No file processed in this run carried a licence to check.
+    """
+    if not verified_any:
+        raise SystemExit(
+            f"ERROR: no file converted in this run carried a licence in its "
+            f"safetensors metadata, so {license_path} was never verified against "
+            "anything upstream attaches to these weights. Refusing to convert "
+            "with an unverified copy."
+        )
+
+
 def connector_fingerprint(weights: dict[str, mx.array]) -> str:
     """A hash of the connector tensors, used to compare two DiT variants.
 
@@ -706,18 +758,26 @@ def convert(args) -> None:
     # make ensure_license_file refetch from GitHub on every source file.
     info = dict(METADATA.as_split_fields())
 
+    # Not every SOURCE_FILES entry embeds the licence (the temporal upscaler
+    # and the text encoder do not — see _verify_license_if_carried), so this
+    # is checked against whichever files do carry it, not only the first.
+    # SOURCE_FILES orders the small conv video VAE first and it does carry
+    # the licence, so a mismatch there still surfaces within minutes, before
+    # the 42 GB transformer downloads — _require_license_verified below is
+    # what catches a run where nothing ever carried one to check at all.
+    license_path = output_dir / "LICENSE"
+    license_verified = False
+
     connector_seen: str | None = None
     for source in _selected_sources(variants, skip_shared=args.skip_shared):
         download_hf_files(UPSTREAM_REPO, [source.path], download_dir)
         local = download_dir / source.path
         header_metadata = read_header_metadata(local)
 
-        # The licence travels with the weights: check it against what we ship,
-        # on the first file, before any of the long work.
-        license_path = output_dir / "LICENSE"
         if not license_path.exists():
             ensure_license_file(output_dir, info)
-        verify_embedded_license(header_metadata, license_path)
+        if _verify_license_if_carried(header_metadata, license_path):
+            license_verified = True
 
         if source.converter is not None:
             source.converter(local, output_dir, header_metadata)
@@ -784,6 +844,8 @@ def convert(args) -> None:
             del weights
             gc.collect()
             mx.clear_cache()
+
+    _require_license_verified(license_verified, license_path)
 
     # LoRAs ship as-is: no conversion, just downloaded and copied under their
     # upstream basename. `_selected_loras` empties this under --skip-shared or

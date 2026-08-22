@@ -13,7 +13,9 @@ from mlx_forge.recipes.ltx_25 import (
     SOURCE_FILES,
     UPSTREAM_TRANSFORMERS,
     _is_upscaler_conv_weight,
+    _require_license_verified,
     _selected_loras,
+    _verify_license_if_carried,
     connector_fingerprint,
     download_size_mb,
     ltx25_should_quantize,
@@ -190,6 +192,82 @@ class TestEmbeddedLicenceCheck:
         shipped.write_text("anything\n")
         with pytest.raises(SystemExit, match="carries no licence"):
             verify_embedded_license({}, shipped)
+
+
+class TestVerifyLicenseIfCarried:
+    """Not every LTX-2.5 checkpoint embeds the licence (the temporal upscaler
+    and the text encoder do not), so convert() must only check the files that
+    carry one, and abort at the end if none did."""
+
+    def test_a_file_carrying_a_matching_licence_verifies(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text(
+            "  LTX-2.x Community License Agreement\n  License date: August 11, 2026\n"
+        )
+        assert _verify_license_if_carried({"license": AUGUST}, shipped) is True
+
+    def test_a_file_carrying_a_mismatched_licence_still_aborts(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("LTX-2 Community License Agreement\nLicense date: January 5, 2026\n")
+        with pytest.raises(SystemExit, match="does not match the agreement"):
+            _verify_license_if_carried({"license": AUGUST}, shipped)
+
+    def test_a_file_carrying_no_licence_is_skipped_not_failed(self, tmp_path):
+        # e.g. the temporal upscaler, or the text encoder's ['format', 'gemma_config'].
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("anything\n")
+        assert _verify_license_if_carried({"format": "pt", "gemma_config": "{}"}, shipped) is False
+
+
+class TestRequireLicenseVerified:
+    def test_does_not_raise_once_something_verified(self, tmp_path):
+        _require_license_verified(True, tmp_path / "LICENSE")  # must not raise
+
+    def test_a_run_where_nothing_verified_aborts_naming_the_problem(self, tmp_path):
+        with pytest.raises(SystemExit, match="no file"):
+            _require_license_verified(False, tmp_path / "LICENSE")
+
+
+class TestLicenseCheckAcrossAPack:
+    """The four run-level scenarios from convert()'s own loop, exercised on
+    plain metadata dicts standing in for SOURCE_FILES entries — no real
+    checkpoint needed, mirroring how verify_embedded_license is already
+    tested."""
+
+    _MATCHING_SHIPPED = "  LTX-2.x Community License Agreement\n  License date: August 11, 2026\n"
+    _NO_LICENSE = {"format": "pt", "gemma_config": "{}"}  # e.g. the text encoder
+    _WITH_LICENSE = {"license": AUGUST}
+
+    def _run(self, header_metadata_list, license_path):
+        verified_any = False
+        for header_metadata in header_metadata_list:
+            if _verify_license_if_carried(header_metadata, license_path):
+                verified_any = True
+        _require_license_verified(verified_any, license_path)
+
+    def test_a_run_where_every_file_carries_it_completes(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text(self._MATCHING_SHIPPED)
+        self._run([self._WITH_LICENSE, self._WITH_LICENSE], shipped)  # must not raise
+
+    def test_a_run_where_some_files_carry_none_still_completes(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text(self._MATCHING_SHIPPED)
+        # The conv video VAE (carries it) first, then two files that do not
+        # (temporal upscaler, text encoder) — the real SOURCE_FILES ordering.
+        self._run([self._WITH_LICENSE, self._NO_LICENSE, self._NO_LICENSE], shipped)
+
+    def test_a_run_where_no_file_carries_it_aborts_naming_the_problem(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text(self._MATCHING_SHIPPED)
+        with pytest.raises(SystemExit, match="no file"):
+            self._run([self._NO_LICENSE, self._NO_LICENSE], shipped)
+
+    def test_a_mismatch_on_any_carrying_file_still_aborts(self, tmp_path):
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("this text matches nothing\n")
+        with pytest.raises(SystemExit, match="does not match the agreement"):
+            self._run([self._NO_LICENSE, self._WITH_LICENSE, self._NO_LICENSE], shipped)
 
 
 class TestLoraSelection:
