@@ -18,6 +18,7 @@ from mlx_forge.recipes.ltx_25 import (
     _is_upscaler_conv_weight,
     _require_license_verified,
     _selected_loras,
+    _source_download_dir,
     _verify_license_if_carried,
     connector_fingerprint,
     download_size_mb,
@@ -26,6 +27,7 @@ from mlx_forge.recipes.ltx_25 import (
     verify_embedded_license,
     write_ltx25_quantize_config,
 )
+from mlx_forge.upload import iter_model_files
 
 
 class TestDitQuantisation:
@@ -476,3 +478,62 @@ class TestSplit:
         ltx_25.split(argparse.Namespace(model_dir="."))
         out = capsys.readouterr().out
         assert "already" in out.lower()
+
+
+class TestSourceDownloadDir:
+    """`convert()` must not download upstream checkpoints into output_dir.
+
+    `upload.iter_model_files` is the single source of truth for "what the
+    model is" and walks the output directory recursively with no exclusion
+    for a source-checkpoint cache, so anything convert() writes under
+    output_dir gets uploaded. The gated LTX-2.5 checkpoints (76+ GB) must
+    live somewhere iter_model_files never looks.
+    """
+
+    def test_download_dir_is_not_inside_output_dir(self, tmp_path):
+        output_dir = tmp_path / "ltx-2.5-mlx"
+        download_dir = _source_download_dir(output_dir)
+        # Assert the relationship directly — not by string-matching a
+        # hardcoded name like ".source" — so the test still catches a
+        # regression even if the sibling's naming scheme changes.
+        assert download_dir != output_dir
+        assert output_dir not in download_dir.parents
+        assert download_dir.parent == output_dir.parent
+
+    def test_download_dir_is_a_sibling_for_an_arbitrary_output_path(self, tmp_path):
+        # --output can point anywhere; the sibling must be derived from
+        # whatever output_dir is, not from a hardcoded "models/" prefix.
+        output_dir = tmp_path / "some" / "nested" / "custom-output"
+        download_dir = _source_download_dir(output_dir)
+        assert output_dir not in download_dir.parents
+        assert download_dir.parent == output_dir.parent
+
+
+class TestConvertedPackHasNoSourceCheckpoints:
+    """Regression test for the source-in-output-dir defect.
+
+    A fixture that never had a source-checkpoint directory in the first
+    place could pass this test even with the defect still present — see
+    `_full_pack`'s docstring for the same lesson applied to leaked-prefix
+    detection. So this fixture reproduces the real shape `convert()`
+    produces: a pack directory plus its sibling `-src` download directory
+    sitting next to it, both populated, mirroring what a real conversion
+    leaves on disk.
+    """
+
+    def test_iter_model_files_excludes_the_sibling_source_dir(self, tmp_path):
+        output_dir = tmp_path / "ltx-2.5-mlx"
+        output_dir.mkdir()
+        _full_pack(output_dir)
+
+        download_dir = _source_download_dir(output_dir)
+        download_dir.mkdir()
+        diffusion_models = download_dir / "diffusion_models"
+        diffusion_models.mkdir()
+        checkpoint = diffusion_models / "ltx-2.5-22b-dev-transformer-bf16.safetensors"
+        checkpoint.write_bytes(b"not a real checkpoint, just large enough to matter if counted")
+
+        files = iter_model_files(output_dir)
+        relative_paths = {p.relative_to(output_dir).as_posix() for p in files}
+        assert not any("-src" in part for path in relative_paths for part in path.split("/"))
+        assert all(download_dir not in p.parents for p in files)

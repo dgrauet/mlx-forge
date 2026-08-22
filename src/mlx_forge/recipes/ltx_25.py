@@ -808,6 +808,22 @@ def _dry_run(args, output_dir: Path, variants: list[str]) -> None:
     print(f"  free space needed: {fmt_size(download + output)}")
 
 
+def _source_download_dir(output_dir: Path) -> Path:
+    """Where `convert()` downloads upstream checkpoints for this run.
+
+    A sibling of `output_dir`, not a child of it (mirrors ltx_23's
+    `models/ltx-2.3-src`) — `upload.iter_model_files` walks `output_dir`
+    recursively with no exclusion for a nested source cache, so a download
+    directory placed inside the pack would ship 76+ GB of gated upstream
+    checkpoints to the public mirror alongside the converted weights.
+    `--output` can point anywhere, so this is derived from `output_dir`
+    rather than hardcoding "models/"; keeping it alongside `output_dir`
+    (rather than under a fixed tmp root) keeps the 42 GB downloads on the
+    same filesystem as the eventual output.
+    """
+    return output_dir.parent / f"{output_dir.name}-src"
+
+
 def convert(args) -> None:
     """Convert LTX-2.5 to MLX, one upstream file at a time."""
     variants = args.variant or sorted(UPSTREAM_TRANSFORMERS)
@@ -822,7 +838,7 @@ def convert(args) -> None:
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    download_dir = output_dir / ".source"
+    download_dir = _source_download_dir(output_dir)
 
     # Built once and carried through the whole run: ensure_license_file records
     # license_provenance into this same dict, and write_split_model below must
