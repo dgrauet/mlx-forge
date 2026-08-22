@@ -90,6 +90,47 @@ def extract_assets(weights: dict[str, mx.array], output_dir: Path) -> list[Path]
     return written
 
 
+def convert_text_encoder(source_path: Path, output_dir: Path, header_metadata: dict) -> None:
+    """Convert the Gemma-4 checkpoint: weights to one file, assets to five.
+
+    A SOURCE_FILES hook rather than a classifier, because the five U8 tensors
+    are files and the common loop only knows how to write weights.
+
+    Args:
+        source_path: The downloaded checkpoint.
+        output_dir: The converted model directory.
+        header_metadata: The checkpoint's `__metadata__`, whose `gemma_config`
+            becomes text_encoder_config.json.
+    """
+    import gc
+    import json
+
+    from ..convert import process_component
+
+    weights = mx.load(str(source_path))
+
+    extract_assets(weights, output_dir)
+
+    config = header_metadata.get("gemma_config")
+    if config:
+        with open(output_dir / "text_encoder_config.json", "w") as handle:
+            json.dump(json.loads(config), handle, indent=2)
+
+    keys = [k for k in weights if classify_text_encoder_key(k) == "text_encoder"]
+    process_component(
+        weights,
+        "text_encoder",
+        keys,
+        output_dir,
+        component_prefix="text_encoder",
+        sanitizer=sanitize_text_encoder_key,
+    )
+
+    del weights
+    gc.collect()
+    mx.clear_cache()
+
+
 def should_quantize_gemma(key: str, weight: mx.array) -> bool:
     """Only the transformer stack's Linear weights.
 

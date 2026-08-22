@@ -16,12 +16,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import mlx.core as mx
 
 from ..metadata import RecipeMetadata
 from ..transpose import transpose_conv
+from .ltx_25_text_encoder import TEXT_ENCODER_FILE, convert_text_encoder
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -76,9 +78,8 @@ class SourceFile:
     converter: Callable | None = None
 
 
-# SOURCE_FILES is filled in over Tasks 7-11; the DiT, text encoder and
-# duration-head/upscaler entries are added by later tasks.
-SOURCE_FILES: tuple[SourceFile, ...] = ()
+# SOURCE_FILES is assembled at the end of this module, once every classifier
+# and converter it references has been defined.
 
 
 # ---------------------------------------------------------------------------
@@ -328,11 +329,138 @@ def write_ltx25_quantize_config(output_dir: Path, *, bits: int, group_size: int)
     )
 
 
+# ---------------------------------------------------------------------------
+# Source table — the single source of truth for what upstream contains
+# ---------------------------------------------------------------------------
+
+#: Upstream files in conversion order. Small components first, so a wrong
+#: classifier surfaces in minutes rather than after the 42 GB downloads.
+SOURCE_FILES: tuple[SourceFile, ...] = (
+    SourceFile(
+        path="vae/ltx-2.5-video-vae-conv-bf16.safetensors",
+        components=("vae_encoder_conv", "vae_decoder_conv"),
+        size_mb=1_450,
+        classify=partial(classify_video_vae_key, suffix="_conv"),
+    ),
+    SourceFile(
+        path="vae/ltx-2.5-video-vae-bf16.safetensors",
+        components=("vae_encoder_av", "vae_decoder_av"),
+        size_mb=1_470,
+        classify=partial(classify_video_vae_key, suffix="_av"),
+    ),
+    SourceFile(
+        path="vae/ltx-2.5-audio-vae-bf16.safetensors",
+        components=("audio_vae", "vocoder"),
+        size_mb=370,
+        classify=classify_audio_key,
+    ),
+    SourceFile(
+        path=DURATION_HEAD_FILE,
+        components=("duration_head",),
+        size_mb=4,
+        classify=classify_duration_head_key,
+    ),
+    SourceFile(
+        path=UPSCALER_FILES["spatial_upscaler_x2_v1_0"],
+        components=("spatial_upscaler_x2_v1_0",),
+        size_mb=1_000,
+        # This file holds exactly one component, so the classifier ignores
+        # its argument and always returns that component's name.
+        classify=lambda key: "spatial_upscaler_x2_v1_0",
+    ),
+    SourceFile(
+        path=UPSCALER_FILES["temporal_upscaler_x2_v1_0"],
+        components=("temporal_upscaler_x2_v1_0",),
+        size_mb=260,
+        # Same reasoning as the spatial upscaler above.
+        classify=lambda key: "temporal_upscaler_x2_v1_0",
+    ),
+    SourceFile(
+        path=TEXT_ENCODER_FILE,
+        components=("text_encoder",),
+        size_mb=26_300,
+        converter=convert_text_encoder,
+    ),
+    SourceFile(
+        path=UPSTREAM_TRANSFORMERS["dev"],
+        components=("transformer", "connector"),
+        size_mb=42_020,
+        classify=classify_dit_key,
+    ),
+    SourceFile(
+        path=UPSTREAM_TRANSFORMERS["distilled"],
+        components=("transformer", "connector"),
+        size_mb=42_020,
+        classify=classify_dit_key,
+    ),
+)
+
+#: Files copied through untouched, not converted.
+PASSTHROUGH_FILES = {"lora": LORA_FILES["distilled-450"], "size_mb": 8_900}
+
+#: Measured on the published LTX-2.3 pack, whose connector is the same shape.
+#: Defined above its use so download_size_mb/output_size_mb read top-to-bottom.
+_CONNECTOR_SIZE_MB = 6_340
+
+#: Components that exist independently of any transformer variant, and which
+#: --skip-shared omits for the delta workflow.
+SHARED_COMPONENTS = frozenset(
+    {
+        "vae_encoder_conv",
+        "vae_decoder_conv",
+        "vae_encoder_av",
+        "vae_decoder_av",
+        "audio_vae",
+        "vocoder",
+        "duration_head",
+        "spatial_upscaler_x2_v1_0",
+        "temporal_upscaler_x2_v1_0",
+        "text_encoder",
+    }
+)
+
+
+def _selected_sources(variants: list[str], *, skip_shared: bool) -> list[SourceFile]:
+    """The SOURCE_FILES entries a run with these options actually reads."""
+    wanted_transformers = {UPSTREAM_TRANSFORMERS[v] for v in variants}
+    out = []
+    for source in SOURCE_FILES:
+        if source.path in UPSTREAM_TRANSFORMERS.values():
+            if source.path in wanted_transformers:
+                out.append(source)
+        elif not skip_shared:
+            out.append(source)
+    return out
+
+
+def download_size_mb(variants: list[str], *, skip_shared: bool) -> int:
+    """Approximate download for this run, in MB, LoRA included."""
+    total = sum(s.size_mb for s in _selected_sources(variants, skip_shared=skip_shared))
+    if not skip_shared:
+        total += PASSTHROUGH_FILES["size_mb"]
+    return total
+
+
+def output_size_mb(variants: list[str], *, skip_shared: bool) -> int:
+    """Approximate bf16 output for this run, in MB.
+
+    Smaller than the download because the connector is written once however
+    many transformer variants carry a copy of it.
+    """
+    total = download_size_mb(variants, skip_shared=skip_shared)
+    extra_variants = max(0, len(variants) - 1)
+    return total - extra_variants * _CONNECTOR_SIZE_MB
+
+
 __all__ = [
     "METADATA",
     "UPSTREAM_REPO",
     "SourceFile",
     "SOURCE_FILES",
+    "PASSTHROUGH_FILES",
+    "SHARED_COMPONENTS",
+    "download_size_mb",
+    "output_size_mb",
     "classify_video_vae_key",
     "sanitize_vae_decoder_key",
     "sanitize_vae_encoder_key",
