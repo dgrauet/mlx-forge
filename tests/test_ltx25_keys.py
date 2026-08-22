@@ -8,12 +8,15 @@ import mlx.core as mx
 import pytest
 
 from mlx_forge.recipes.ltx_25 import (
+    UPSCALER_FILES,
     classify_audio_key,
     classify_dit_key,
+    classify_duration_head_key,
     classify_video_vae_key,
     maybe_transpose,
     sanitize_audio_vae_key,
     sanitize_connector_key,
+    sanitize_duration_head_key,
     sanitize_transformer_key,
     sanitize_vae_decoder_key,
     sanitize_vae_encoder_key,
@@ -190,3 +193,32 @@ class TestTransposition:
         w = mx.zeros((8, 16, 4))  # (I, O, K)
         out = maybe_transpose("ups.0.weight", w, "vocoder")
         assert out.shape == (16, 4, 8)
+
+
+class TestDurationHead:
+    def test_every_key_is_classified(self, ltx25_keys):
+        keys = ltx25_keys[DURATION_HEAD]["keys"]
+        assert keys, "fixture must carry the duration head"
+        assert [k for k in keys if classify_duration_head_key(k) is None] == []
+
+    def test_the_prefix_is_stripped(self):
+        assert (
+            sanitize_duration_head_key("duration_head.attention_pooler.cross_attn.out_proj.weight")
+            == "attention_pooler.cross_attn.out_proj.weight"
+        )
+
+    def test_a_foreign_key_is_skipped(self):
+        assert sanitize_duration_head_key("vocoder.ups.0.weight") is None
+
+
+class TestUpscalers:
+    def test_names_carry_scale_and_version(self):
+        # LTX-2.3's convention: a bare "spatial_upscaler" cannot say which of
+        # several published upscalers a file holds.
+        assert set(UPSCALER_FILES) == {
+            "spatial_upscaler_x2_v1_0",
+            "temporal_upscaler_x2_v1_0",
+        }
+
+    def test_paths_point_into_the_upstream_folder(self):
+        assert all(p.startswith("latent_upscale_models/") for p in UPSCALER_FILES.values())

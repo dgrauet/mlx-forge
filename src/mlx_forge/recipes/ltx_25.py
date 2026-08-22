@@ -247,3 +247,41 @@ def maybe_transpose(key: str, value: mx.array, component: str) -> mx.array:
     if not is_conv:
         return value
     return transpose_conv(value, is_conv_transpose=component == "vocoder" and "ups" in key)
+
+
+# ---------------------------------------------------------------------------
+# Duration head — 15 tensors, per-file classification
+# ---------------------------------------------------------------------------
+
+
+UPSCALER_FILES = {
+    "spatial_upscaler_x2_v1_0": (
+        "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+    ),
+    "temporal_upscaler_x2_v1_0": (
+        "latent_upscale_models/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors"
+    ),
+}
+
+DURATION_HEAD_FILE = "model_patches/ltx-2.5-duration-head-bf16.safetensors"
+
+LORA_FILES = {
+    "distilled-450": "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+}
+
+
+def classify_duration_head_key(key: str) -> str | None:
+    """Route a duration-head key. The file holds one component and nothing else."""
+    return "duration_head" if key.startswith("duration_head.") else None
+
+
+def sanitize_duration_head_key(key: str) -> str | None:
+    """Convert a duration-head key to MLX format."""
+    if key.startswith("duration_head."):
+        return key[len("duration_head.") :]
+    return None
+
+
+def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
+    """Whether an upscaler tensor is a conv weight needing the layout swap."""
+    return "conv" in key.lower() and key.endswith(".weight") and weight.ndim >= 3
