@@ -26,6 +26,8 @@ SPLIT_MODEL_KEYS = (
     "license_name",
     "license_link",
     "license_file",
+    "license_source",
+    "gated",
     "quantization_scope",
     "links",
     "usage_url",
@@ -41,7 +43,7 @@ SPLIT_MODEL_KEYS = (
 #: follow. matrix-game-3.0 recorded `license: other` where Skywork publishes
 #: apache-2.0, and a fill-only-what-is-absent rule left that stale value on the
 #: Hub forever — correcting the recipe would never have reached the repo.
-LICENSE_KEYS = ("license", "license_name", "license_link", "license_file")
+LICENSE_KEYS = ("license", "license_name", "license_link", "license_file", "license_source")
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,15 @@ class RecipeMetadata:
             A tuple when the obligation covers more than the licence itself:
             Hunyuan3D ships a Notice.txt alongside its LICENSE, and passing on
             only half of what upstream attaches is not passing it on.
+        license_source: Where to fetch `license_file` from, when it is not the
+            upstream Hub repo. LTX-2.5 publishes no LICENSE on the Hub; the
+            agreement its weights carry lives in a GitHub repository. Written
+            as "github:<owner>/<repo>/<path>". Left None, the copy is fetched
+            from the upstream Hub repo, which is what the other ten recipes do.
+        gated: Whether our published mirrors should require accepting terms,
+            mirroring an upstream that gates access. Declared, never applied as
+            a side effect: `upload` reports a mismatch with the live repo and
+            only changes it under an explicit --set-gated.
         quantization_scope: What this recipe's --quantize actually touches, as
             prose — "transformer Linear weights only". Declaring it turns on the
             card's quantized presentation: instead of "MLX format conversion of
@@ -118,6 +129,8 @@ class RecipeMetadata:
     license_name: str | None = None
     license_link: str | None = None
     license_file: str | tuple[str, ...] | None = None
+    license_source: str | None = None
+    gated: bool = False
     quantization_scope: str | None = None
     links: list[str] = field(default_factory=list)
     usage_url: str | None = None
@@ -153,6 +166,10 @@ class RecipeMetadata:
             # Always a list in the manifest, so readers need not handle both
             # shapes; the declaration keeps the convenient scalar form.
             out["license_file"] = list(license_files(self.license_file))
+        if self.license_source:
+            out["license_source"] = self.license_source
+        if self.gated:
+            out["gated"] = True
         if self.quantization_scope:
             out["quantization_scope"] = self.quantization_scope
         if self.links:
