@@ -20,6 +20,7 @@ from huggingface_hub import hf_hub_download
 # Enable high-performance mode for hf-xet (saturates network bandwidth)
 os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 from huggingface_hub.errors import (
+    GatedRepoError,
     HfHubHTTPError,
     LocalEntryNotFoundError,
     RepositoryNotFoundError,
@@ -428,6 +429,12 @@ def download_hf_files(
                 filename=filename,
                 local_dir=download_dir,
             )
+        except GatedRepoError:
+            print(
+                f"ERROR: '{repo_id}' is gated.\n"
+                f"Accept the terms at https://huggingface.co/{repo_id} , then run: hf auth login"
+            )
+            raise SystemExit(1)
         except RepositoryNotFoundError:
             print(
                 f"ERROR: Repository '{repo_id}' not found or access denied.\n"

@@ -6,9 +6,13 @@ explicit --set-gated changes it.
 """
 
 from typing import TYPE_CHECKING, cast
+from unittest.mock import Mock
 
 import pytest
+from huggingface_hub.errors import GatedRepoError
 
+from mlx_forge import convert as convert_mod
+from mlx_forge.convert import download_hf_files
 from mlx_forge.upload import apply_gating, gating_mismatch
 
 if TYPE_CHECKING:
@@ -71,3 +75,33 @@ class TestApplyGating:
         with pytest.raises(SystemExit, match="declares no gating"):
             apply_gating("me/other-mlx", {}, cast("HfApi", fake))
         assert fake.settings_calls == []
+
+
+class TestGatedDownload:
+    def test_says_how_to_get_access(self, tmp_path, monkeypatch, capsys):
+        def refuse(**kwargs):
+            mock_response = Mock()
+            mock_response.status_code = 403
+            raise GatedRepoError("Repository is gated", response=mock_response)
+
+        monkeypatch.setattr(convert_mod, "hf_hub_download", refuse)
+
+        with pytest.raises(SystemExit):
+            download_hf_files("Lightricks/LTX-2.5", ["README.md"], tmp_path)
+
+        out = capsys.readouterr().out
+        assert "huggingface.co/Lightricks/LTX-2.5" in out
+        assert "hf auth login" in out
+
+    def test_the_branch_precedes_repository_not_found(self, tmp_path, monkeypatch, capsys):
+        # GatedRepoError subclasses RepositoryNotFoundError. If the generic
+        # branch is reached first this message never appears.
+        def refuse(**kwargs):
+            mock_response = Mock()
+            mock_response.status_code = 403
+            raise GatedRepoError("Repository is gated", response=mock_response)
+
+        monkeypatch.setattr(convert_mod, "hf_hub_download", refuse)
+        with pytest.raises(SystemExit):
+            download_hf_files("Lightricks/LTX-2.5", ["README.md"], tmp_path)
+        assert "not found" not in capsys.readouterr().out
