@@ -97,6 +97,14 @@ class RecipeMetadata:
             agreement its weights carry lives in a GitHub repository. Written
             as "github:<owner>/<repo>/<path>". Left None, the copy is fetched
             from the upstream Hub repo, which is what the other ten recipes do.
+            A GitHub `license_source` names exactly one file, and its basename
+            must match the single-string `license_file` it feeds — `convert`
+            refuses rather than fetching that one path again for every entry
+            of a multi-file `license_file` tuple. A recipe whose GitHub
+            agreement is itself split across files (a LICENSE plus a Notice,
+            say) is not yet supported; that would need `license_source` to map
+            each declared filename to its own path, deferred until a recipe
+            actually needs it.
         gated: Whether our published mirrors should require accepting terms,
             mirroring an upstream that gates access. Declared, never applied as
             a side effect: `upload` reports a mismatch with the live repo and

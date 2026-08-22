@@ -299,6 +299,19 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
 
         if github:
             repo, path = github
+            if Path(path).name != name:
+                # license_source names exactly one GitHub file. A declared
+                # license_file whose basename differs from that file (the
+                # multi-file case docs/recipe-anatomy.md documents for
+                # Hunyuan3D's ("LICENSE", "Notice.txt")) would otherwise fetch
+                # the same path again and write its bytes under the wrong
+                # name — a silently wrong licence file recorded as verified.
+                # Refuse loudly instead; see RecipeMetadata.license_source.
+                return refuse(
+                    f"license_source names {path}, which does not match the "
+                    f"declared license_file entry {name!r}; a GitHub "
+                    "license_source can only describe a single file"
+                )
             try:
                 content, revision = fetch_github_license(repo, path)
             except (OSError, ValueError) as e:
