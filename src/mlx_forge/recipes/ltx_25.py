@@ -39,9 +39,18 @@ from ..convert import (
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import write_quantize_config
+from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
+from ..validate import (
+    finish_validation,
+    start_validation,
+    validate_conv_layout,
+    validate_file_exists,
+    validate_no_pytorch_prefix,
+    validate_quantization,
+)
 from .ltx_25_text_encoder import (
+    ASSET_FILENAMES,
     TEXT_ENCODER_FILE,
     convert_text_encoder,
     should_quantize_gemma,
@@ -899,6 +908,172 @@ def convert(args) -> None:
     print_output_summary(output_dir, header="LTX-2.5 conversion complete")
 
 
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+#: What a correct pack holds, per component. Cheap identity checks: swapping
+#: the two video VAE files changes nothing a key name would reveal (both
+#: expose the same `encoder.`/`decoder.` prefixes), but the decoder tensor
+#: counts differ by 226 — a swapped pair is detectable without loading a
+#: single weight.
+EXPECTED_TENSOR_COUNTS = {
+    "vae_encoder_conv": 84,
+    "vae_decoder_conv": 84,
+    "vae_encoder_av": 84,
+    "vae_decoder_av": 310,
+    "audio_vae": 102,
+    "vocoder": 1227,
+    "duration_head": 15,
+}
+
+#: The five files `convert_text_encoder`/`extract_assets` write from the
+#: Gemma-4 checkpoint's embedded U8 tensors — tokenizer.json among them at
+#: 32 MB. A pack whose tokenizer silently failed to extract loads and then
+#: generates nonsense, so their presence and parseability is worth asserting.
+TEXT_ENCODER_ASSET_FILES = tuple(ASSET_FILENAMES.values())
+
+#: Only components whose original upstream file still carries a literal
+#: prefix worth checking for. The video VAE sanitizers strip "encoder."/
+#: "decoder." from the front of every key, leaving nothing PyTorch-shaped to
+#: look for; these three sanitizers keep (or restore) their own component
+#: prefix on unrelated substructure, so a leftover unsanitized prefix is
+#: still a meaningful signal here.
+_PYTORCH_PREFIX_BY_COMPONENT = {
+    "audio_vae": "audio_vae.",
+    "vocoder": "vocoder.",
+    "duration_head": "duration_head.",
+}
+
+#: Components with conv weights worth layout-checking, and at what rank.
+#: Video VAEs are Conv3d; audio VAE and vocoder are Conv1d/Conv2d family but
+#: share the ndim=4 check ltx_23.py uses for its own audio components.
+_CONV_NDIM_BY_COMPONENT = {
+    "vae_encoder_conv": 5,
+    "vae_decoder_conv": 5,
+    "vae_encoder_av": 5,
+    "vae_decoder_av": 5,
+    "audio_vae": 4,
+    "vocoder": 4,
+}
+
+
+def add_validate_args(parser) -> None:
+    """Register `mlx-forge validate ltx-2.5` arguments."""
+    parser.add_argument("model_dir", type=str, help="Converted model directory")
+
+
+def validate(args) -> None:
+    """Check a converted LTX-2.5 directory.
+
+    Two things are worth understanding rather than just reading off the
+    checks below:
+
+    The tensor counts in `EXPECTED_TENSOR_COUNTS` distinguish the two video
+    VAEs, whose files expose identical top-level prefixes for different
+    architectures — the decoders differ by 226 tensors, so a swapped pair is
+    caught without loading a single weight.
+
+    The text encoder's five assets (`TEXT_ENCODER_ASSET_FILES`) are files
+    extracted from U8 tensors at conversion time; a pack whose tokenizer
+    silently failed to extract loads and then generates nonsense, so their
+    presence and parseability is checked explicitly.
+    """
+    model_dir, result = start_validation(args.model_dir)
+
+    manifest_path = model_dir / "split_model.json"
+    split_info: dict = {}
+    if manifest_path.exists():
+        split_info = json.loads(manifest_path.read_text())
+    delta = bool(split_info.get("delta"))
+    if delta:
+        print("[INFO] Delta mode (skipping shared component checks)")
+
+    if not delta:
+        print("\n== Text Encoder Assets ==")
+        for filename in TEXT_ENCODER_ASSET_FILES:
+            path = model_dir / filename
+            result.check(
+                path.exists() and path.stat().st_size > 0,
+                f"{filename} present and non-empty",
+            )
+        for filename in TEXT_ENCODER_ASSET_FILES:
+            if not filename.endswith(".json"):
+                continue
+            path = model_dir / filename
+            if not path.exists():
+                continue
+            try:
+                json.loads(path.read_text())
+                result.check(True, f"{filename} parses as JSON")
+            except ValueError:
+                result.check(False, f"{filename} parses as JSON")
+
+        print("\n== VAE and Component Weights ==")
+        for component, expected in EXPECTED_TENSOR_COUNTS.items():
+            filename = f"{component}.safetensors"
+            if not validate_file_exists(model_dir, filename, result):
+                continue
+            weights = load_safetensors(model_dir / filename)
+            result.check(
+                len(weights) == expected,
+                f"{component} holds {expected} tensors (found {len(weights)})",
+            )
+            prefix = _PYTORCH_PREFIX_BY_COMPONENT.get(component)
+            if prefix:
+                validate_no_pytorch_prefix(weights, prefix, result)
+            ndim = _CONV_NDIM_BY_COMPONENT.get(component)
+            if ndim:
+                validate_conv_layout(weights, result, ndim=ndim)
+            del weights
+            gc.collect()
+            mx.clear_cache()
+
+    print("\n== Transformer Variants ==")
+    variants = split_info.get("transformer_variants") or list(VARIANT_FILENAMES)
+    qconfig = read_quantize_config(model_dir)
+    if qconfig is not None:
+        print(f"Model is quantized: int{qconfig.get('bits', '?')}")
+    for variant in variants:
+        filename = VARIANT_FILENAMES[variant]
+        if not validate_file_exists(model_dir, filename, result):
+            continue
+        if qconfig is not None:
+            weights = load_safetensors(model_dir / filename)
+            validate_quantization(weights, result, block_key="transformer_blocks")
+            del weights
+            gc.collect()
+            mx.clear_cache()
+
+    finish_validation(result)
+
+
+# ---------------------------------------------------------------------------
+# Split — a required no-op
+# ---------------------------------------------------------------------------
+
+
+def add_split_args(parser) -> None:
+    """Register `mlx-forge split ltx-2.5` arguments."""
+    parser.add_argument("model_dir", type=str, help="Converted model directory")
+
+
+def split(args) -> None:
+    """No-op: LTX-2.5 arrives already split upstream.
+
+    `split()` is part of the recipe contract enforced by `cli.py` and
+    `tests/test_recipe_contract.py`; a recipe that omits it produces an
+    `AttributeError` traceback instead of an explanation. LTX-2.3's 46 GB
+    monolith needs this repo's own splitting step — LTX-2.5 does not, because
+    Lightricks already ships one upstream file per role and `convert()`
+    writes each component directly.
+    """
+    print(
+        "LTX-2.5 ships already split by Lightricks — one upstream file per role — "
+        "so `convert` writes the components directly and there is nothing to split."
+    )
+
+
 __all__ = [
     "METADATA",
     "UPSTREAM_REPO",
@@ -936,4 +1111,10 @@ __all__ = [
     "connector_fingerprint",
     "add_convert_args",
     "convert",
+    "EXPECTED_TENSOR_COUNTS",
+    "TEXT_ENCODER_ASSET_FILES",
+    "add_validate_args",
+    "validate",
+    "add_split_args",
+    "split",
 ]

@@ -1,11 +1,14 @@
 """SOURCE_FILES invariants, output-name guards, and the quantisation record."""
 
+import argparse
 import hashlib
 import json
+import json as _json
 
 import mlx.core as mx
 import pytest
 
+from mlx_forge.recipes import ltx_25
 from mlx_forge.recipes.ltx_25 import (
     LORA_FILES,
     PASSTHROUGH_FILES,
@@ -291,3 +294,36 @@ class TestLoraSelection:
 
     def test_skip_shared_ships_no_lora_even_if_named_explicitly(self):
         assert _selected_loras(["dev"], skip_shared=True, lora=["distilled-450"]) == []
+
+
+def _pack(tmp_path, **files):
+    import mlx.core as mx
+
+    for name, weights in files.items():
+        mx.save_safetensors(str(tmp_path / f"{name}.safetensors"), weights)
+    (tmp_path / "split_model.json").write_text(_json.dumps({"recipe": "ltx-2.5"}))
+    return tmp_path
+
+
+class TestValidate:
+    def test_a_missing_text_encoder_asset_fails(self, tmp_path, capsys):
+        import mlx.core as mx
+
+        _pack(tmp_path, text_encoder={"text_encoder.model.embed_tokens.weight": mx.zeros((4, 4))})
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
+        assert "tokenizer.json" in capsys.readouterr().out
+
+    def test_the_two_vaes_are_told_apart_by_tensor_count(self, tmp_path):
+        # 170 against 396: swapping the two files is detectable without
+        # loading a single weight.
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_conv"] == 84
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_av"] == 310
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["duration_head"] == 15
+
+
+class TestSplit:
+    def test_is_a_no_op_that_explains_itself(self, capsys):
+        ltx_25.split(argparse.Namespace(model_dir="."))
+        out = capsys.readouterr().out
+        assert "already" in out.lower()
