@@ -22,8 +22,13 @@ from pathlib import Path
 import mlx.core as mx
 
 from ..metadata import RecipeMetadata
+from ..quantize import write_quantize_config
 from ..transpose import transpose_conv
-from .ltx_25_text_encoder import TEXT_ENCODER_FILE, convert_text_encoder
+from .ltx_25_text_encoder import (
+    TEXT_ENCODER_FILE,
+    convert_text_encoder,
+    should_quantize_gemma,
+)
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -304,9 +309,6 @@ def _is_upscaler_conv_weight(key: str, weight: mx.array) -> bool:
 # ---------------------------------------------------------------------------
 # Quantisation — two components, different rules
 # ---------------------------------------------------------------------------
-
-from ..quantize import write_quantize_config  # noqa: E402
-from .ltx_25_text_encoder import should_quantize_gemma  # noqa: E402
 
 QUANTIZED_COMPONENTS = {
     "transformer": "transformer_blocks Linear weights",
