@@ -156,6 +156,53 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def parse_license_source(spec: str | None) -> tuple[str, str] | None:
+    """Split a "github:<owner>/<repo>/<path>" declaration, or None if it is not one.
+
+    Returns None rather than raising for a plain Hub repo id, so the ten
+    recipes that declare no source keep the existing code path untouched.
+
+    Raises:
+        ValueError: The spec claims the github scheme but names no file.
+    """
+    if not spec or not spec.startswith("github:"):
+        return None
+    parts = spec[len("github:") :].split("/")
+    if len(parts) < 3 or not all(parts):
+        raise ValueError(
+            f"malformed licence source {spec!r}: expected github:<owner>/<repo>/<path>"
+        )
+    return "/".join(parts[:2]), "/".join(parts[2:])
+
+
+def fetch_github_license(repo: str, path: str) -> tuple[bytes, str | None]:
+    """The raw bytes of `path` on `repo`'s default branch, and the commit it came from.
+
+    The commit is resolved separately and best-effort: provenance is better
+    partial than absent, and a rate-limited API must not fail a conversion that
+    already has the bytes it needs.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    raw = f"https://raw.githubusercontent.com/{repo}/HEAD/{path}"
+    with urllib.request.urlopen(raw) as response:
+        content = response.read()
+
+    revision: str | None = None
+    api = f"https://api.github.com/repos/{repo}/commits?path={path}&per_page=1"
+    try:
+        with urllib.request.urlopen(api) as response:
+            commits = _json.loads(response.read())
+        if isinstance(commits, list) and commits and isinstance(commits[0].get("sha"), str):
+            revision = commits[0]["sha"]
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        pass
+
+    return content, revision
+
+
 def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) -> list[Path]:
     """Place the upstream licence text next to the weights, and vouch for it.
 
@@ -209,7 +256,15 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
         print(f"  WARNING: {message}")
         return []
 
-    upstream = info.get("base_model") or hub_repo_from_source(info.get("source"))
+    try:
+        github = parse_license_source(info.get("license_source"))
+    except ValueError as e:
+        return refuse(str(e))
+
+    if github:
+        upstream = f"github:{github[0]}"
+    else:
+        upstream = info.get("base_model") or hub_repo_from_source(info.get("source"))
     provenance = dict(info.get("license_provenance") or {})
 
     for filename in declared:
@@ -241,11 +296,20 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
                 "it against (set base_model in the recipe)"
             )
 
-        try:
-            cached = Path(hf_hub_download(repo_id=upstream, filename=filename))
-            revision = _upstream_revision(upstream)
-        except (HfHubHTTPError, OSError, ConnectionError, ValueError) as e:
-            return refuse(f"could not fetch {filename} from {upstream}: {e}")
+        if github:
+            repo, path = github
+            try:
+                content, revision = fetch_github_license(repo, path)
+            except (OSError, ValueError) as e:
+                return refuse(f"could not fetch {path} from github.com/{repo}: {e}")
+            cached = output_dir / f".{name}.fetched"
+            cached.write_bytes(content)
+        else:
+            try:
+                cached = Path(hf_hub_download(repo_id=upstream, filename=filename))
+                revision = _upstream_revision(upstream)
+            except (HfHubHTTPError, OSError, ConnectionError, ValueError) as e:
+                return refuse(f"could not fetch {filename} from {upstream}: {e}")
 
         digest = _sha256(cached)
         if local.exists() and local.stat().st_size and _sha256(local) != digest:
@@ -260,6 +324,9 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
             print(f"  Licence: {filename} from {upstream} -> {name}")
 
         provenance[name] = {"repo": upstream, "revision": revision, "sha256": digest}
+
+        if github:
+            cached.unlink(missing_ok=True)
 
     if provenance != (info.get("license_provenance") or {}):
         info["license_provenance"] = provenance
