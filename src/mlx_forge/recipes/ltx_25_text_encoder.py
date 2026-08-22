@@ -13,9 +13,13 @@ tokenizer out of a safetensors entry.
 
 from __future__ import annotations
 
+import gc
+import json
 from pathlib import Path
 
 import mlx.core as mx
+
+from ..convert import load_safetensors, process_component
 
 TEXT_ENCODER_FILE = "text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"
 
@@ -82,7 +86,10 @@ def extract_assets(weights: dict[str, mx.array], output_dir: Path) -> list[Path]
 
     written: list[Path] = []
     for key, filename in ASSET_FILENAMES.items():
-        payload = bytes(memoryview(weights[key].astype(mx.uint8)))
+        tensor = weights[key].astype(mx.uint8)
+        # mx.array implements the buffer protocol at runtime but its stubs
+        # don't declare __buffer__, so ty can't see it satisfies Buffer.
+        payload = bytes(memoryview(tensor))  # ty: ignore[invalid-argument-type]
         target = output_dir / filename
         target.write_bytes(payload)
         print(f"  Extracted {filename} ({len(payload) / 1024:.0f} KB)")
@@ -102,12 +109,7 @@ def convert_text_encoder(source_path: Path, output_dir: Path, header_metadata: d
         header_metadata: The checkpoint's `__metadata__`, whose `gemma_config`
             becomes text_encoder_config.json.
     """
-    import gc
-    import json
-
-    from ..convert import process_component
-
-    weights = mx.load(str(source_path))
+    weights = load_safetensors(source_path)
 
     extract_assets(weights, output_dir)
 

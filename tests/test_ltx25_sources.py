@@ -2,15 +2,18 @@
 
 import hashlib
 import json
+from types import SimpleNamespace
 
 import mlx.core as mx
 import pytest
 
 from mlx_forge.recipes.ltx_25 import (
+    LORA_FILES,
     QUANTIZED_COMPONENTS,
     SOURCE_FILES,
     UPSTREAM_TRANSFORMERS,
     _is_upscaler_conv_weight,
+    _selected_loras,
     connector_fingerprint,
     download_size_mb,
     ltx25_should_quantize,
@@ -144,7 +147,10 @@ class TestConnectorFingerprint:
         weights = {self._KEY: mx.zeros((2,))}
         expected = hashlib.sha256()
         expected.update(self._KEY.encode())
-        expected.update(bytes(memoryview(mx.zeros((2,)).astype(mx.float32))))
+        tensor = mx.zeros((2,)).astype(mx.float32)
+        # mx.array implements the buffer protocol at runtime but its stubs
+        # don't declare __buffer__, so ty can't see it satisfies Buffer.
+        expected.update(bytes(memoryview(tensor)))  # ty: ignore[invalid-argument-type]
         assert connector_fingerprint(weights) == expected.hexdigest()
 
 
@@ -152,8 +158,11 @@ class TestEmbeddedLicenceCheck:
     def test_accepts_a_text_differing_only_in_trailing_space(self, tmp_path):
         # What we ship is GitHub's bytes (34 441); what the weights carry is
         # 34 562. The 580 lines are identical once trailing space is removed.
+        # Leading indentation matches AUGUST's; only the trailing space differs.
         shipped = tmp_path / "LICENSE"
-        shipped.write_text("LTX-2.x Community License Agreement\nLicense date: August 11, 2026\n")
+        shipped.write_text(
+            "  LTX-2.x Community License Agreement\n  License date: August 11, 2026\n"
+        )
         verify_embedded_license({"license": AUGUST}, shipped)  # must not raise
 
     def test_rejects_a_text_whose_words_differ(self, tmp_path):
@@ -168,3 +177,17 @@ class TestEmbeddedLicenceCheck:
         shipped.write_text("anything\n")
         with pytest.raises(SystemExit, match="carries no licence"):
             verify_embedded_license({}, shipped)
+
+
+class TestLoraSelection:
+    def test_defaults_to_every_declared_lora(self):
+        args = SimpleNamespace(lora=None, skip_shared=False)
+        assert _selected_loras(args) == sorted(LORA_FILES)
+
+    def test_an_explicit_choice_is_honoured(self):
+        args = SimpleNamespace(lora=["distilled-450"], skip_shared=False)
+        assert _selected_loras(args) == ["distilled-450"]
+
+    def test_skip_shared_ships_no_lora_even_if_named_explicitly(self):
+        args = SimpleNamespace(lora=["distilled-450"], skip_shared=True)
+        assert _selected_loras(args) == []

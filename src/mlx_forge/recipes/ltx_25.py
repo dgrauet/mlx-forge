@@ -17,6 +17,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -31,6 +32,7 @@ from ..convert import (
     download_hf_files,
     ensure_license_file,
     fmt_size,
+    load_safetensors,
     print_output_summary,
     process_component,
     quantize_component,
@@ -503,7 +505,10 @@ def download_size_mb(variants: list[str], *, skip_shared: bool) -> int:
     """Approximate download for this run, in MB, LoRA included."""
     total = sum(s.size_mb for s in _selected_sources(variants, skip_shared=skip_shared))
     if not skip_shared:
-        total += PASSTHROUGH_FILES["size_mb"]
+        # PASSTHROUGH_FILES mixes a str (the lora path) and an int (its size) as
+        # values, so the dict's inferred value type is `str | int`; the key
+        # always holds an int, hence the explicit conversion rather than a cast.
+        total += int(PASSTHROUGH_FILES["size_mb"])
     return total
 
 
@@ -541,12 +546,13 @@ def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
     This is what makes that defensible: the text we distribute is provably the
     agreement attached to the weights we converted.
 
-    The comparison is normalised — `strip()` per line, both ends — because the
-    two renderings differ by leading/trailing whitespace and a final newline
-    (34 441 bytes on GitHub against 34 562 embedded, same 580 lines). That is a
-    weaker guarantee than byte equality, and it is stated here rather than only
-    in a design document: whitespace is not terms, but a check that tolerates
-    anything tolerates too much, so nothing else is normalised away.
+    The comparison is normalised — `rstrip` per line — because the two
+    renderings differ by trailing whitespace and a final newline (34 441 bytes
+    on GitHub against 34 562 embedded, same 580 lines, identical once trailing
+    whitespace is removed). That is a weaker guarantee than byte equality, and
+    it is stated here rather than only in a design document: whitespace is not
+    terms, but a check that tolerates anything tolerates too much, so nothing
+    else — leading indentation included — is normalised away.
 
     Raises:
         SystemExit: The checkpoint carries no licence, or its text differs.
@@ -558,8 +564,8 @@ def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
             "so the copy we ship cannot be checked against it. Refusing to convert."
         )
 
-    shipped_lines = [line.strip() for line in license_path.read_text().splitlines()]
-    embedded_lines = [line.strip() for line in embedded.splitlines()]
+    shipped_lines = [line.rstrip() for line in license_path.read_text().splitlines()]
+    embedded_lines = [line.rstrip() for line in embedded.splitlines()]
     if shipped_lines != embedded_lines:
         raise SystemExit(
             f"ERROR: {license_path} does not match the agreement embedded in the weights. "
@@ -568,7 +574,7 @@ def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
         )
 
 
-def connector_fingerprint(weights: dict) -> str:
+def connector_fingerprint(weights: dict[str, mx.array]) -> str:
     """A hash of the connector tensors, used to compare two DiT variants.
 
     LTX-2.3 extracts shared components from the first variant only, assuming
@@ -578,7 +584,10 @@ def connector_fingerprint(weights: dict) -> str:
     digest = hashlib.sha256()
     for key in sorted(k for k in weights if classify_dit_key(k) == "connector"):
         digest.update(key.encode())
-        digest.update(bytes(memoryview(weights[key].astype(mx.float32))))
+        tensor = weights[key].astype(mx.float32)
+        # mx.array implements the buffer protocol at runtime but its stubs
+        # don't declare __buffer__, so ty can't see it satisfies Buffer.
+        digest.update(bytes(memoryview(tensor)))  # ty: ignore[invalid-argument-type]
     return digest.hexdigest()
 
 
@@ -612,6 +621,22 @@ def add_convert_args(parser) -> None:
         choices=sorted(LORA_FILES),
         help="LoRA to sync, copied as-is (default: all)",
     )
+
+
+def _selected_loras(args) -> list[str]:
+    """Which LORA_FILES entries this run copies.
+
+    `--lora` defaults to `None` (argparse's `append` sentinel for "never
+    passed"), so an unset flag means "all of them" rather than "none". Skipped
+    entirely under `--skip-shared`: the delta workflow's whole point is not
+    re-shipping what the remote copy already has, which is also why
+    `download_size_mb` excludes `PASSTHROUGH_FILES` under the same flag.
+    """
+    if args.skip_shared:
+        return []
+    if args.lora is not None:
+        return list(args.lora)
+    return sorted(LORA_FILES)
 
 
 def _dry_run(args, output_dir: Path, variants: list[str]) -> None:
@@ -667,7 +692,7 @@ def convert(args) -> None:
         if source.converter is not None:
             source.converter(local, output_dir, header_metadata)
         else:
-            weights = mx.load(str(local))
+            weights = load_safetensors(local)
 
             # The connector is written from the first variant that carries
             # it; the second variant only compares its fingerprint against
@@ -685,6 +710,11 @@ def convert(args) -> None:
                         "for the other. Convert them into separate directories."
                     )
 
+            # Every SOURCE_FILES entry without a converter must declare a
+            # classify function (test_every_entry_can_convert_itself pins
+            # this); asserting it here, rather than trusting the type alone,
+            # is what lets classify_keys take a non-optional callable.
+            assert source.classify is not None, f"{source.path} has neither classify nor converter"
             keys_by_component = classify_keys(weights, source.classify)
             for component_name, keys in keys_by_component.items():
                 if component_name == "connector" and not write_connector:
@@ -725,6 +755,22 @@ def convert(args) -> None:
             gc.collect()
             mx.clear_cache()
 
+    # LoRAs ship as-is: no conversion, just downloaded and copied under their
+    # upstream basename. `_selected_loras` empties this under --skip-shared,
+    # matching PASSTHROUGH_FILES's exclusion from the delta workflow.
+    lora_synced: list[str] = []
+    for lora_name in _selected_loras(args):
+        filename = LORA_FILES[lora_name]
+        dest = output_dir / Path(filename).name
+        if dest.exists():
+            print(f"\n[lora:{lora_name}] {dest.name} already exists, skipping")
+            lora_synced.append(dest.name)
+            continue
+        download_hf_files(UPSTREAM_REPO, [filename], download_dir)
+        shutil.copy2(download_dir / filename, dest)
+        print(f"  Synced {dest.name} ({dest.stat().st_size / (1024**2):.0f} MB)")
+        lora_synced.append(dest.name)
+
     if args.quantize:
         for variant in variants:
             quantize_component(
@@ -754,6 +800,7 @@ def convert(args) -> None:
             "quantized": bool(args.quantize),
             "quantization_bits": args.bits if args.quantize else None,
             "delta": bool(args.skip_shared),
+            "lora": lora_synced,
         }
     )
     write_split_model(output_dir, info)
