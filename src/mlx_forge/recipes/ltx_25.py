@@ -42,11 +42,11 @@ from ..metadata import RecipeMetadata
 from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
+    ValidationResult,
     finish_validation,
     start_validation,
     validate_conv_layout,
     validate_file_exists,
-    validate_no_pytorch_prefix,
     validate_quantization,
 )
 from .ltx_25_text_encoder import (
@@ -1014,17 +1014,23 @@ EXPECTED_TENSOR_COUNTS = {
 #: generates nonsense, so their presence and parseability is worth asserting.
 TEXT_ENCODER_ASSET_FILES = tuple(ASSET_FILENAMES.values())
 
-#: Only components whose original upstream file still carries a literal
-#: prefix worth checking for. The video VAE sanitizers strip "encoder."/
-#: "decoder." from the front of every key, leaving nothing PyTorch-shaped to
-#: look for; these three sanitizers keep (or restore) their own component
-#: prefix on unrelated substructure, so a leftover unsanitized prefix is
-#: still a meaningful signal here.
-_PYTORCH_PREFIX_BY_COMPONENT = {
-    "audio_vae": "audio_vae.",
-    "vocoder": "vocoder.",
-    "duration_head": "duration_head.",
-}
+#: Components whose upstream keys are checked for a leaked PyTorch prefix
+#: *underneath* the component prefix `process_component` writes (every key
+#: is `f"{component}.{sanitized}"`, so one leading `f"{component}."` is
+#: always present and correct — only a second occurrence, in what remains
+#: after stripping that one, means the sanitizer failed). The video VAE
+#: sanitizers strip "encoder."/"decoder." from the front of every key,
+#: leaving nothing PyTorch-shaped to look for, so they are not in this list.
+#:
+#: `vocoder` is deliberately absent. Its upstream file holds two sibling
+#: generators of identical structure under a shared "vocoder." container: the
+#: main one, itself named "vocoder", and "bwe_generator". sanitize_vocoder_key
+#: strips only the single leading "vocoder." (see its docstring), so the main
+#: generator's keys legitimately keep a second "vocoder." one level down —
+#: `vocoder.vocoder.ups.5.weight` is correct output, not a leaked prefix.
+#: There is no unsanitized-prefix condition this check could distinguish from
+#: correct output, so it has nothing to assert here.
+_LEAKED_PREFIX_COMPONENTS = ("audio_vae", "duration_head")
 
 #: Components with conv weights worth layout-checking, and at what rank.
 #: Video VAEs are Conv3d; audio VAE and vocoder are Conv1d/Conv2d family but
@@ -1037,6 +1043,37 @@ _CONV_NDIM_BY_COMPONENT = {
     "audio_vae": 4,
     "vocoder": 4,
 }
+
+
+def _validate_no_leaked_pytorch_prefix(
+    weights: dict[str, mx.array], component: str, result: ValidationResult
+) -> None:
+    """Check that no key still carries `component`'s upstream prefix underneath
+    the component prefix `process_component` writes.
+
+    `process_component` stores every key as `f"{component}.{sanitized}"`, so
+    a correctly-sanitized key legitimately starts with `f"{component}."`
+    once — that leading occurrence is the component prefix, not a survival.
+    Only a *second* occurrence, found in what remains after stripping that
+    one leading prefix, means the sanitizer left the original PyTorch prefix
+    in place (e.g. `audio_vae.audio_vae.decoder...`).
+
+    Args:
+        weights: Dict of weight keys -> tensors, as written to the component
+            file.
+        component: Component name, matching both its own key prefix and the
+            upstream prefix its sanitizer is meant to strip.
+        result: ValidationResult to record into.
+    """
+    prefix = f"{component}."
+    bad_keys = [k for k in weights if k.startswith(prefix) and prefix in k[len(prefix) :]]
+    result.check(
+        len(bad_keys) == 0,
+        f"No PyTorch prefix '{prefix}' remaining beneath the component prefix "
+        f"(found {len(bad_keys)})",
+    )
+    for k in bad_keys[:5]:
+        print(f"    Bad key: {k}")
 
 
 def add_validate_args(parser) -> None:
@@ -1100,9 +1137,8 @@ def validate(args) -> None:
                 len(weights) == expected,
                 f"{component} holds {expected} tensors (found {len(weights)})",
             )
-            prefix = _PYTORCH_PREFIX_BY_COMPONENT.get(component)
-            if prefix:
-                validate_no_pytorch_prefix(weights, prefix, result)
+            if component in _LEAKED_PREFIX_COMPONENTS:
+                _validate_no_leaked_pytorch_prefix(weights, component, result)
             ndim = _CONV_NDIM_BY_COMPONENT.get(component)
             if ndim:
                 validate_conv_layout(weights, result, ndim=ndim)

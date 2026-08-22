@@ -321,17 +321,25 @@ def _full_pack(tmp_path, *, omit=()):
     test built on it isolates exactly the gap it targets: if the pack is
     otherwise complete and only `omit` is missing, a still-passing run means
     the omitted component is not actually gated on.
+
+    Keys are built the way `process_component` actually writes them —
+    `f"{component}.{sanitized}"` — rather than a shape that dodges the real
+    condition. A fixture with keys like "w0.weight" never carries the
+    component's own name, so it can never trip (or validate a fix for)
+    `_validate_no_leaked_pytorch_prefix`, which looks specifically for the
+    component prefix appearing twice.
     """
     import mlx.core as mx
 
     # The seven components EXPECTED_TENSOR_COUNTS covered before this fix,
-    # each with the right tensor count and no accidental "<component>."
-    # literal prefix (that would trip validate_no_pytorch_prefix).
+    # each with the right tensor count and a realistic single component
+    # prefix (not doubled — that would trip
+    # `_validate_no_leaked_pytorch_prefix` for audio_vae/duration_head).
     counts = dict(ltx_25.EXPECTED_TENSOR_COUNTS)
     for component, count in counts.items():
         if component in omit:
             continue
-        weights = {f"w{i}.weight": mx.zeros((2, 2)) for i in range(count)}
+        weights = {f"{component}.w{i}.weight": mx.zeros((2, 2)) for i in range(count)}
         mx.save_safetensors(str(tmp_path / f"{component}.safetensors"), weights)
 
     # Assets are always written, even when `omit` drops the text_encoder
@@ -373,6 +381,54 @@ class TestValidate:
         assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_conv"] == 86
         assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_av"] == 312
         assert ltx_25.EXPECTED_TENSOR_COUNTS["duration_head"] == 15
+
+
+class TestLeakedPrefixDetection:
+    """RED/GREEN coverage for `_validate_no_leaked_pytorch_prefix`.
+
+    Every key `process_component` writes legitimately starts with its own
+    component prefix once (`f"{component}.{sanitized}"`), so a fixture built
+    that way — like `_full_pack` — must pass. Only a *second* occurrence of
+    the prefix, left behind by a sanitizer that failed to strip the upstream
+    PyTorch prefix, is a real defect: this class pins that a key like
+    `audio_vae.audio_vae.decoder...` is caught, while the correct single-
+    prefix form is not.
+    """
+
+    def test_audio_vae_key_with_a_leaked_prefix_fails(self, tmp_path):
+        pack = _full_pack(tmp_path)
+        count = ltx_25.EXPECTED_TENSOR_COUNTS["audio_vae"]
+        weights = {f"audio_vae.w{i}.weight": mx.zeros((2, 2)) for i in range(count - 1)}
+        weights["audio_vae.audio_vae.decoder.conv_in.conv.bias"] = mx.zeros((2, 2))
+        mx.save_safetensors(str(pack / "audio_vae.safetensors"), weights)
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(pack)))
+
+    def test_duration_head_key_with_a_leaked_prefix_fails(self, tmp_path):
+        pack = _full_pack(tmp_path)
+        count = ltx_25.EXPECTED_TENSOR_COUNTS["duration_head"]
+        weights = {f"duration_head.w{i}.weight": mx.zeros((2, 2)) for i in range(count - 1)}
+        weights["duration_head.duration_head.attention_pooler.cross_attn.in_proj_bias"] = mx.zeros(
+            (2, 2)
+        )
+        mx.save_safetensors(str(pack / "duration_head.safetensors"), weights)
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(pack)))
+
+    def test_a_vocoder_key_with_a_second_prefix_is_not_flagged(self, tmp_path, capsys):
+        # vocoder.vocoder.ups.5.weight is correct output (see
+        # sanitize_vocoder_key and _LEAKED_PREFIX_COMPONENTS' docstring), not
+        # a leaked prefix — the vocoder file has two sibling generators
+        # sharing a "vocoder." container, one of them itself named
+        # "vocoder". A real pack is full of these; the check must not flag
+        # them.
+        pack = _full_pack(tmp_path)
+        count = ltx_25.EXPECTED_TENSOR_COUNTS["vocoder"]
+        weights = {f"vocoder.w{i}.weight": mx.zeros((2, 2)) for i in range(count - 1)}
+        weights["vocoder.vocoder.ups.5.weight"] = mx.zeros((2, 2))
+        mx.save_safetensors(str(pack / "vocoder.safetensors"), weights)
+        ltx_25.validate(argparse.Namespace(model_dir=str(pack)))  # must not raise
+        assert "All checks passed" in capsys.readouterr().out
 
 
 class TestSharedComponentsAreAllGated:
