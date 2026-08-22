@@ -2,13 +2,13 @@
 
 import hashlib
 import json
-from types import SimpleNamespace
 
 import mlx.core as mx
 import pytest
 
 from mlx_forge.recipes.ltx_25 import (
     LORA_FILES,
+    PASSTHROUGH_FILES,
     QUANTIZED_COMPONENTS,
     SOURCE_FILES,
     UPSTREAM_TRANSFORMERS,
@@ -110,6 +110,19 @@ class TestFootprint:
             ["dev", "distilled"], skip_shared=False
         )
 
+    def test_a_distilled_only_run_excludes_the_dead_lora(self):
+        # The estimate must derive from the same selection convert()'s copy
+        # step uses (_selected_loras), or the two can disagree — exactly the
+        # drift SOURCE_FILES exists to prevent.
+        with_dev = download_size_mb(["dev"], skip_shared=False)
+        distilled_only = download_size_mb(["distilled"], skip_shared=False)
+        assert with_dev - distilled_only == int(PASSTHROUGH_FILES["size_mb"])
+
+    def test_an_explicit_lora_choice_restores_it_for_a_distilled_only_run(self):
+        distilled_only = download_size_mb(["distilled"], skip_shared=False)
+        forced = download_size_mb(["distilled"], skip_shared=False, lora=["distilled-450"])
+        assert forced - distilled_only == int(PASSTHROUGH_FILES["size_mb"])
+
 
 class TestUpscalerConvWeight:
     # Real shapes from the live spatial/temporal upscaler safetensors headers.
@@ -180,14 +193,23 @@ class TestEmbeddedLicenceCheck:
 
 
 class TestLoraSelection:
-    def test_defaults_to_every_declared_lora(self):
-        args = SimpleNamespace(lora=None, skip_shared=False)
-        assert _selected_loras(args) == sorted(LORA_FILES)
+    def test_defaults_to_every_declared_lora_when_dev_is_present(self):
+        assert _selected_loras(["dev"], skip_shared=False, lora=None) == sorted(LORA_FILES)
+        assert _selected_loras(["dev", "distilled"], skip_shared=False, lora=None) == sorted(
+            LORA_FILES
+        )
 
-    def test_an_explicit_choice_is_honoured(self):
-        args = SimpleNamespace(lora=["distilled-450"], skip_shared=False)
-        assert _selected_loras(args) == ["distilled-450"]
+    def test_defaults_to_none_for_a_distilled_only_pack(self, capsys):
+        # distilled-* LoRAs are meant to run on the dev transformer; a
+        # distilled checkpoint has the distillation baked in and never loads
+        # one, so bundling it by default would be dead weight.
+        assert _selected_loras(["distilled"], skip_shared=False, lora=None) == []
+        assert "no 'dev' variant" in capsys.readouterr().out
+
+    def test_an_explicit_choice_is_honoured_even_for_a_distilled_only_pack(self):
+        assert _selected_loras(["distilled"], skip_shared=False, lora=["distilled-450"]) == [
+            "distilled-450"
+        ]
 
     def test_skip_shared_ships_no_lora_even_if_named_explicitly(self):
-        args = SimpleNamespace(lora=["distilled-450"], skip_shared=True)
-        assert _selected_loras(args) == []
+        assert _selected_loras(["dev"], skip_shared=True, lora=["distilled-450"]) == []

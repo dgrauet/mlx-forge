@@ -501,24 +501,36 @@ def _selected_sources(variants: list[str], *, skip_shared: bool) -> list[SourceF
     return out
 
 
-def download_size_mb(variants: list[str], *, skip_shared: bool) -> int:
-    """Approximate download for this run, in MB, LoRA included."""
+def download_size_mb(
+    variants: list[str], *, skip_shared: bool, lora: list[str] | None = None
+) -> int:
+    """Approximate download for this run, in MB, LoRA included.
+
+    `lora` mirrors `convert()`'s `--lora`: passed through to `_selected_loras`
+    so the estimate is derived from the very same selection the copy step
+    uses, rather than a second, looser rule that could disagree with it —
+    exactly the kind of drift `SOURCE_FILES` exists to prevent. `None` (the
+    default) reproduces `_selected_loras`'s own default: every declared LoRA
+    when `variants` includes `"dev"`, none otherwise.
+    """
     total = sum(s.size_mb for s in _selected_sources(variants, skip_shared=skip_shared))
-    if not skip_shared:
-        # PASSTHROUGH_FILES mixes a str (the lora path) and an int (its size) as
-        # values, so the dict's inferred value type is `str | int`; the key
-        # always holds an int, hence the explicit conversion rather than a cast.
+    if _selected_loras(variants, skip_shared=skip_shared, lora=lora):
+        # PASSTHROUGH_FILES mixes a str (the lora path) and an int (its size)
+        # as values, so the dict's inferred value type is `str | int`; the
+        # key always holds an int, hence the explicit conversion rather than
+        # a cast. LORA_FILES has exactly one entry today, so "any selected"
+        # and "the flat size" agree; a second LoRA would need a per-file size.
         total += int(PASSTHROUGH_FILES["size_mb"])
     return total
 
 
-def output_size_mb(variants: list[str], *, skip_shared: bool) -> int:
+def output_size_mb(variants: list[str], *, skip_shared: bool, lora: list[str] | None = None) -> int:
     """Approximate bf16 output for this run, in MB.
 
     Smaller than the download because the connector is written once however
     many transformer variants carry a copy of it.
     """
-    total = download_size_mb(variants, skip_shared=skip_shared)
+    total = download_size_mb(variants, skip_shared=skip_shared, lora=lora)
     extra_variants = max(0, len(variants) - 1)
     return total - extra_variants * _CONNECTOR_SIZE_MB
 
@@ -623,26 +635,44 @@ def add_convert_args(parser) -> None:
     )
 
 
-def _selected_loras(args) -> list[str]:
+def _selected_loras(variants: list[str], *, skip_shared: bool, lora: list[str] | None) -> list[str]:
     """Which LORA_FILES entries this run copies.
 
-    `--lora` defaults to `None` (argparse's `append` sentinel for "never
-    passed"), so an unset flag means "all of them" rather than "none". Skipped
-    entirely under `--skip-shared`: the delta workflow's whole point is not
-    re-shipping what the remote copy already has, which is also why
-    `download_size_mb` excludes `PASSTHROUGH_FILES` under the same flag.
+    Takes `variants`/`skip_shared`/`lora` directly rather than an `args`
+    object, so `download_size_mb` can call it with the same three values
+    `convert()` does and the estimate cannot drift from the actual selection.
+
+    `--skip-shared` always wins: the delta workflow's whole point is not
+    re-shipping what the remote copy already has. Short of that, an explicit
+    `--lora` always wins too, including for a distilled-only pack — an
+    explicit choice overrides any default reasoning. Otherwise, default to
+    every entry in `LORA_FILES` only when `"dev"` is among the variants: the
+    distilled-* LoRAs are meant to be applied to the *dev* transformer, and a
+    distilled checkpoint has the distillation baked in and never loads one,
+    so bundling it by default for a distilled-only pack would be dead weight
+    (8.9 GB per pack). This rule is inherited from `ltx_23._effective_lora_names`'s
+    reading of the same artefact one version earlier
+    (`ltx-2.3-22b-distilled-lora-384` / `ltx-2.5-22b-distilled-lora-450`) —
+    2.3 has shipped on that reading — not from an upstream statement specific
+    to LTX-2.5's LoRA.
     """
-    if args.skip_shared:
+    if skip_shared:
         return []
-    if args.lora is not None:
-        return list(args.lora)
-    return sorted(LORA_FILES)
+    if lora is not None:
+        return list(lora)
+    if "dev" in variants:
+        return sorted(LORA_FILES)
+    print(
+        "\n[lora] Skipping distilled LoRA(s) — package has no 'dev' variant "
+        "(distilled transformers have the distillation baked in)."
+    )
+    return []
 
 
 def _dry_run(args, output_dir: Path, variants: list[str]) -> None:
     """Print the plan and what it will cost, without downloading anything."""
-    download = download_size_mb(variants, skip_shared=args.skip_shared)
-    output = output_size_mb(variants, skip_shared=args.skip_shared)
+    download = download_size_mb(variants, skip_shared=args.skip_shared, lora=args.lora)
+    output = output_size_mb(variants, skip_shared=args.skip_shared, lora=args.lora)
     print(f"\nWould convert {UPSTREAM_REPO} -> {output_dir}")
     print(f"  variants: {', '.join(variants)}")
     for source in _selected_sources(variants, skip_shared=args.skip_shared):
@@ -756,10 +786,10 @@ def convert(args) -> None:
             mx.clear_cache()
 
     # LoRAs ship as-is: no conversion, just downloaded and copied under their
-    # upstream basename. `_selected_loras` empties this under --skip-shared,
-    # matching PASSTHROUGH_FILES's exclusion from the delta workflow.
+    # upstream basename. `_selected_loras` empties this under --skip-shared or
+    # for a distilled-only pack with no explicit --lora — see its docstring.
     lora_synced: list[str] = []
-    for lora_name in _selected_loras(args):
+    for lora_name in _selected_loras(variants, skip_shared=args.skip_shared, lora=args.lora):
         filename = LORA_FILES[lora_name]
         dest = output_dir / Path(filename).name
         if dest.exists():
