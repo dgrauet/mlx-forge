@@ -26,7 +26,6 @@ Maintenance tool, not a test: network access and a HF login, so CI skips it.
 """
 
 import hashlib
-import hashlib as _hashlib
 import json
 import sys
 
@@ -59,7 +58,11 @@ for model in sorted(api.list_models(author=AUTHOR), key=lambda m: m.id):
     if not declared:
         continue
 
-    github = parse_license_source(split_info.get("license_source"))
+    try:
+        github = parse_license_source(split_info.get("license_source"))
+    except ValueError as exc:
+        rows.append((model.id.split("/")[1], [f"license_source: {exc}"], []))
+        continue
     upstream = (
         f"github:{github[0]}"
         if github
@@ -84,7 +87,7 @@ for model in sorted(api.list_models(author=AUTHOR), key=lambda m: m.id):
         if github:
             try:
                 content, _ = fetch_github_license(github[0], path)
-                current = _hashlib.sha256(content).hexdigest()
+                current = hashlib.sha256(content).hexdigest()
             except Exception:  # noqa: BLE001 — an unreachable text is an unknown one here
                 current = None
         else:
