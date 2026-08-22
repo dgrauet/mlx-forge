@@ -229,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
             "writing or uploading anything. Use before refreshing a published card."
         ),
     )
+    upload_parser.add_argument(
+        "--set-gated",
+        action="store_true",
+        help="Apply the gating the recipe declares to the target repo (outward-facing; "
+        "without it a mismatch is only reported)",
+    )
     mode_group = upload_parser.add_mutually_exclusive_group()
     mode_group.add_argument(
         "--card-only",
@@ -491,10 +497,12 @@ def _run_upload(args) -> None:
 
     from .convert import ensure_license_file, write_split_model
     from .upload import (
+        apply_gating,
         backfill_from_recipe,
         backfill_quantization,
         card_links,
         derive_repo_id,
+        gating_mismatch,
         generate_model_card,
         load_model_metadata,
         persist_card_metadata,
@@ -539,6 +547,18 @@ def _run_upload(args) -> None:
     # Same idea for the build's own facts: the quantizer recorded them in
     # quantize_config.json, and a manifest written before quantizing never did.
     split_info = backfill_quantization(model_dir, split_info)
+
+    # Gating is declared by the recipe, never applied as a side effect of an
+    # unrelated upload: only --set-gated changes what may download the repo.
+    if args.set_gated:
+        if not args.dry_run:
+            apply_gating(repo_id, split_info, api)
+        else:
+            print(f"[dry-run] would set {repo_id} to gated=auto")
+    else:
+        warning = gating_mismatch(repo_id, split_info, api)
+        if warning:
+            print(f"WARNING: {warning}")
 
     # Publishing a derivative of a community-licensed model obliges us to hand
     # the recipient a copy of the agreement, so this runs before the file

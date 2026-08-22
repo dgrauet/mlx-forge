@@ -512,6 +512,52 @@ def card_only_files(model_dir: Path) -> list[str]:
     return ["README.md", *(n for n in companions if (model_dir / n).exists())]
 
 
+def gating_mismatch(repo_id: str, split_info: dict, api: HfApi) -> str | None:
+    """A sentence describing a gap between declared and live gating, or None.
+
+    Only a repo the recipe declares gated is reported, and only when the live
+    repo is open. A repo gated by hand where nothing is declared is left alone:
+    reporting it would invite undoing a deliberate act.
+
+    Args:
+        repo_id: The target repository.
+        split_info: The manifest, whose `gated` key carries the declaration.
+        api: An HfApi instance.
+    """
+    if not split_info.get("gated"):
+        return None
+    try:
+        live = api.model_info(repo_id).gated
+    except Exception:  # noqa: BLE001 — a repo we cannot read yet is not a mismatch
+        return None
+    if live:
+        return None
+    return (
+        f"{repo_id} is open, but this recipe declares it gated because upstream "
+        "gates access. Re-run with --set-gated to change it; nothing was changed now."
+    )
+
+
+def apply_gating(repo_id: str, split_info: dict, api: HfApi) -> None:
+    """Set the repo's gating to what the recipe declares.
+
+    Args:
+        repo_id: The target repository.
+        split_info: The manifest, whose `gated` key carries the declaration.
+        api: An HfApi instance.
+
+    Raises:
+        SystemExit: The manifest declares no gating, so there is nothing to apply.
+    """
+    if not split_info.get("gated"):
+        raise SystemExit(
+            f"ERROR: --set-gated was passed but {repo_id} declares no gating. "
+            "Gating is declared by the recipe; there is nothing to apply."
+        )
+    api.update_repo_settings(repo_id, gated="auto")
+    print(f"Set {repo_id} to gated=auto")
+
+
 def upload_model(
     model_dir: Path,
     *,
