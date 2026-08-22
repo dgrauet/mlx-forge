@@ -76,13 +76,24 @@ class TestAssetExtraction:
 
 
 class TestQuantisationPolicy:
+    """Driven over `text_encoder.`-prefixed keys, not bare upstream names.
+
+    I1 (final-review.md): process_component writes text-encoder keys under
+    component_prefix="text_encoder", and quantize_component reloads that file
+    and passes should_quantize_gemma the on-disk key straight through. A test
+    over bare keys — what this class used to do — cannot see that: it would
+    keep passing even if the prefix strip were removed entirely, which is
+    exactly how the exclusions went unexercised in production for as long as
+    they did.
+    """
+
     def test_attention_and_mlp_projections_are_quantised(self):
         w = mx.zeros((3840, 3840))
         for key in (
-            "model.layers.0.self_attn.q_proj.weight",
-            "model.layers.0.self_attn.o_proj.weight",
-            "model.layers.0.mlp.gate_proj.weight",
-            "model.layers.0.mlp.down_proj.weight",
+            "text_encoder.model.layers.0.self_attn.q_proj.weight",
+            "text_encoder.model.layers.0.self_attn.o_proj.weight",
+            "text_encoder.model.layers.0.mlp.gate_proj.weight",
+            "text_encoder.model.layers.0.mlp.down_proj.weight",
         ):
             assert should_quantize_gemma(key, w), key
 
@@ -90,24 +101,47 @@ class TestQuantisationPolicy:
         # Gemma is a feature extractor here, not a generator: its hidden states
         # feed the DiT directly, so a quantised embedding table moves the
         # starting point of all 48 layers. mlx-lm would quantise it; we do not.
-        assert not should_quantize_gemma("model.embed_tokens.weight", mx.zeros((262144, 3840)))
+        assert not should_quantize_gemma(
+            "text_encoder.model.embed_tokens.weight", mx.zeros((262144, 3840))
+        )
 
     def test_the_projectors_are_not(self):
         # Six tensors carrying the whole of the conditioning, for no weight.
         for key in (
-            "text_embedding_projection.video_aggregate_embed.weight",
-            "audio_projector.embedding_projection.weight",
-            "multi_modal_projector.embedding_projection.weight",
+            "text_encoder.text_embedding_projection.video_aggregate_embed.weight",
+            "text_encoder.audio_projector.embedding_projection.weight",
+            "text_encoder.multi_modal_projector.embedding_projection.weight",
         ):
             assert not should_quantize_gemma(key, mx.zeros((3840, 3840))), key
 
     def test_the_vision_branch_is_not(self):
-        assert not should_quantize_gemma("vision_model.encoder.layer.0.weight", mx.zeros((64, 64)))
+        assert not should_quantize_gemma(
+            "text_encoder.vision_model.encoder.layer.0.weight", mx.zeros((64, 64))
+        )
 
     def test_norms_and_scalars_are_not(self):
-        assert not should_quantize_gemma("model.layers.0.input_layernorm.weight", mx.zeros((3840,)))
-        assert not should_quantize_gemma("model.layers.0.layer_scalar", mx.zeros((1,)))
+        assert not should_quantize_gemma(
+            "text_encoder.model.layers.0.input_layernorm.weight", mx.zeros((3840,))
+        )
+        assert not should_quantize_gemma("text_encoder.model.layers.0.layer_scalar", mx.zeros((1,)))
 
     def test_already_quantised_artefacts_are_not(self):
-        assert not should_quantize_gemma("model.layers.0.mlp.up_proj.scales", mx.zeros((16, 16)))
-        assert not should_quantize_gemma("model.layers.0.mlp.up_proj.biases", mx.zeros((16, 16)))
+        assert not should_quantize_gemma(
+            "text_encoder.model.layers.0.mlp.up_proj.scales", mx.zeros((16, 16))
+        )
+        assert not should_quantize_gemma(
+            "text_encoder.model.layers.0.mlp.up_proj.biases", mx.zeros((16, 16))
+        )
+
+    def test_a_future_vit_attention_tensor_is_still_excluded(self):
+        # This is what I1 actually broke: an unprefixed check would let a
+        # vision-branch tensor that happens to end in one of the quantised
+        # suffixes (exactly what a ViT's own self-attention normally has)
+        # sail through, because startswith(_UNQUANTISED_PREFIXES) was being
+        # tested against a key that already carried "text_encoder." in
+        # production. With the prefix stripped first, this must stay
+        # excluded even though its suffix alone would otherwise qualify.
+        assert not should_quantize_gemma(
+            "text_encoder.vision_model.encoder.layer.0.self_attn.q_proj.weight",
+            mx.zeros((64, 64)),
+        )

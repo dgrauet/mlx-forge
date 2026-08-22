@@ -141,11 +141,19 @@ def should_quantize_gemma(key: str, weight: mx.array) -> bool:
     error surfaces as drifting conditioning, not as slightly worse text), the
     six projectors (the whole conditioning passes through them, for a
     negligible weight), and the vision branch (nine tensors).
+
+    `quantize_component` reloads the file `process_component` wrote under
+    `component_prefix="text_encoder"`, so `key` here is
+    `text_encoder.vision_model...`, not the bare upstream name
+    `_UNQUANTISED_PREFIXES` was written against. Strip the prefix first —
+    mirrors `ltx25_should_quantize`'s `key.replace("transformer.", "", 1)` for
+    the same reason.
     """
-    if key.startswith(_UNQUANTISED_PREFIXES):
+    bare_key = key.replace("text_encoder.", "", 1)
+    if bare_key.startswith(_UNQUANTISED_PREFIXES):
         return False
-    if key.endswith((".scales", ".biases")):
+    if bare_key.endswith((".scales", ".biases")):
         return False
     if weight.ndim != 2:
         return False
-    return key.endswith(_QUANTISED_SUFFIXES)
+    return bare_key.endswith(_QUANTISED_SUFFIXES)
