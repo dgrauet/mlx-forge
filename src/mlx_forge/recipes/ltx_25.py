@@ -407,18 +407,30 @@ def ltx25_should_quantize(key: str, weight: mx.array) -> bool:
     )
 
 
-def write_ltx25_quantize_config(output_dir: Path, *, bits: int, group_size: int) -> Path:
-    """Record how this pack was quantised, per component.
+def write_ltx25_quantize_config(
+    output_dir: Path, *, bits: int, group_size: int, skip_shared: bool
+) -> Path:
+    """Record how this pack was quantised, per component actually written.
 
     LTX-2.3 records a single `only_transformer_blocks` flag, which cannot
-    describe two components quantised under different rules. The runtime has to
-    rebuild each without guessing.
+    describe two components quantised under different rules. The runtime has
+    to rebuild each without guessing.
+
+    `skip_shared` mirrors `convert()`'s own guard around text-encoder
+    quantisation (`if not args.skip_shared`): a `--skip-shared` pack contains
+    no text encoder, so recording `QUANTIZED_COMPONENTS["text_encoder"]`
+    unconditionally would claim a component the pack does not ship — the
+    delta workflow's own manifest documented rule this function's docstring
+    already stated but did not enforce.
     """
+    components = dict(QUANTIZED_COMPONENTS)
+    if skip_shared:
+        del components["text_encoder"]
     return write_quantize_config(
         output_dir,
         bits=bits,
         group_size=group_size,
-        components=dict(QUANTIZED_COMPONENTS),
+        components=components,
     )
 
 
@@ -931,7 +943,9 @@ def convert(args) -> None:
                 group_size=args.group_size,
                 should_quantize=should_quantize_gemma,
             )
-        write_ltx25_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
+        write_ltx25_quantize_config(
+            output_dir, bits=args.bits, group_size=args.group_size, skip_shared=args.skip_shared
+        )
 
     # Reuse the same `info` the loop above passed to ensure_license_file, so
     # its license_provenance record reaches the manifest instead of being

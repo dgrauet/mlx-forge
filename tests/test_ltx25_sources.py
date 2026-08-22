@@ -53,11 +53,22 @@ class TestQuantizeConfig:
     def test_records_a_scope_per_component(self, tmp_path):
         # 2.3 wrote a single only_transformer_blocks flag. Two components with
         # different rules cannot be described by one boolean.
-        path = write_ltx25_quantize_config(tmp_path, bits=8, group_size=64)
+        path = write_ltx25_quantize_config(tmp_path, bits=8, group_size=64, skip_shared=False)
         record = json.loads(path.read_text())["quantization"]
         assert record["bits"] == 8
         assert record["group_size"] == 64
         assert set(record["components"]) == set(QUANTIZED_COMPONENTS)
+
+    def test_a_delta_pack_names_only_the_transformer(self, tmp_path):
+        # I3 (final-review.md): a --skip-shared --quantize pack contains no
+        # text encoder, but write_ltx25_quantize_config used to write both
+        # QUANTIZED_COMPONENTS entries unconditionally — the manifest would
+        # claim a component the pack does not ship, defeating the whole
+        # point of recording scope per component (a runtime is meant to
+        # rebuild each without guessing).
+        path = write_ltx25_quantize_config(tmp_path, bits=8, group_size=64, skip_shared=True)
+        record = json.loads(path.read_text())["quantization"]
+        assert set(record["components"]) == {"transformer"}
 
     def test_names_only_what_is_actually_quantised(self):
         assert set(QUANTIZED_COMPONENTS) == {"transformer", "text_encoder"}
