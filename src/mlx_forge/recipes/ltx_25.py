@@ -917,6 +917,10 @@ def convert(args) -> None:
 #: expose the same `encoder.`/`decoder.` prefixes), but the decoder tensor
 #: counts differ by 226 — a swapped pair is detectable without loading a
 #: single weight.
+#: Covers every entry in SHARED_COMPONENTS (test_covers_every_shared_component
+#: pins this). text_encoder's 681 is the checkpoint's 686 tensors minus the 5
+#: U8 assets `sanitize_text_encoder_key` refuses, both harvested from
+#: tests/fixtures/ltx_25_keys.json; the two upscalers hold 72 each.
 EXPECTED_TENSOR_COUNTS = {
     "vae_encoder_conv": 84,
     "vae_decoder_conv": 84,
@@ -925,6 +929,9 @@ EXPECTED_TENSOR_COUNTS = {
     "audio_vae": 102,
     "vocoder": 1227,
     "duration_head": 15,
+    "spatial_upscaler_x2_v1_0": 72,
+    "temporal_upscaler_x2_v1_0": 72,
+    "text_encoder": 681,
 }
 
 #: The five files `convert_text_encoder`/`extract_assets` write from the

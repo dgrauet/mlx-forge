@@ -305,6 +305,44 @@ def _pack(tmp_path, **files):
     return tmp_path
 
 
+def _full_pack(tmp_path, *, omit=()):
+    """A pack that satisfies every check `validate()` currently runs, so any
+    test built on it isolates exactly the gap it targets: if the pack is
+    otherwise complete and only `omit` is missing, a still-passing run means
+    the omitted component is not actually gated on.
+    """
+    import mlx.core as mx
+
+    # The seven components EXPECTED_TENSOR_COUNTS covered before this fix,
+    # each with the right tensor count and no accidental "<component>."
+    # literal prefix (that would trip validate_no_pytorch_prefix).
+    counts = dict(ltx_25.EXPECTED_TENSOR_COUNTS)
+    for component, count in counts.items():
+        if component in omit:
+            continue
+        weights = {f"w{i}.weight": mx.zeros((2, 2)) for i in range(count)}
+        mx.save_safetensors(str(tmp_path / f"{component}.safetensors"), weights)
+
+    # Assets are always written, even when `omit` drops the text_encoder
+    # weight file itself — otherwise a missing-weights test would fail for
+    # the wrong reason (missing assets, already covered by
+    # test_a_missing_text_encoder_asset_fails) rather than the one it targets.
+    for filename in ltx_25.TEXT_ENCODER_ASSET_FILES:
+        content = "{}" if filename.endswith(".json") else "not json"
+        (tmp_path / filename).write_text(content)
+
+    if "transformer" not in omit:
+        mx.save_safetensors(
+            str(tmp_path / ltx_25.VARIANT_FILENAMES["dev"]),
+            {"transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4))},
+        )
+
+    (tmp_path / "split_model.json").write_text(
+        _json.dumps({"recipe": "ltx-2.5", "transformer_variants": ["dev"]})
+    )
+    return tmp_path
+
+
 class TestValidate:
     def test_a_missing_text_encoder_asset_fails(self, tmp_path, capsys):
         import mlx.core as mx
@@ -315,11 +353,51 @@ class TestValidate:
         assert "tokenizer.json" in capsys.readouterr().out
 
     def test_the_two_vaes_are_told_apart_by_tensor_count(self, tmp_path):
-        # 170 against 396: swapping the two files is detectable without
-        # loading a single weight.
+        # 84 against 310: the two video VAE decoders differ by 226 tensors,
+        # so swapping the files is detectable without loading a single weight.
         assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_conv"] == 84
         assert ltx_25.EXPECTED_TENSOR_COUNTS["vae_decoder_av"] == 310
         assert ltx_25.EXPECTED_TENSOR_COUNTS["duration_head"] == 15
+
+
+class TestSharedComponentsAreAllGated:
+    """Every entry in SHARED_COMPONENTS must be checked by validate(), not just
+    the seven video/audio/duration_head files. A pack that is otherwise
+    complete but missing the text encoder weights, or either upscaler, must
+    fail — not silently exit 0."""
+
+    def test_covers_every_shared_component(self):
+        assert set(ltx_25.SHARED_COMPONENTS) <= set(ltx_25.EXPECTED_TENSOR_COUNTS)
+
+    def test_text_encoder_weight_count_is_bf16_only(self):
+        # The checkpoint holds 686 tensors total (681 BF16 + 5 U8 assets);
+        # sanitize_text_encoder_key refuses the 5 U8 asset keys, so the
+        # written text_encoder.safetensors holds 681.
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["text_encoder"] == 681
+
+    def test_upscaler_weight_counts(self):
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["spatial_upscaler_x2_v1_0"] == 72
+        assert ltx_25.EXPECTED_TENSOR_COUNTS["temporal_upscaler_x2_v1_0"] == 72
+
+    def test_a_pack_missing_the_text_encoder_weights_fails(self, tmp_path):
+        _full_pack(tmp_path, omit=("text_encoder",))
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
+
+    def test_a_pack_missing_the_spatial_upscaler_fails(self, tmp_path):
+        _full_pack(tmp_path, omit=("spatial_upscaler_x2_v1_0",))
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
+
+    def test_a_pack_missing_the_temporal_upscaler_fails(self, tmp_path):
+        _full_pack(tmp_path, omit=("temporal_upscaler_x2_v1_0",))
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
+
+    def test_a_genuinely_complete_pack_passes(self, tmp_path, capsys):
+        _full_pack(tmp_path)
+        ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))  # must not raise
+        assert "All checks passed" in capsys.readouterr().out
 
 
 class TestSplit:
