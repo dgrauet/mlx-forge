@@ -111,7 +111,7 @@ def quantize_weights(
     total = len(to_quantize)
     keys = list(to_quantize.keys())
     desc = f"  Quantizing to int{bits}"
-    for i, key in enumerate(tqdm(keys, desc=desc, leave=False)):
+    for key in tqdm(keys, desc=desc, leave=False):
         weight = to_quantize.pop(key)
 
         if weight.shape[-1] % group_size != 0:
@@ -138,14 +138,6 @@ def quantize_weights(
         # this is the release that keeps peak memory at ~result size instead
         # of source-plus-result (see docstring).
         del weight, q_weight, scales, biases
-
-        # Periodically release MLX's cached (but unreferenced) buffers back to
-        # the system allocator, rather than letting them accumulate for the
-        # duration of a multi-thousand-tensor loop. Not independently measured
-        # against the real 38 GB LTX-2.5 checkpoint (not available in this
-        # sandbox) — verify peak memory on real weights before relying on it.
-        if (i + 1) % 200 == 0:
-            mx.clear_cache()
 
     del to_quantize
 
