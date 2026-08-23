@@ -1178,15 +1178,45 @@ def validate(args) -> None:
                 result.check(False, f"{filename} parses as JSON")
 
         print("\n== VAE and Component Weights ==")
+        qconfig = read_quantize_config(model_dir)
+        quantized_components = set(qconfig.get("components", {})) if qconfig is not None else set()
         for component, expected in EXPECTED_TENSOR_COUNTS.items():
             filename = f"{component}.safetensors"
             if not validate_file_exists(model_dir, filename, result):
                 continue
             weights = load_safetensors(model_dir / filename)
-            result.check(
-                len(weights) == expected,
-                f"{component} holds {expected} tensors (found {len(weights)})",
-            )
+            if component in QUANTIZED_COMPONENTS and component in quantized_components:
+                # EXPECTED_TENSOR_COUNTS holds bf16 counts. Quantization
+                # turns each quantized tensor into three entries (the
+                # weight, plus .scales and .biases), so a quantized
+                # component legitimately holds more tensors than its bf16
+                # count. Derive the expected count from what actually got
+                # quantized rather than skipping the check — this still
+                # asserts the component holds every original tensor *and*
+                # that each quantized one gained exactly one .scales and
+                # one .biases.
+                scale_keys = [k for k in weights if k.endswith(".scales")]
+                bias_keys = [k for k in weights if k.endswith(".biases")]
+                result.check(
+                    len(scale_keys) > 0,
+                    f"{component} is quantized ({len(scale_keys)} .scales keys)",
+                )
+                result.check(
+                    len(scale_keys) == len(bias_keys),
+                    f"{component}: equal .scales and .biases count "
+                    f"({len(scale_keys)} vs {len(bias_keys)})",
+                )
+                expected_quantized = expected + 2 * len(scale_keys)
+                result.check(
+                    len(weights) == expected_quantized,
+                    f"{component} holds {expected_quantized} tensors when quantized "
+                    f"(found {len(weights)})",
+                )
+            else:
+                result.check(
+                    len(weights) == expected,
+                    f"{component} holds {expected} tensors (found {len(weights)})",
+                )
             if component in _LEAKED_PREFIX_COMPONENTS:
                 _validate_no_leaked_pytorch_prefix(weights, component, result)
             ndim = _CONV_NDIM_BY_COMPONENT.get(component)

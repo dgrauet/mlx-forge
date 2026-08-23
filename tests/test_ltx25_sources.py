@@ -470,7 +470,7 @@ def _pack(tmp_path, **files):
     return tmp_path
 
 
-def _full_pack(tmp_path, *, omit=()):
+def _full_pack(tmp_path, *, omit=(), quantized_counts=None):
     """A pack that satisfies every check `validate()` currently runs, so any
     test built on it isolates exactly the gap it targets: if the pack is
     otherwise complete and only `omit` is missing, a still-passing run means
@@ -482,8 +482,22 @@ def _full_pack(tmp_path, *, omit=()):
     component's own name, so it can never trip (or validate a fix for)
     `_validate_no_leaked_pytorch_prefix`, which looks specifically for the
     component prefix appearing twice.
+
+    `quantized_counts` extends this to the quantized shape a real q8/q4 pack
+    actually has: `{"text_encoder": 328}` replaces 328 of that component's
+    plain `w{i}.weight` tensors with real quantized triplets (`.weight` +
+    `.scales` + `.biases`), and writes `quantize_config.json` recording the
+    component as quantized — the same two facts (file shape, and the config
+    that tells `validate()` to expect it) a real `--quantize` conversion
+    produces together. Earlier fixtures here only ever built unquantized
+    packs, which is exactly why the bf16-only `EXPECTED_TENSOR_COUNTS` check
+    never saw a quantized pack until a real conversion did.
     """
     import mlx.core as mx
+
+    from mlx_forge.quantize import write_quantize_config
+
+    quantized_counts = quantized_counts or {}
 
     # The seven components EXPECTED_TENSOR_COUNTS covered before this fix,
     # each with the right tensor count and a realistic single component
@@ -493,8 +507,24 @@ def _full_pack(tmp_path, *, omit=()):
     for component, count in counts.items():
         if component in omit:
             continue
-        weights = {f"{component}.w{i}.weight": mx.zeros((2, 2)) for i in range(count)}
+        n_quantized = quantized_counts.get(component, 0)
+        n_plain = count - n_quantized
+        weights = {f"{component}.w{i}.weight": mx.zeros((2, 2)) for i in range(n_plain)}
+        for i in range(n_quantized):
+            key = f"{component}.q{i}.weight"
+            weights[key] = mx.zeros((2, 2), dtype=mx.int8)
+            weights[f"{key}.scales"] = mx.zeros((2,))
+            weights[f"{key}.biases"] = mx.zeros((2,))
         mx.save_safetensors(str(tmp_path / f"{component}.safetensors"), weights)
+
+    if quantized_counts:
+        # A quantized pack always quantizes the transformer alongside
+        # whatever shared components were quantized (see the transformer
+        # write below) — record it here too, not just the components
+        # `quantized_counts` names explicitly.
+        components = {name: ltx_25.QUANTIZED_COMPONENTS[name] for name in quantized_counts}
+        components.setdefault("transformer", ltx_25.QUANTIZED_COMPONENTS["transformer"])
+        write_quantize_config(tmp_path, bits=8, group_size=64, components=components)
 
     # Assets are always written, even when `omit` drops the text_encoder
     # weight file itself — otherwise a missing-weights test would fail for
@@ -505,10 +535,21 @@ def _full_pack(tmp_path, *, omit=()):
         (tmp_path / filename).write_text(content)
 
     if "transformer" not in omit:
-        mx.save_safetensors(
-            str(tmp_path / ltx_25.VARIANT_FILENAMES["dev"]),
-            {"transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4))},
-        )
+        # A quantized pack always quantizes the transformer alongside
+        # whatever else is quantized (write_ltx25_quantize_config records
+        # both unless --skip-shared drops text_encoder) — the "Transformer
+        # Variants" section below assumes exactly that once
+        # quantize_config.json exists, so this must mirror it or the
+        # unrelated .scales/.biases check fails for the wrong reason.
+        if quantized_counts:
+            transformer_weights = {
+                "transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4), dtype=mx.int8),
+                "transformer_blocks.0.attn1.to_q.weight.scales": mx.zeros((4,)),
+                "transformer_blocks.0.attn1.to_q.weight.biases": mx.zeros((4,)),
+            }
+        else:
+            transformer_weights = {"transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4))}
+        mx.save_safetensors(str(tmp_path / ltx_25.VARIANT_FILENAMES["dev"]), transformer_weights)
 
     (tmp_path / "split_model.json").write_text(
         _json.dumps({"recipe": "ltx-2.5", "transformer_variants": ["dev"]})
@@ -620,6 +661,51 @@ class TestSharedComponentsAreAllGated:
             ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
 
     def test_a_genuinely_complete_pack_passes(self, tmp_path, capsys):
+        _full_pack(tmp_path)
+        ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))  # must not raise
+        assert "All checks passed" in capsys.readouterr().out
+
+
+class TestQuantizedComponentCounts:
+    """EXPECTED_TENSOR_COUNTS holds bf16 counts. Quantization turns each
+    quantized tensor into three entries (weight + .scales + .biases), so a
+    quantized pack legitimately holds more tensors than the bf16 count — the
+    defect a real q8 text_encoder pack (681 -> 1337 tensors) uncovered.
+    """
+
+    def test_a_quantized_text_encoder_with_the_derived_count_passes(self, tmp_path, capsys):
+        _full_pack(tmp_path, quantized_counts={"text_encoder": 328})
+        ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))  # must not raise
+        assert "All checks passed" in capsys.readouterr().out
+
+    def test_a_quantized_pack_still_holding_the_bf16_count_fails(self, tmp_path):
+        # quantize_config.json claims text_encoder was quantized, but the
+        # file itself holds exactly the bf16 count — i.e. nothing was
+        # actually quantized. The plain bf16 check must not let this pass.
+        from mlx_forge.quantize import write_quantize_config
+
+        _full_pack(tmp_path)
+        write_quantize_config(
+            tmp_path,
+            bits=8,
+            group_size=64,
+            components={"text_encoder": ltx_25.QUANTIZED_COMPONENTS["text_encoder"]},
+        )
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
+
+    def test_a_quantized_pack_with_mismatched_scales_and_biases_fails(self, tmp_path):
+        _full_pack(tmp_path, quantized_counts={"text_encoder": 328})
+        weights = ltx_25.load_safetensors(tmp_path / "text_encoder.safetensors")
+        # Drop one .biases key so scales (328) and biases (327) disagree —
+        # the total count alone would hide this.
+        del weights["text_encoder.q0.weight.biases"]
+        mx.save_safetensors(str(tmp_path / "text_encoder.safetensors"), weights)
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))
+
+    def test_an_unquantized_pack_still_passes_with_the_plain_count(self, tmp_path, capsys):
+        # Regression guard: the unquantized path must stay exactly as it was.
         _full_pack(tmp_path)
         ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))  # must not raise
         assert "All checks passed" in capsys.readouterr().out
