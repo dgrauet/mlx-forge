@@ -888,9 +888,11 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
     split_model_path = output_dir / "split_model.json"
     if not split_model_path.exists():
         raise SystemExit(
-            f"ERROR: {output_dir} does not contain split_model.json.\n"
-            "--config-only backfills an existing pack. Create the directory or\n"
-            "run a normal conversion (without --config-only) first."
+            f"ERROR: {output_dir} does not contain split_model.json, so it is not a\n"
+            "converted pack. --config-only backfills a pack that already exists; it\n"
+            "cannot create one. Check --output for a typo, or run a normal conversion\n"
+            "(without --config-only) to produce the pack first.\n"
+            "Creating the directory does not help: the check is for split_model.json."
         )
 
     download_dir = _source_download_dir(output_dir)
