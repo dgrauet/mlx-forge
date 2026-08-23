@@ -497,15 +497,14 @@ def _run_upload(args) -> None:
 
     from .convert import ensure_license_file, write_split_model
     from .upload import (
-        apply_gating,
         backfill_from_recipe,
         backfill_quantization,
         card_links,
         derive_repo_id,
-        gating_mismatch,
         generate_model_card,
         load_model_metadata,
         persist_card_metadata,
+        resolve_gating,
         upload_model,
     )
 
@@ -550,15 +549,18 @@ def _run_upload(args) -> None:
 
     # Gating is declared by the recipe, never applied as a side effect of an
     # unrelated upload: only --set-gated changes what may download the repo.
-    if args.set_gated:
-        if not args.dry_run:
-            apply_gating(repo_id, split_info, api)
-        else:
-            print(f"[dry-run] would set {repo_id} to gated=auto")
-    else:
-        warning = gating_mismatch(repo_id, split_info, api)
-        if warning:
-            print(f"WARNING: {warning}")
+    # On a first upload this also creates the repo (ahead of upload_model's
+    # own exist_ok create_repo) when --set-gated is passed, so a gated build
+    # is never briefly public between repo creation and gating — see
+    # resolve_gating's docstring for the full reasoning.
+    resolve_gating(
+        repo_id,
+        split_info,
+        api,
+        set_gated=args.set_gated,
+        dry_run=args.dry_run,
+        private=args.private,
+    )
 
     # Publishing a derivative of a community-licensed model obliges us to hand
     # the recipient a copy of the agreement, so this runs before the file

@@ -512,6 +512,103 @@ def card_only_files(model_dir: Path) -> list[str]:
     return ["README.md", *(n for n in companions if (model_dir / n).exists())]
 
 
+def repo_exists(repo_id: str, api: HfApi) -> bool:
+    """Whether ``repo_id`` already exists on the Hub.
+
+    Only ``RepositoryNotFoundError`` counts as "does not exist". A network
+    hiccup or permission error while checking is a different problem and must
+    not be read as a fresh repo — treating the two alike would let a caller
+    create (and leave open) a repo that in fact already exists and simply
+    could not be read just now.
+
+    Args:
+        repo_id: The target repository.
+        api: An HfApi instance.
+    """
+    try:
+        api.model_info(repo_id)
+    except RepositoryNotFoundError:
+        return False
+    return True
+
+
+def resolve_gating(
+    repo_id: str,
+    split_info: dict,
+    api: HfApi,
+    *,
+    set_gated: bool,
+    dry_run: bool,
+    private: bool = False,
+) -> None:
+    """Decide this upload's gating before any file is created or pushed.
+
+    Gating is declared by the recipe and reported by upload; only an explicit
+    ``--set-gated`` changes a repo's access. That principle has a gap on a
+    first upload: `create_repo` used to happen only inside `upload_model`,
+    after this decision, so a first upload of a gated-declared recipe without
+    ``--set-gated`` silently produced an open repo (the mismatch check
+    couldn't tell "repo missing" from "nothing to report" and stayed quiet),
+    and a first upload WITH ``--set-gated`` crashed trying to gate a repo
+    that did not exist yet.
+
+    This closes both gaps:
+
+    - A first upload of a recipe that declares gating, without
+      ``--set-gated``, is refused outright — no repo is created.
+    - A first upload WITH ``--set-gated`` creates the repo and gates it here,
+      before returning control to the caller, which then does the (possibly
+      multi-hour) weights upload. Gating has to happen before that upload, not
+      after: gating a repo once the weights already landed would leave a
+      window in which a gated model's weights sat in a public repo.
+    - An existing repo's gating is unchanged unless ``--set-gated`` is passed,
+      exactly as before.
+
+    Args:
+        repo_id: The target repository.
+        split_info: The manifest, whose `gated` key carries the declaration.
+        api: An HfApi instance.
+        set_gated: Whether `--set-gated` was passed.
+        dry_run: Whether this is a dry run — nothing is created or changed,
+            only printed.
+        private: Passed through to `create_repo` when a first upload with
+            `--set-gated` has to create the repo here.
+
+    Raises:
+        SystemExit: A first upload of a recipe that declares gating was
+            requested without `--set-gated`.
+    """
+    exists = repo_exists(repo_id, api)
+    declares_gating = bool(split_info.get("gated"))
+
+    if not exists and declares_gating and not set_gated:
+        raise SystemExit(
+            f"ERROR: {repo_id} does not exist yet, and this recipe declares the "
+            "mirror gated because its upstream gates access. Creating it "
+            "without --set-gated would publish an open copy of a gated model. "
+            "Re-run with --set-gated to create it already gated."
+        )
+
+    if set_gated:
+        if dry_run:
+            if exists:
+                print(f"[dry-run] would set {repo_id} to gated=auto")
+            else:
+                print(f"[dry-run] would create {repo_id}, set gated=auto, then upload")
+            return
+        if not exists:
+            # Create the repo here, ahead of upload_model's own (exist_ok)
+            # create_repo, so gating lands before any file does.
+            api.create_repo(repo_id=repo_id, exist_ok=True, private=private)
+        apply_gating(repo_id, split_info, api)
+        return
+
+    if exists:
+        warning = gating_mismatch(repo_id, split_info, api)
+        if warning:
+            print(f"WARNING: {warning}")
+
+
 def gating_mismatch(repo_id: str, split_info: dict, api: HfApi) -> str | None:
     """A sentence describing a gap between declared and live gating, or None.
 
