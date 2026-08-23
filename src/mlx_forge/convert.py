@@ -668,6 +668,8 @@ def quantize_component(
     print(f"\n  Quantizing {component_name} to int{bits} (group_size={group_size})...")
     weights = load_safetensors(filepath)
 
+    # quantize_weights() empties `weights` as it runs (see its docstring) to keep
+    # peak memory bounded; it is not touched again after this call.
     result = quantize_weights(
         weights,
         bits=bits,

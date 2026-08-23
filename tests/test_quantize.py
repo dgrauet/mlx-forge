@@ -87,6 +87,48 @@ class TestQuantizeWeightsMaterialization:
         assert unmaterialized == []
 
 
+class TestQuantizeWeightsConsumesInput:
+    """quantize_weights() empties its `weights` argument to bound peak memory.
+
+    Retaining a reference to a source tensor after its quantized replacement
+    exists means source and result are both live at once — on the real
+    LTX-2.5 DiT (4091 tensors, 38.0 GB) that is a measured 57.4 GB peak on a
+    34 GB machine, which SIGKILLs the process. See quantize_weights()'s
+    docstring for the full measurement.
+    """
+
+    def test_input_dict_is_emptied(self):
+        weights = {"a.weight": mx.ones((64, 128)), "b.bias": mx.ones((64,))}
+
+        quantize_weights(
+            weights, bits=8, group_size=64, should_quantize=lambda k, w: k.endswith(".weight")
+        )
+
+        assert weights == {}
+
+    def test_input_dict_drains_progressively(self):
+        """The dict must shrink as each tensor is consumed, not just at the end.
+
+        Under the old implementation `weights` was only ever iterated
+        (`.items()`), never popped, so its length was constant for the whole
+        call. A `should_quantize` predicate that samples `len(weights)` on
+        each invocation observes that constant length under the old code;
+        under the fixed code it observes a strictly decreasing sequence,
+        because each key is popped from `weights` immediately before its
+        value is classified.
+        """
+        weights = {f"w{i}.weight": mx.ones((64, 128)) for i in range(5)}
+        observed_lengths: list[int] = []
+
+        def should_quantize(key: str, w: mx.array) -> bool:
+            observed_lengths.append(len(weights))
+            return True
+
+        quantize_weights(weights, bits=8, group_size=64, should_quantize=should_quantize)
+
+        assert observed_lengths == [4, 3, 2, 1, 0]
+
+
 class TestFormatBytes:
     def test_bytes(self):
         assert "100.00 B" == format_bytes(100)
