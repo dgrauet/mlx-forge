@@ -309,7 +309,17 @@ class TestLoraSelection:
         assert _selected_loras(["dev"], skip_shared=True, lora=["distilled-450"]) == []
 
 
-def _write_transformer_checkpoint(path, *, connector_value: float) -> None:
+#: Default embedded DiT config for `_write_transformer_checkpoint` fixtures —
+#: a stand-in for the real upstream `{"scheduler": {...}, "transformer": {...}}`
+#: object, shaped enough (a JSON string, non-empty) to exercise convert()'s
+#: real "raw_config missing/differs" checks without needing the actual 2199
+#: byte upstream payload.
+_DIT_CONFIG = _json.dumps({"scheduler": {"num_steps": 20}, "transformer": {"num_layers": 48}})
+
+
+def _write_transformer_checkpoint(
+    path, *, connector_value: float, config: str | None = _DIT_CONFIG
+) -> None:
     """A minimal stand-in for one of UPSTREAM_TRANSFORMERS' real 42 GB files.
 
     Carries one transformer key and both connector stacks, real license
@@ -320,6 +330,12 @@ def _write_transformer_checkpoint(path, *, connector_value: float) -> None:
     The embedded `license` text is AUGUST (defined above, for
     TestEmbeddedLicenceCheck) — the same fixture text already proven to
     match, once normalised, the LICENSE `_prepare` writes to `output_dir`.
+
+    `config` mirrors upstream's `__metadata__["config"]` — a JSON string, not
+    a dict — since that is the shape `convert()`'s embedded-config check reads
+    (see TestEmbeddedConfigEmission). Defaults to `_DIT_CONFIG` so every
+    caller that predates that check keeps working without passing one
+    explicitly; pass `None` to omit it (a checkpoint with no config at all).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     weights = {
@@ -331,19 +347,25 @@ def _write_transformer_checkpoint(path, *, connector_value: float) -> None:
             (2, 2), connector_value
         ),
     }
-    mx.save_safetensors(str(path), weights, metadata={"license": AUGUST})
+    metadata = {"license": AUGUST}
+    if config is not None:
+        metadata["config"] = config
+    mx.save_safetensors(str(path), weights, metadata=metadata)
 
 
-def _convert_args(tmp_path, *, variants, skip_shared) -> argparse.Namespace:
+def _convert_args(
+    tmp_path, *, variants, skip_shared, dry_run=False, config_only=False
+) -> argparse.Namespace:
     return argparse.Namespace(
         output=str(tmp_path / "out"),
         quantize=False,
         bits=8,
         group_size=64,
-        dry_run=False,
+        dry_run=dry_run,
         variant=variants,
         skip_shared=skip_shared,
         lora=[],
+        config_only=config_only,
     )
 
 
@@ -459,6 +481,195 @@ class TestSkipSharedConnector:
         ltx_25.convert(args)
 
         assert (output_dir / "connector.safetensors").exists()
+
+
+class TestEmbeddedConfigEmission:
+    """`convert()` must write embedded_config.json from the DiT's own
+    __metadata__["config"] — the same key `_verify_license_if_carried` reads
+    "license" from — verbatim, and abort loudly if dev and distilled ever
+    disagree rather than silently writing one variant's config for both.
+
+    Uses the same download stub and pre-populated source directory as
+    TestSkipSharedConnector, narrowed to the two transformer files so this
+    doesn't need the ~5 GB of other shared fixtures a real run would touch.
+    """
+
+    def _stub_download(self, monkeypatch):
+        def fake_download(repo, paths, download_dir):
+            for rel in paths:
+                local = download_dir / rel
+                assert local.exists(), f"test fixture did not pre-populate {local}"
+
+        monkeypatch.setattr(ltx_25, "download_hf_files", fake_download)
+
+    def _prepare(self, tmp_path, *, configs):
+        args = _convert_args(tmp_path, variants=["dev", "distilled"], skip_shared=False)
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True)
+        (output_dir / "LICENSE").write_text(
+            "  LTX-2.x Community License Agreement\n  License date: August 11, 2026\n"
+        )
+        download_dir = ltx_25._source_download_dir(output_dir)
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["dev"], connector_value=1.0, config=configs[0]
+        )
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["distilled"],
+            connector_value=1.0,
+            config=configs[1],
+        )
+        transformer_only = [
+            s for s in ltx_25.SOURCE_FILES if s.path in UPSTREAM_TRANSFORMERS.values()
+        ]
+        return args, output_dir, transformer_only
+
+    def test_a_normal_conversion_writes_the_upstream_object_unchanged(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch)
+        args, output_dir, transformer_only = self._prepare(
+            tmp_path, configs=(_DIT_CONFIG, _DIT_CONFIG)
+        )
+        monkeypatch.setattr(
+            ltx_25, "_selected_sources", lambda variants, *, skip_shared: transformer_only
+        )
+
+        ltx_25.convert(args)
+
+        config_path = output_dir / "embedded_config.json"
+        assert config_path.exists()
+        assert json.loads(config_path.read_text()) == json.loads(_DIT_CONFIG)
+
+    def test_differing_configs_abort_naming_the_disagreement(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch)
+        other_config = _json.dumps({"scheduler": {"num_steps": 30}, "transformer": {}})
+        args, output_dir, transformer_only = self._prepare(
+            tmp_path, configs=(_DIT_CONFIG, other_config)
+        )
+        monkeypatch.setattr(
+            ltx_25, "_selected_sources", lambda variants, *, skip_shared: transformer_only
+        )
+
+        with pytest.raises(SystemExit, match="dev and distilled transformers carry different"):
+            ltx_25.convert(args)
+
+        assert not (output_dir / "embedded_config.json").exists()
+
+    def test_identical_configs_succeed_and_write_one_file(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch)
+        args, output_dir, transformer_only = self._prepare(
+            tmp_path, configs=(_DIT_CONFIG, _DIT_CONFIG)
+        )
+        monkeypatch.setattr(
+            ltx_25, "_selected_sources", lambda variants, *, skip_shared: transformer_only
+        )
+
+        ltx_25.convert(args)
+
+        assert (output_dir / "embedded_config.json").exists()
+
+    def test_a_transformer_carrying_no_config_aborts(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch)
+        args, output_dir, transformer_only = self._prepare(tmp_path, configs=(None, None))
+        monkeypatch.setattr(
+            ltx_25, "_selected_sources", lambda variants, *, skip_shared: transformer_only
+        )
+
+        with pytest.raises(SystemExit, match="carries no 'config'"):
+            ltx_25.convert(args)
+
+
+class TestConfigOnlyBackfill:
+    """`--config-only` backfills embedded_config.json into an existing pack
+    without downloading or reading whole checkpoints, and never touches a
+    `.safetensors` file — the acceptance criterion for the two real packs
+    this is meant to run against."""
+
+    def _pack_with_local_sources(self, tmp_path, *, configs=(_DIT_CONFIG, _DIT_CONFIG)):
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True)
+        download_dir = ltx_25._source_download_dir(output_dir)
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["dev"], connector_value=1.0, config=configs[0]
+        )
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["distilled"],
+            connector_value=1.0,
+            config=configs[1],
+        )
+        return output_dir
+
+    def test_writes_into_a_pack_that_has_none(self, tmp_path):
+        output_dir = self._pack_with_local_sources(tmp_path)
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+
+        ltx_25.convert(args)
+
+        config_path = output_dir / "embedded_config.json"
+        assert config_path.exists()
+        assert json.loads(config_path.read_text()) == json.loads(_DIT_CONFIG)
+
+    def test_touches_no_safetensors_file(self, tmp_path):
+        output_dir = self._pack_with_local_sources(tmp_path)
+        # A pre-existing weight file convert() must not read or rewrite.
+        weight_path = output_dir / "transformer-dev.safetensors"
+        mx.save_safetensors(str(weight_path), {"w": mx.zeros((2, 2))})
+        before = weight_path.stat().st_mtime_ns
+
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+        ltx_25.convert(args)
+
+        assert weight_path.stat().st_mtime_ns == before
+
+    def test_respects_dry_run(self, tmp_path):
+        output_dir = self._pack_with_local_sources(tmp_path)
+        args = _convert_args(
+            tmp_path,
+            variants=["dev", "distilled"],
+            skip_shared=False,
+            config_only=True,
+            dry_run=True,
+        )
+
+        ltx_25.convert(args)
+
+        assert not (output_dir / "embedded_config.json").exists()
+
+    def test_fetches_the_header_over_http_when_no_local_source_is_present(
+        self, tmp_path, monkeypatch
+    ):
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True)
+        # No _source_download_dir(output_dir) populated at all — every
+        # variant must fall back to _remote_header_metadata.
+        monkeypatch.setattr(
+            ltx_25,
+            "_remote_header_metadata",
+            lambda repo, filename: {"config": _DIT_CONFIG},
+        )
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+
+        ltx_25.convert(args)
+
+        config_path = output_dir / "embedded_config.json"
+        assert config_path.exists()
+        assert json.loads(config_path.read_text()) == json.loads(_DIT_CONFIG)
+
+    def test_differing_configs_abort_naming_the_disagreement(self, tmp_path):
+        other_config = _json.dumps({"scheduler": {"num_steps": 30}, "transformer": {}})
+        output_dir = self._pack_with_local_sources(tmp_path, configs=(_DIT_CONFIG, other_config))
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+
+        with pytest.raises(SystemExit, match="dev and distilled transformers carry different"):
+            ltx_25.convert(args)
+
+        assert not (output_dir / "embedded_config.json").exists()
 
 
 def _pack(tmp_path, **files):

@@ -18,12 +18,15 @@ import gc
 import hashlib
 import json
 import shutil
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
 import mlx.core as mx
+from huggingface_hub import hf_hub_url
+from huggingface_hub.utils import build_hf_headers
 
 from ..convert import (
     add_common_convert_args,
@@ -638,6 +641,32 @@ def read_header_metadata(path: Path) -> dict:
     return header.get("__metadata__", {})
 
 
+def _remote_header_metadata(repo: str, filename: str) -> dict:
+    """The `__metadata__` mapping of an upstream file, read via HTTP Range requests.
+
+    Fetches only the 8-byte length prefix and the JSON header that follows —
+    a few kilobytes against a checkpoint that can be 42 GB — never the tensor
+    data itself. Mirrors `scripts/harvest_ltx25_keys.py`'s `read_header`,
+    which established this approach against this same repository; this is
+    the same two-request shape, just returning `__metadata__` instead of the
+    reduced key list that script harvests.
+
+    Used only when the file is not already sitting in the run's source
+    download directory (`read_header_metadata` handles that case straight
+    off disk); `--config-only` is `_config_only`'s only caller.
+    """
+    url = hf_hub_url(repo, filename)
+    base = build_hf_headers()
+
+    def fetch(byte_range: str) -> bytes:
+        request = urllib.request.Request(url, headers={**base, "Range": byte_range})
+        return urllib.request.urlopen(request).read()
+
+    length = int.from_bytes(fetch("bytes=0-7"), "little")
+    header = json.loads(fetch(f"bytes=8-{8 + length - 1}"))
+    return header.get("__metadata__", {})
+
+
 def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
     """Check the LICENSE we ship against the one the weights carry.
 
@@ -772,6 +801,16 @@ def add_convert_args(parser) -> None:
         choices=sorted(LORA_FILES),
         help="LoRA to sync, copied as-is (default: all)",
     )
+    parser.add_argument(
+        "--config-only",
+        action="store_true",
+        help=(
+            "Backfill embedded_config.json into an existing pack without "
+            "reconverting: reads only safetensors headers (local file if present "
+            "under the run's source directory, otherwise an HTTP range request), "
+            "never a weight file"
+        ),
+    )
 
 
 def _selected_loras(variants: list[str], *, skip_shared: bool, lora: list[str] | None) -> list[str]:
@@ -821,6 +860,67 @@ def _dry_run(args, output_dir: Path, variants: list[str]) -> None:
     print(f"  free space needed: {fmt_size(download + output)}")
 
 
+def _config_only(args, output_dir: Path, variants: list[str]) -> None:
+    """Backfill embedded_config.json into an existing pack, header bytes only.
+
+    For each selected variant's transformer, reads its safetensors header —
+    a few kilobytes, never the 42 GB tensor data — from the run's source
+    download directory if that file is already there (`read_header_metadata`,
+    the same one `convert()` uses), or via an HTTP Range request otherwise
+    (`_remote_header_metadata`). Never opens, downloads, or writes a
+    `.safetensors` file: this is a JSON emission, not a conversion.
+
+    Compares every selected variant's raw config the same way `convert()`'s
+    own loop does, so a two-variant backfill gets the same "abort naming the
+    disagreement" guarantee a normal run does — there being only one already
+    on disk (as with the two real packs this backfills) does not exempt this
+    path from checking, since --variant can still select both.
+    """
+    download_dir = _source_download_dir(output_dir)
+    dit_config_raw: str | None = None
+    dit_config_variant: str | None = None
+    for variant in variants:
+        path = UPSTREAM_TRANSFORMERS[variant]
+        local = download_dir / path
+        if local.exists():
+            print(f"  Reading header from local file: {local}")
+            header_metadata = read_header_metadata(local)
+        else:
+            print(f"  Fetching header over HTTP: {path}")
+            header_metadata = _remote_header_metadata(UPSTREAM_REPO, path)
+        raw_config = header_metadata.get("config")
+        if not raw_config:
+            raise SystemExit(
+                f"ERROR: {path} carries no 'config' in its safetensors metadata, "
+                "so embedded_config.json cannot be backfilled from it."
+            )
+        if dit_config_raw is None:
+            dit_config_raw = raw_config
+            dit_config_variant = variant
+        elif raw_config != dit_config_raw:
+            raise SystemExit(
+                f"ERROR: the {dit_config_variant} and {variant} transformers carry "
+                "different embedded configs; this recipe writes one "
+                "embedded_config.json, which would be wrong for one of them. "
+                "Backfill them into separate directories."
+            )
+
+    assert dit_config_raw is not None  # variants is never empty
+
+    config_path = output_dir / "embedded_config.json"
+    if args.dry_run:
+        print(
+            f"\nWould write {config_path} "
+            f"({len(dit_config_raw)} bytes of upstream config, from {', '.join(variants)})"
+        )
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as handle:
+        json.dump(json.loads(dit_config_raw), handle, indent=2)
+    print(f"\nWrote {config_path}")
+
+
 def _source_download_dir(output_dir: Path) -> Path:
     """Where `convert()` downloads upstream checkpoints for this run.
 
@@ -845,6 +945,15 @@ def convert(args) -> None:
         if args.output
         else default_output_dir("ltx-2.5", quantize=args.quantize, bits=args.bits)
     )
+
+    if args.config_only:
+        # A JSON-only backfill for a pack that already exists: no download
+        # plan to preview, no weights to write — _config_only handles
+        # --dry-run itself rather than sharing _dry_run's download/output
+        # size estimate, which describes a full conversion this path never
+        # does.
+        _config_only(args, output_dir, variants)
+        return
 
     if args.dry_run:
         _dry_run(args, output_dir, variants)
@@ -872,6 +981,14 @@ def convert(args) -> None:
     license_verified = False
 
     connector_seen: str | None = None
+    # The DiT's own scheduler/transformer config, embedded verbatim in every
+    # UPSTREAM_TRANSFORMERS file's __metadata__["config"] (confirmed on both
+    # dev and distilled — see _dit_config below). Tracked the same way as
+    # connector_seen just above: computed for every selected transformer,
+    # dev and distilled included, and compared rather than trusted to agree,
+    # because a pack carries exactly one embedded_config.json.
+    dit_config_raw: str | None = None
+    dit_config_variant: str | None = None
     for source in _selected_sources(variants, skip_shared=args.skip_shared):
         download_hf_files(UPSTREAM_REPO, [source.path], download_dir)
         local = download_dir / source.path
@@ -905,6 +1022,25 @@ def convert(args) -> None:
                         "ERROR: the dev and distilled transformers carry different "
                         "connectors; this recipe writes one, which would be wrong "
                         "for the other. Convert them into separate directories."
+                    )
+
+            if source.path in UPSTREAM_TRANSFORMERS.values():
+                variant = _TRANSFORMER_VARIANT_BY_PATH[source.path]
+                raw_config = header_metadata.get("config")
+                if not raw_config:
+                    raise SystemExit(
+                        f"ERROR: {source.path} carries no 'config' in its safetensors "
+                        "metadata, so embedded_config.json cannot be written from it."
+                    )
+                if dit_config_raw is None:
+                    dit_config_raw = raw_config
+                    dit_config_variant = variant
+                elif raw_config != dit_config_raw:
+                    raise SystemExit(
+                        f"ERROR: the {dit_config_variant} and {variant} transformers "
+                        "carry different embedded configs; this recipe writes one "
+                        "embedded_config.json, which would be wrong for one of them. "
+                        "Convert them into separate directories."
                     )
 
             # Every SOURCE_FILES entry without a converter must declare a
@@ -965,6 +1101,19 @@ def convert(args) -> None:
             mx.clear_cache()
 
     _require_license_verified(license_verified, license_path)
+
+    # The consuming runtime (ltx-2-mlx) reads the DiT config through
+    # LTXModelConfig.from_checkpoint_dir(), which looks for
+    # embedded_config.json (then config.json) at the pack root; without it,
+    # that reader falls back to LTX-2.3 defaults, silently, which are wrong
+    # for 2.5. Written verbatim — no renaming, filtering, or added fields —
+    # once every selected transformer's raw config has been checked to agree
+    # (dit_config_raw is None only if no transformer was selected, which
+    # SOURCE_FILES makes impossible: --variant always names at least one).
+    if dit_config_raw is not None:
+        config_path = output_dir / "embedded_config.json"
+        with open(config_path, "w") as handle:
+            json.dump(json.loads(dit_config_raw), handle, indent=2)
 
     # LoRAs ship as-is: no conversion, just downloaded and copied under their
     # upstream basename. `_selected_loras` empties this under --skip-shared or
