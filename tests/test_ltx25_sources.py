@@ -586,6 +586,8 @@ class TestConfigOnlyBackfill:
     def _pack_with_local_sources(self, tmp_path, *, configs=(_DIT_CONFIG, _DIT_CONFIG)):
         output_dir = tmp_path / "out"
         output_dir.mkdir(parents=True)
+        # Create split_model.json to make this a valid pack
+        (output_dir / "split_model.json").write_text(_json.dumps({"recipe": "ltx-2.5"}))
         download_dir = ltx_25._source_download_dir(output_dir)
         _write_transformer_checkpoint(
             download_dir / UPSTREAM_TRANSFORMERS["dev"], connector_value=1.0, config=configs[0]
@@ -642,6 +644,8 @@ class TestConfigOnlyBackfill:
     ):
         output_dir = tmp_path / "out"
         output_dir.mkdir(parents=True)
+        # Create split_model.json to make this a valid pack
+        (output_dir / "split_model.json").write_text(_json.dumps({"recipe": "ltx-2.5"}))
         # No _source_download_dir(output_dir) populated at all — every
         # variant must fall back to _remote_header_metadata.
         monkeypatch.setattr(
@@ -670,6 +674,76 @@ class TestConfigOnlyBackfill:
             ltx_25.convert(args)
 
         assert not (output_dir / "embedded_config.json").exists()
+
+    def test_refuses_when_target_directory_does_not_exist(self, tmp_path):
+        """--config-only must refuse when the target directory does not exist."""
+        output_dir = tmp_path / "out"
+        # Ensure output directory doesn't exist
+        assert not output_dir.exists()
+
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+
+        with pytest.raises(SystemExit, match="split_model.json"):
+            ltx_25.convert(args)
+
+        # Guard must run before mkdir: directory should not be created
+        assert not output_dir.exists()
+
+    def test_refuses_when_target_directory_has_no_split_model(self, tmp_path):
+        """--config-only must refuse when split_model.json is missing."""
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True)
+        # Directory exists but has no split_model.json
+        assert not (output_dir / "split_model.json").exists()
+
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+
+        with pytest.raises(SystemExit, match="split_model.json"):
+            ltx_25.convert(args)
+
+        # Directory should still exist but remain unchanged
+        assert output_dir.exists()
+        assert not (output_dir / "split_model.json").exists()
+        assert not (output_dir / "embedded_config.json").exists()
+
+    def test_succeeds_when_pack_exists_with_split_model(self, tmp_path, monkeypatch):
+        """--config-only must work when split_model.json exists."""
+        output_dir = self._pack_with_local_sources(tmp_path)
+        # Pre-create split_model.json to make this a real pack
+        (output_dir / "split_model.json").write_text(_json.dumps({"recipe": "ltx-2.5"}))
+
+        args = _convert_args(
+            tmp_path, variants=["dev", "distilled"], skip_shared=False, config_only=True
+        )
+
+        ltx_25.convert(args)
+
+        config_path = output_dir / "embedded_config.json"
+        assert config_path.exists()
+        assert json.loads(config_path.read_text()) == json.loads(_DIT_CONFIG)
+
+    def test_dry_run_config_only_refuses_without_split_model(self, tmp_path):
+        """--dry-run --config-only must refuse the same way as normal --config-only."""
+        output_dir = tmp_path / "out"
+        assert not output_dir.exists()
+
+        args = _convert_args(
+            tmp_path,
+            variants=["dev", "distilled"],
+            skip_shared=False,
+            config_only=True,
+            dry_run=True,
+        )
+
+        with pytest.raises(SystemExit, match="split_model.json"):
+            ltx_25.convert(args)
+
+        # Guard must run before anything is created
+        assert not output_dir.exists()
 
 
 def _pack(tmp_path, **files):

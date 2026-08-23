@@ -875,7 +875,24 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
     disagreement" guarantee a normal run does — there being only one already
     on disk (as with the two real packs this backfills) does not exempt this
     path from checking, since --variant can still select both.
+
+    Raises:
+        SystemExit: The target directory does not exist or contains no
+            split_model.json (what makes it a converted pack). This guard runs
+            before any directory creation, so a mistyped path produces an error
+            without silently creating an empty directory.
     """
+    # Guard against --config-only on a non-existent or incomplete directory.
+    # This must run BEFORE any mkdir() call, so if it fails, no directory is
+    # created that did not exist before.
+    split_model_path = output_dir / "split_model.json"
+    if not split_model_path.exists():
+        raise SystemExit(
+            f"ERROR: {output_dir} does not contain split_model.json.\n"
+            "--config-only backfills an existing pack. Create the directory or\n"
+            "run a normal conversion (without --config-only) first."
+        )
+
     download_dir = _source_download_dir(output_dir)
     dit_config_raw: str | None = None
     dit_config_variant: str | None = None
@@ -915,7 +932,6 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
         )
         return
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as handle:
         json.dump(json.loads(dit_config_raw), handle, indent=2)
     print(f"\nWrote {config_path}")
