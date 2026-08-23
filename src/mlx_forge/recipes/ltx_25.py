@@ -544,8 +544,20 @@ PASSTHROUGH_FILES = {"lora": LORA_FILES["distilled-450"], "size_mb": 8_900}
 #: Defined above its use so download_size_mb/output_size_mb read top-to-bottom.
 _CONNECTOR_SIZE_MB = 6_340
 
-#: Components that exist independently of any transformer variant, and which
-#: --skip-shared omits for the delta workflow.
+#: Components that do not vary with which transformer variant produced them,
+#: and which --skip-shared therefore omits from a delta pack. This is the
+#: single source of truth `convert()` reads to decide what to skip writing —
+#: see the `component_name in SHARED_COMPONENTS` guard in its write loop —
+#: not a description of the effect for a reader to take on faith.
+#:
+#: `connector` is here despite riding inside the same downloaded file as
+#: `transformer` (both come from UPSTREAM_TRANSFORMERS' safetensors): dev and
+#: distilled carry byte-identical connectors, verified via
+#: `connector_fingerprint` on every run with two variants, so it is shared by
+#: any reasonable definition even though it has no source file of its own.
+#: `_selected_sources` cannot skip *downloading* it — it is bundled with the
+#: transformer weights the delta workflow needs regardless — so this
+#: membership is what makes convert() skip *writing* it out instead.
 SHARED_COMPONENTS = frozenset(
     {
         "vae_encoder_conv",
@@ -558,6 +570,7 @@ SHARED_COMPONENTS = frozenset(
         "spatial_upscaler_x2_v1_0",
         "temporal_upscaler_x2_v1_0",
         "text_encoder",
+        "connector",
     }
 )
 
@@ -874,9 +887,13 @@ def convert(args) -> None:
         else:
             weights = load_safetensors(local)
 
-            # The connector is written from the first variant that carries
-            # it; the second variant only compares its fingerprint against
-            # the first, never rewriting the file the first one wrote.
+            # The fingerprint is computed and compared on every run that
+            # carries a connector, --skip-shared included: it is what proves
+            # dev and distilled agree, and it costs seconds against an
+            # already-downloaded 42 GB file. Only the *writing* is
+            # conditional — write_connector picks the first variant to carry
+            # it (the second only compares), and the SHARED_COMPONENTS guard
+            # below additionally suppresses it for a delta pack.
             write_connector = False
             if "connector" in source.components:
                 fingerprint = connector_fingerprint(weights)
@@ -899,6 +916,17 @@ def convert(args) -> None:
             _share_video_vae_statistics(keys_by_component, source.components)
             for component_name, keys in keys_by_component.items():
                 if component_name == "connector" and not write_connector:
+                    continue
+                # The single place --skip-shared's contract is enforced for
+                # a component that rides inside a file downloaded anyway
+                # (the connector, bundled with the transformer): the file
+                # still had to be fetched and classified, but a component
+                # named in SHARED_COMPONENTS is never written to a delta
+                # pack. Sources _selected_sources already dropped entirely
+                # (vae_*, audio_vae, vocoder, duration_head, the upscalers,
+                # text_encoder) never reach this loop under --skip-shared, so
+                # this check is a no-op for them and load-bearing only here.
+                if args.skip_shared and component_name in SHARED_COMPONENTS:
                     continue
 
                 transform = (
@@ -1010,7 +1038,12 @@ def convert(args) -> None:
 #: Covers every entry in SHARED_COMPONENTS (test_covers_every_shared_component
 #: pins this). text_encoder's 681 is the checkpoint's 686 tensors minus the 5
 #: U8 assets `sanitize_text_encoder_key` refuses, both harvested from
-#: tests/fixtures/ltx_25_keys.json; the two upscalers hold 72 each.
+#: tests/fixtures/ltx_25_keys.json; the two upscalers hold 72 each. connector's
+#: 258 was measured on a real converted pack (`mlx-forge convert ltx-2.5
+#: --variant dev --skip-shared --quantize`), not harvested from the fixture —
+#: unlike the other entries here, the connector has no SOURCE_FILES entry of
+#: its own to harvest a header count from; it only ever appears bundled
+#: inside a transformer file.
 EXPECTED_TENSOR_COUNTS = {
     "vae_encoder_conv": 86,
     "vae_decoder_conv": 86,
@@ -1022,6 +1055,7 @@ EXPECTED_TENSOR_COUNTS = {
     "spatial_upscaler_x2_v1_0": 72,
     "temporal_upscaler_x2_v1_0": 72,
     "text_encoder": 681,
+    "connector": 258,
 }
 
 #: The five files `convert_text_encoder`/`extract_assets` write from the

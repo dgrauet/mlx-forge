@@ -309,6 +309,158 @@ class TestLoraSelection:
         assert _selected_loras(["dev"], skip_shared=True, lora=["distilled-450"]) == []
 
 
+def _write_transformer_checkpoint(path, *, connector_value: float) -> None:
+    """A minimal stand-in for one of UPSTREAM_TRANSFORMERS' real 42 GB files.
+
+    Carries one transformer key and both connector stacks, real license
+    metadata (so convert() doesn't need network to fetch or check one), and
+    nothing else — enough for `classify_dit_key`/the sanitizers/`maybe_transpose`
+    to run their real logic, without the weight itself needing a realistic shape.
+
+    The embedded `license` text is AUGUST (defined above, for
+    TestEmbeddedLicenceCheck) — the same fixture text already proven to
+    match, once normalised, the LICENSE `_prepare` writes to `output_dir`.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    weights = {
+        "model.diffusion_model.transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4)),
+        "model.diffusion_model.video_embeddings_connector.proj.weight": mx.full(
+            (2, 2), connector_value
+        ),
+        "model.diffusion_model.audio_embeddings_connector.proj.weight": mx.full(
+            (2, 2), connector_value
+        ),
+    }
+    mx.save_safetensors(str(path), weights, metadata={"license": AUGUST})
+
+
+def _convert_args(tmp_path, *, variants, skip_shared) -> argparse.Namespace:
+    return argparse.Namespace(
+        output=str(tmp_path / "out"),
+        quantize=False,
+        bits=8,
+        group_size=64,
+        dry_run=False,
+        variant=variants,
+        skip_shared=skip_shared,
+        lora=[],
+    )
+
+
+class TestSkipSharedConnector:
+    """`--skip-shared` must omit the connector from a delta pack (it is now a
+    member of SHARED_COMPONENTS), while still computing and comparing the
+    dev/distilled connector fingerprint — only the *write* is conditional.
+
+    `download_hf_files` is stubbed to a no-op and the "download" directory is
+    pre-populated directly, so these exercise convert()'s real selection and
+    write-loop logic without touching the network or downloading anything.
+    """
+
+    def _stub_download(self, monkeypatch, tmp_path):
+        def fake_download(repo, paths, download_dir):
+            for rel in paths:
+                local = download_dir / rel
+                assert local.exists(), f"test fixture did not pre-populate {local}"
+
+        monkeypatch.setattr(ltx_25, "download_hf_files", fake_download)
+
+    def _prepare(self, tmp_path, *, connector_values):
+        args = _convert_args(tmp_path, variants=["dev", "distilled"], skip_shared=True)
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True)
+        # Pre-create LICENSE so `convert()` finds it already in place and
+        # never calls ensure_license_file — which would otherwise reach out
+        # to GitHub for real. Its text matches _TRANSFORMER_LICENSE once
+        # normalised, so `_verify_license_if_carried` accepts it exactly like
+        # a real run's fetched copy would.
+        (output_dir / "LICENSE").write_text(
+            "  LTX-2.x Community License Agreement\n  License date: August 11, 2026\n"
+        )
+        download_dir = ltx_25._source_download_dir(output_dir)
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["dev"],
+            connector_value=connector_values[0],
+        )
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["distilled"],
+            connector_value=connector_values[1],
+        )
+        return args, output_dir
+
+    def test_a_delta_run_writes_no_connector(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch, tmp_path)
+        args, output_dir = self._prepare(tmp_path, connector_values=(1.0, 1.0))
+
+        ltx_25.convert(args)
+
+        assert not (output_dir / "connector.safetensors").exists()
+        assert (output_dir / "transformer-dev.safetensors").exists()
+        assert (output_dir / "transformer-distilled.safetensors").exists()
+
+    def test_a_full_run_writes_the_connector_once(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch, tmp_path)
+        args = _convert_args(tmp_path, variants=["dev", "distilled"], skip_shared=False)
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True)
+        (output_dir / "LICENSE").write_text(
+            "  LTX-2.x Community License Agreement\n  License date: August 11, 2026\n"
+        )
+        download_dir = ltx_25._source_download_dir(output_dir)
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["dev"], connector_value=1.0
+        )
+        _write_transformer_checkpoint(
+            download_dir / UPSTREAM_TRANSFORMERS["distilled"], connector_value=1.0
+        )
+        # This test's question is only whether convert() writes the connector
+        # on a non-delta run; the other shared sources (vae_*, audio_vae,
+        # duration_head, upscalers, text_encoder) are irrelevant to it and
+        # would need a real ~5 GB fixture set to exercise honestly. Narrowing
+        # `_selected_sources` to just the two transformer files keeps this
+        # test about the connector specifically, the same way `--skip-shared`
+        # narrows it in the code under test.
+        transformer_only = [
+            s for s in ltx_25.SOURCE_FILES if s.path in UPSTREAM_TRANSFORMERS.values()
+        ]
+        monkeypatch.setattr(
+            ltx_25, "_selected_sources", lambda variants, *, skip_shared: transformer_only
+        )
+
+        ltx_25.convert(args)
+
+        assert (output_dir / "connector.safetensors").exists()
+        connector = ltx_25.load_safetensors(output_dir / "connector.safetensors")
+        assert all(k.startswith("connector.") for k in connector)
+
+    def test_fingerprint_mismatch_still_aborts_under_skip_shared(self, tmp_path, monkeypatch):
+        self._stub_download(monkeypatch, tmp_path)
+        args, output_dir = self._prepare(tmp_path, connector_values=(1.0, 2.0))
+
+        with pytest.raises(SystemExit, match="different"):
+            ltx_25.convert(args)
+
+        # The abort happens while processing the second (distilled) file, so
+        # the first file's non-shared output (its transformer) is already on
+        # disk — proving the fingerprint check really ran against real
+        # written state, not that convert() failed before doing anything.
+        assert (output_dir / "transformer-dev.safetensors").exists()
+        assert not (output_dir / "connector.safetensors").exists()
+
+    def test_shared_components_constant_is_actually_consulted(self, tmp_path, monkeypatch):
+        # If the write loop stopped reading SHARED_COMPONENTS (or someone
+        # emptied the constant), this test — not just an assertion on the
+        # constant's contents — is what would catch it: emptying it here
+        # must flip the delta run's connector-writing behaviour.
+        self._stub_download(monkeypatch, tmp_path)
+        args, output_dir = self._prepare(tmp_path, connector_values=(1.0, 1.0))
+        monkeypatch.setattr(ltx_25, "SHARED_COMPONENTS", frozenset())
+
+        ltx_25.convert(args)
+
+        assert (output_dir / "connector.safetensors").exists()
+
+
 def _pack(tmp_path, **files):
     import mlx.core as mx
 
