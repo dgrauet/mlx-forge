@@ -32,7 +32,7 @@ from ..convert import (
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import _materialize
+from ..quantize import _materialize, read_quantize_config, write_quantize_config
 from ..transpose import needs_transpose, transpose_conv
 from ..validate import (
     ValidationResult,
@@ -662,6 +662,16 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
             "group_size": args.group_size,
             "quantized_components": [quantize_target],
         }
+        # quantize_config.json is the shared-layer record: upload.py recovers
+        # bits/group_size from it for the model card, and validate gates the
+        # scales/biases checks on it. Recording quantization only in
+        # split_model.json left quantized cards without a bit width.
+        write_quantize_config(
+            output_dir,
+            bits=args.bits,
+            group_size=args.group_size,
+            quantized_components=[quantize_target],
+        )
     write_split_model(output_dir, split_model)
 
 
@@ -675,7 +685,9 @@ def validate(args) -> None:
     model_dir, result = start_validation(args.model_dir)
 
     validate_file_exists(model_dir, "config.json", result)
-    finish_validation(result)
+    if not result.passed:
+        # Nothing below can run without config.json; close the run here.
+        finish_validation(result)
 
     with open(model_dir / "config.json") as f:
         config = json.load(f)
@@ -710,11 +722,25 @@ def _validate_shape(model_dir: Path, config: dict, result: ValidationResult) -> 
     result.check(len(moe_keys) > 0, f"MoE keys present ({len(moe_keys)})")
     validate_no_pytorch_prefix(dit_weights, "model.", result)
 
-    split_model = json.loads((model_dir / "split_model.json").read_text())
-    if "quantization" in split_model:
+    if _quantization_recorded(model_dir):
         validate_quantization(dit_weights, result, block_key="blocks")
     del dit_weights
     gc.collect()
+
+
+def _quantization_recorded(model_dir: Path) -> bool:
+    """True if this pack was converted with --quantize.
+
+    quantize_config.json is the shared-layer record; packs converted before
+    this recipe wrote it recorded quantization only in split_model.json, so
+    accept either.
+    """
+    if read_quantize_config(model_dir) is not None:
+        return True
+    marker = model_dir / "split_model.json"
+    if marker.exists():
+        return "quantization" in json.loads(marker.read_text())
+    return False
 
 
 def _validate_paint(model_dir: Path, config: dict, result: ValidationResult) -> None:
@@ -729,6 +755,10 @@ def _validate_paint(model_dir: Path, config: dict, result: ValidationResult) -> 
     conv_in = unet_w.get("conv_in.weight")
     if conv_in is not None:
         result.check(conv_in.shape[-1] == 12, f"conv_in 12ch (got {conv_in.shape})")
+    if _quantization_recorded(model_dir):
+        # paint_should_quantize only accepts 2-D linears, which all live in
+        # down_blocks/mid_block/up_blocks — "block" covers the three.
+        validate_quantization(unet_w, result, block_key="block")
     del unet_w
     gc.collect()
 
