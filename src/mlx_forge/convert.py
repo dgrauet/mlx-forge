@@ -10,6 +10,7 @@ import gc
 import json
 import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -204,7 +205,9 @@ def fetch_github_license(repo: str, path: str) -> tuple[bytes, str | None]:
     return content, revision
 
 
-def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) -> list[Path]:
+def ensure_license_file(
+    output_dir: Path, info: dict, *, strict: bool = True, dry_run: bool = False
+) -> list[Path]:
     """Place the upstream licence text next to the weights, and vouch for it.
 
     Converting and quantising a model produces a derivative, and the community
@@ -235,6 +238,8 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
             runs before the manifest is written, so the record lands in it.
         strict: Abort on a mismatch or a failed fetch rather than warning. True
             when publishing, which is where the obligation binds.
+        dry_run: Verify and report, but never copy the licence into
+            output_dir — `upload --dry-run` promises to leave it untouched.
 
     Returns:
         The local paths, empty when nothing is declared or when a fetch or a
@@ -316,7 +321,12 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
                 content, revision = fetch_github_license(repo, path)
             except (OSError, ValueError) as e:
                 return refuse(f"could not fetch {path} from github.com/{repo}: {e}")
-            cached = output_dir / f".{name}.fetched"
+            # Scratch copy outside output_dir: this function must not leave
+            # anything behind in the pack (a dry run in particular), and a
+            # crashed process should not either.
+            fd, scratch_name = tempfile.mkstemp(prefix=f"{name}.", suffix=".fetched")
+            os.close(fd)
+            cached = Path(scratch_name)
             cached.write_bytes(content)
         else:
             try:
@@ -335,8 +345,11 @@ def ensure_license_file(output_dir: Path, info: dict, *, strict: bool = True) ->
                 )
 
             if not local.exists() or not local.stat().st_size:
-                shutil.copyfile(cached, local)
-                print(f"  Licence: {filename} from {upstream} -> {name}")
+                if dry_run:
+                    print(f"  [dry-run] would copy licence {filename} from {upstream} -> {name}")
+                else:
+                    shutil.copyfile(cached, local)
+                    print(f"  Licence: {filename} from {upstream} -> {name}")
 
             provenance[name] = {"repo": upstream, "revision": revision, "sha256": digest}
         finally:

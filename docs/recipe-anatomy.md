@@ -21,7 +21,7 @@ are model facts, not style. Unifying them would create false equivalences.
 | **Key classification / sanitization** | Every checkpoint names its weights differently. `sanitize_*` encodes one upstream's naming, verified key by key. |
 | **Quantization scope** (`should_quantize`) | Which layers survive int4/int8 depends on the architecture — an embedding table is fine to quantize in one model and destroys quality in another. |
 | **Conv transposition** | PyTorch is channels-second, MLX channels-last, but *which* tensors are convs (and of what rank) is model-specific. `attn.proj.weight` is a Linear despite matching a patch-embed's name. |
-| **Source format** | safetensors, `.pt`/`.pth` (5 recipes), fp8 with per-row scales (ideogram-4), sharded or single, sometimes nested inside a pickled container. |
+| **Source format** | safetensors, `.pt`/`.pth` (4 recipes), fp8 with per-row scales (ideogram-4), sharded or single, sometimes nested inside a pickled container. |
 | **Component decomposition** | 1 output file (ernie-image-pe) to 6 (LTX-2.3, matrix-game), or two independent stages (hunyuan3d). |
 | **Pipeline files** | Which tokenizer/scheduler files the runtime needs, and whether they keep their directory. |
 
@@ -87,7 +87,7 @@ by its own tests.**
 | Recipe | Upstream | Source format | Components | Recipe-specific flags |
 |---|---|---|---|---|
 | `ltx-2.3` | Lightricks/LTX-2.3 | safetensors | 6 + upscalers + LoRAs | `--variant --skip-shared --spatial-upscaler --temporal-upscaler --lora` |
-| `ltx-2.5` | Lightricks/LTX-2.5 (gated) | safetensors, pre-split | 2 DiT + text encoder + 2 video VAE + audio + duration head + upscalers | `--variant --skip-shared --lora` |
+| `ltx-2.5` | Lightricks/LTX-2.5 (gated) | safetensors, pre-split | 2 DiT + text encoder + 2 video VAE + audio + duration head + upscalers | `--variant --skip-shared --lora --config-only` |
 | `ideogram-4` | ideogram-ai/ideogram-4-fp8 | **fp8** + scales | 4 | `--source` |
 | `matrix-game-3.0` | Skywork/Matrix-Game-3.0 | safetensors + `.pth` | 6 | `--dit/--t5/--vae-checkpoint --skip-tokenizer` |
 | `cogvideox-fun-v1.5-5b-inp` | alibaba-pai/CogVideoX-Fun-V1.5-5b-InP | safetensors | 3 | `--source` |
@@ -153,7 +153,7 @@ Declaring it makes `convert` fetch the file verbatim from upstream and `upload`
 **refuse to publish** without it. Leave it `None` for apache-2.0 or mit, which
 the SPDX identifier satisfies on its own.
 
-The fetch hangs off `write_split_model()`, the one function all ten recipes
+The fetch hangs off `write_split_model()`, the one function all eleven recipes
 call, so a recipe cannot forget it. It is best-effort there (a Hub hiccup must
 not destroy a long conversion) and strict in the upload path, which is where the
 obligation actually binds.

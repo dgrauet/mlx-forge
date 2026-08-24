@@ -3,7 +3,7 @@
 ## Project Overview
 
 CLI tool to convert, quantize, split, and validate ML models for Apple MLX on Apple Silicon.
-Generic framework with model-specific "recipes" (10 supported).
+Generic framework with model-specific "recipes" (11 supported).
 
 ## Quick Start
 

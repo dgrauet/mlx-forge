@@ -796,7 +796,12 @@ def _full_pack(tmp_path, *, omit=(), quantized_counts=None):
         n_plain = count - n_quantized
         weights = {f"{component}.w{i}.weight": mx.zeros((2, 2)) for i in range(n_plain)}
         for i in range(n_quantized):
-            key = f"{component}.q{i}.weight"
+            # The real q8 text encoder's quantized tensors all live under
+            # model.layers.* — validate() checks exactly that.
+            if component == "text_encoder":
+                key = f"{component}.model.layers.{i}.q.weight"
+            else:
+                key = f"{component}.q{i}.weight"
             weights[key] = mx.zeros((2, 2), dtype=mx.int8)
             weights[f"{key}.scales"] = mx.zeros((2,))
             weights[f"{key}.biases"] = mx.zeros((2,))
@@ -826,14 +831,21 @@ def _full_pack(tmp_path, *, omit=(), quantized_counts=None):
         # Variants" section below assumes exactly that once
         # quantize_config.json exists, so this must mirror it or the
         # unrelated .scales/.biases check fails for the wrong reason.
+        # All 48 blocks, like the real packs: validate() counts distinct
+        # transformer_blocks indices, so a one-block fixture would fail the
+        # structural check for the wrong reason.
         if quantized_counts:
-            transformer_weights = {
-                "transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4), dtype=mx.int8),
-                "transformer_blocks.0.attn1.to_q.weight.scales": mx.zeros((4,)),
-                "transformer_blocks.0.attn1.to_q.weight.biases": mx.zeros((4,)),
-            }
+            transformer_weights = {}
+            for i in range(ltx_25.TRANSFORMER_BLOCK_COUNT):
+                key = f"transformer_blocks.{i}.attn1.to_q.weight"
+                transformer_weights[key] = mx.zeros((4, 4), dtype=mx.int8)
+                transformer_weights[f"{key}.scales"] = mx.zeros((4,))
+                transformer_weights[f"{key}.biases"] = mx.zeros((4,))
         else:
-            transformer_weights = {"transformer_blocks.0.attn1.to_q.weight": mx.zeros((4, 4))}
+            transformer_weights = {
+                f"transformer_blocks.{i}.attn1.to_q.weight": mx.zeros((4, 4))
+                for i in range(ltx_25.TRANSFORMER_BLOCK_COUNT)
+            }
         mx.save_safetensors(str(tmp_path / ltx_25.VARIANT_FILENAMES["dev"]), transformer_weights)
 
     (tmp_path / "split_model.json").write_text(
@@ -984,7 +996,7 @@ class TestQuantizedComponentCounts:
         weights = ltx_25.load_safetensors(tmp_path / "text_encoder.safetensors")
         # Drop one .biases key so scales (328) and biases (327) disagree —
         # the total count alone would hide this.
-        del weights["text_encoder.q0.weight.biases"]
+        del weights["text_encoder.model.layers.0.q.weight.biases"]
         mx.save_safetensors(str(tmp_path / "text_encoder.safetensors"), weights)
         with pytest.raises(SystemExit):
             ltx_25.validate(argparse.Namespace(model_dir=str(tmp_path)))

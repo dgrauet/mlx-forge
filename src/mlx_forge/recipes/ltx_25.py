@@ -17,6 +17,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import re
 import shutil
 import urllib.request
 from collections.abc import Callable
@@ -273,6 +274,10 @@ UPSTREAM_TRANSFORMERS = {
     "dev": "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
     "distilled": "diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors",
 }
+
+#: num_layers in the checkpoint-embedded transformer config, common to both
+#: variants; verified on the real packs (block indices 0..47).
+TRANSFORMER_BLOCK_COUNT = 48
 
 VARIANT_FILENAMES = {
     "dev": "transformer-dev.safetensors",
@@ -1379,6 +1384,12 @@ def validate(args) -> None:
                     f"{component} holds {expected_quantized} tensors when quantized "
                     f"(found {len(weights)})",
                 )
+                if component == "text_encoder":
+                    # The transformer's scales/biases pairing is checked in the
+                    # variant loop below; the other quantized component gets
+                    # the same check. 328 .scales on the real q8 pack, all
+                    # under model.layers.*.
+                    validate_quantization(weights, result, block_key="layers")
             else:
                 result.check(
                     len(weights) == expected,
@@ -1402,12 +1413,39 @@ def validate(args) -> None:
         filename = VARIANT_FILENAMES[variant]
         if not validate_file_exists(model_dir, filename, result):
             continue
+        weights = load_safetensors(model_dir / filename)
+        # Structural checks, quantized or not: a sanitizer regression is
+        # invisible to every other check here. The patterns are exactly what
+        # sanitize_transformer_key strips, verified absent on the real packs.
+        leaked = [
+            k
+            for k in weights
+            if "model.diffusion_model." in k
+            or ".ff.net." in k
+            or ".to_out.0." in k
+            or ".linear_1." in k
+        ]
+        result.check(
+            len(leaked) == 0,
+            f"{variant}: no unsanitized upstream key patterns (found {len(leaked)})",
+        )
+        for k in leaked[:5]:
+            print(f"    Bad key: {k}")
+        block_indices = {
+            int(m.group(1))
+            for k in weights
+            for m in [re.search(r"transformer_blocks\.(\d+)\.", k)]
+            if m
+        }
+        result.check(
+            len(block_indices) == TRANSFORMER_BLOCK_COUNT,
+            f"{variant}: {TRANSFORMER_BLOCK_COUNT} transformer blocks (found {len(block_indices)})",
+        )
         if qconfig is not None:
-            weights = load_safetensors(model_dir / filename)
             validate_quantization(weights, result, block_key="transformer_blocks")
-            del weights
-            gc.collect()
-            mx.clear_cache()
+        del weights
+        gc.collect()
+        mx.clear_cache()
 
     finish_validation(result)
 

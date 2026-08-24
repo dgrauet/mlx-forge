@@ -302,7 +302,7 @@ def iter_model_files(model_dir: Path) -> list[Path]:
     )
 
 
-def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
+def backfill_from_recipe(model_dir: Path, split_info: dict, *, dry_run: bool = False) -> dict:
     """Fill in card metadata the manifest predates, from the recipe declaration.
 
     A directory converted before a field existed carries a manifest without it,
@@ -344,7 +344,10 @@ def backfill_from_recipe(model_dir: Path, split_info: dict) -> dict:
     merged = {**split_info, **added, **corrected}
     for key in dropped:
         del merged[key]
-    write_split_model(model_dir, merged)
+    if dry_run:
+        print("[dry-run] would update split_model.json (recipe backfill)")
+    else:
+        write_split_model(model_dir, merged)
 
     if added:
         print(f"Backfilled from the {metadata.name} recipe: {', '.join(sorted(added))}")
@@ -416,7 +419,7 @@ def card_links(split_info: dict, supplied: list[str] | None = None) -> list[str]
     return links
 
 
-def backfill_quantization(model_dir: Path, split_info: dict) -> dict:
+def backfill_quantization(model_dir: Path, split_info: dict, *, dry_run: bool = False) -> dict:
     """Recover the quantization record from quantize_config.json.
 
     The quantizer writes that file itself, so it is the authority on width and
@@ -446,8 +449,11 @@ def backfill_quantization(model_dir: Path, split_info: dict) -> dict:
         return split_info
 
     merged = {**split_info, **new}
-    write_split_model(model_dir, merged)
-    print(f"Recovered from quantize_config.json: {', '.join(sorted(new))}")
+    if dry_run:
+        print(f"[dry-run] would record from quantize_config.json: {', '.join(sorted(new))}")
+    else:
+        write_split_model(model_dir, merged)
+        print(f"Recovered from quantize_config.json: {', '.join(sorted(new))}")
     return merged
 
 
@@ -459,6 +465,7 @@ def persist_card_metadata(
     links: list[str] | None,
     cli_snippet: str | None,
     note: str | None = None,
+    dry_run: bool = False,
 ) -> dict:
     """Store operator-supplied card metadata so a later refresh keeps it.
 
@@ -487,8 +494,11 @@ def persist_card_metadata(
         return split_info
 
     merged = {**split_info, **new}
-    write_split_model(model_dir, merged)
-    print(f"Recorded in split_model.json: {', '.join(sorted(new))}")
+    if dry_run:
+        print(f"[dry-run] would record in split_model.json: {', '.join(sorted(new))}")
+    else:
+        write_split_model(model_dir, merged)
+        print(f"Recorded in split_model.json: {', '.join(sorted(new))}")
     return merged
 
 

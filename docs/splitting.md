@@ -74,7 +74,10 @@ See model-specific guides for the exact mappings.
 
 ## The split_model.json Marker
 
-Written after every successful split:
+Written after every successful split. The `split`/`files` fields are
+**merged into** any `split_model.json` already present, so the metadata
+`convert` wrote (recipe identity, gating declaration, licence provenance)
+survives a later split:
 
 ```json
 {

@@ -143,7 +143,7 @@ mlx_forge/
     ├── __init__.py  # Registry (AVAILABLE_RECIPES) + the contract every recipe must satisfy
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
     ├── ernie_image.py  # ERNIE-Image: 8B single-stream text-to-image DiT
-    └── ...          # 10 recipes in total — see AVAILABLE_RECIPES
+    └── ...          # 11 recipes in total — see AVAILABLE_RECIPES
 ```
 
 Generic tools live at the top level. Model-specific logic lives in **recipes**. Adding support for a new model means creating a new recipe file.
@@ -246,6 +246,7 @@ PyTorch stores conv weights as `(O, I, ...)` while MLX expects channels-last `(O
 Each recipe has its own detailed guide with architecture, key mapping, known gotchas, and validation details:
 
 - [LTX-2.3](docs/models/ltx-2.3.md) — 22B video DiT (6 components, Conv3d/Conv1d transposition)
+- [LTX-2.5](docs/models/ltx-2.5.md) — pre-split audio-video DiT + Gemma-4 text encoder, gated upstream
 - [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
 - [V-JEPA 2](docs/models/vjepa-2.md) — Meta video world model: ViT-L encoder + predictor, RoPE (2.1 `vjepa-2.1-vitl` / 2.0 `vjepa-2.0-vitl` + attentive probes)
 - [Matrix-Game 3.0](docs/models/matrix-game-3.0.md) — interactive world model: two DiT backbones, UMT5-XXL, three VAE variants

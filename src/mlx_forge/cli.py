@@ -260,6 +260,24 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
 
+    # Two-pass parsing means argparse consumes -h/--help during the first pass,
+    # prints the generic recipe-chooser and exits — so the recipe's own flags
+    # (--variant, --skip-shared, --config-only, ...) were undiscoverable from
+    # the CLI. When both the command and the recipe are named, route help to
+    # the recipe parser instead.
+    argv = sys.argv[1:]
+    if (
+        len(argv) >= 2
+        and argv[0] in ("convert", "validate", "split")
+        and argv[1] in AVAILABLE_RECIPES
+        and any(a in ("-h", "--help") for a in argv[2:])
+    ):
+        recipe = _get_recipe(argv[1])
+        _require_recipe_command(recipe, argv[0], argv[1])
+        recipe_parser = argparse.ArgumentParser(prog=f"mlx-forge {argv[0]} {argv[1]}")
+        getattr(recipe, f"add_{argv[0]}_args")(recipe_parser)
+        recipe_parser.parse_args(["--help"])  # prints the recipe's help and exits
+
     # Two-pass parsing: first get the command and recipe, then add recipe-specific args
     args, remaining = parser.parse_known_args()
 
@@ -541,11 +559,11 @@ def _run_upload(args) -> None:
 
     # A directory converted before a metadata field existed carries a manifest
     # without it; recover it from the recipe rather than publishing the default.
-    split_info = backfill_from_recipe(model_dir, split_info)
+    split_info = backfill_from_recipe(model_dir, split_info, dry_run=args.dry_run)
 
     # Same idea for the build's own facts: the quantizer recorded them in
     # quantize_config.json, and a manifest written before quantizing never did.
-    split_info = backfill_quantization(model_dir, split_info)
+    split_info = backfill_quantization(model_dir, split_info, dry_run=args.dry_run)
 
     # Gating is declared by the recipe, never applied as a side effect of an
     # unrelated upload: only --set-gated changes what may download the repo.
@@ -567,7 +585,7 @@ def _run_upload(args) -> None:
     # listing is built: the licence is part of what the card advertises, and a
     # missing one stops the upload rather than being reported afterwards.
     vouched_before = split_info.get("license_provenance")
-    ensure_license_file(model_dir, split_info)
+    ensure_license_file(model_dir, split_info, dry_run=args.dry_run)
     # ensure_license_file records the copy's origin into split_info but does not
     # write; persist it here, or the next run would have nothing to check the
     # file against and would go back to trusting whatever sits at that name.
@@ -584,6 +602,7 @@ def _run_upload(args) -> None:
         links=args.link,
         cli_snippet=args.cli_snippet,
         note=args.note,
+        dry_run=args.dry_run,
     )
 
     # Describe the repo as it will be, not just the local directory: after a

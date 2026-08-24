@@ -6,7 +6,7 @@ This page documents the LTX-2.3 recipe: CLI usage, architecture, conversion deta
 ## Quick Start
 
 ```bash
-# Convert distilled variant (~46 GB download)
+# Convert both variants, distilled + dev (the default)
 mlx-forge convert ltx-2.3
 
 # Convert dev variant
@@ -25,7 +25,7 @@ mlx-forge convert ltx-2.3 --checkpoint ./ltx-2.3-22b-distilled.safetensors
 mlx-forge convert ltx-2.3 --quantize --bits 8 --spatial-upscaler x2 --dry-run
 
 # Validate a converted model
-mlx-forge validate ltx-2.3 models/ltx-2.3-mlx-distilled
+mlx-forge validate ltx-2.3 models/ltx-2.3-mlx
 
 # Split a legacy unified model
 mlx-forge split ltx-2.3 /path/to/unified-model-dir
@@ -38,12 +38,14 @@ mlx-forge split ltx-2.3 /path/to/unified-model-dir
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--checkpoint` | *(download)* | Path to a local `.safetensors` checkpoint |
-| `--variant` | `distilled` | Model variant (`distilled` or `dev`) |
-| `--output` | `models/ltx-2.3-mlx-<variant>` | Output directory |
+| `--variant` | `distilled dev` | Variant(s) to convert (`distilled`, `distilled-1.1`, `dev`; several allowed) |
+| `--output` | `models/ltx-2.3-mlx[-q<bits>]` | Output directory |
 | `--quantize` | off | Quantize transformer after conversion |
 | `--bits` | `8` | Quantization bits (`4` or `8`) |
 | `--group-size` | `64` | Quantization group size |
 | `--dry-run` | off | Preview conversion plan without downloading or writing |
+| `--skip-shared` | off | Delta mode: only the requested transformer variant(s) and LoRAs |
+| `--lora` | *(all when `dev` included)* | LoRA file(s) to sync from source |
 | `--spatial-upscaler` | *(none)* | Spatial upscaler scale(s): `x2`, `x1.5`, or both |
 | `--spatial-upscaler-checkpoint` | *(download)* | Local path(s) to spatial upscaler checkpoints |
 | `--temporal-upscaler` | *(none)* | Temporal upscaler scale(s): `x2` |

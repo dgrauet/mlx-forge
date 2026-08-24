@@ -158,3 +158,27 @@ class TestUploadCommand:
             ),
         ):
             main()
+
+
+class TestRecipeHelp:
+    """`mlx-forge convert <recipe> --help` must show the recipe's own flags.
+
+    Two-pass parsing used to swallow --help before the recipe parser existed,
+    so every recipe's flags were undiscoverable from the CLI.
+    """
+
+    def test_convert_recipe_help_shows_recipe_flags(self, capsys):
+        with patch("sys.argv", ["mlx-forge", "convert", "ltx-2.5", "--help"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "--skip-shared" in out
+        assert "--config-only" in out
+
+    def test_validate_recipe_help_shows_positional(self, capsys):
+        with patch("sys.argv", ["mlx-forge", "validate", "ltx-2.3", "--help"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+        assert "model_dir" in capsys.readouterr().out

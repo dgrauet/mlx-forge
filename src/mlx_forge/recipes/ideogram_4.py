@@ -126,6 +126,19 @@ _ALL_HF_FILES = (
 METADATA = RecipeMetadata(
     name="ideogram-4",
     source=REPO_ID,
+    # Mirrors the upstream card's front-matter verbatim (gated repo, read
+    # authenticated 2026-08-24): license: other, license_name:
+    # ideogram-4-non-commercial, with LICENSE.md in the repo. Declaring
+    # license_file makes convert fetch the text and upload refuse to publish
+    # without it — the same obligation the LTX and Hunyuan recipes carry.
+    license="other",
+    license_name="ideogram-4-non-commercial",
+    license_link="https://huggingface.co/ideogram-ai/ideogram-4-fp8/blob/main/LICENSE.md",
+    license_file="LICENSE.md",
+    quantization_scope=(
+        "2-D Linear weights in both transformers and the text encoder, "
+        "leaving embeddings, norms and the VAE in bf16"
+    ),
 )
 
 

@@ -33,7 +33,14 @@ def _materialize(*tensors: mx.array) -> None:
 
 
 def default_should_quantize(key: str, weight: mx.array, *, min_elements: int = 256) -> bool:
-    """Default quantization predicate: quantize 2D+ .weight tensors with enough elements.
+    """Default quantization predicate: 2-D Linear `.weight` matrices only.
+
+    This is the generic `mlx-forge quantize` path, so it enforces the
+    project-wide rule (only quantize Linear .weight matrices — never conv,
+    norm, embedding layers): conv kernels are 3-D+ in MLX and are rejected by
+    rank; embedding tables are 2-D `.weight` too, so they are rejected by the
+    conventional "embed" in their key. A recipe that knows its architecture
+    supplies its own predicate instead.
 
     Args:
         key: Weight key name.
@@ -45,11 +52,13 @@ def default_should_quantize(key: str, weight: mx.array, *, min_elements: int = 2
     """
     if not key.endswith(".weight"):
         return False
-    if weight.ndim < 2:
+    if weight.ndim != 2:
+        return False
+    if "embed" in key:
         return False
     if weight.size < min_elements:
         return False
-    if weight.ndim == 2 and min(weight.shape) == 1:
+    if min(weight.shape) == 1:
         return False
     return True
 

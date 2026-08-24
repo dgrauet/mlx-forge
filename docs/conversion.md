@@ -166,18 +166,22 @@ After each component is saved, `gc.collect()` and `mx.clear_cache()` free both P
 
 See the [Adding a New Model Recipe](../README.md#adding-a-new-model-recipe) section in the README for the required interface.
 
-A recipe module must implement:
+A recipe module must implement the six-function contract enforced by
+`COMMAND_REQUIREMENTS` in `recipes/__init__.py` (and checked for every
+registered recipe by `tests/test_recipe_contract.py`):
 
 | Function | Purpose |
 |----------|---------|
-| `classify_key(key) -> str \| None` | Map PyTorch key to component name |
-| Sanitizer functions per component | Rename keys to MLX conventions |
-| `maybe_transpose(key, weight, component) -> array` | Transpose conv weights if needed |
 | `convert(args)` | Main conversion entry point |
 | `validate(args)` | Model-specific validation |
+| `split(args)` | Split a unified file — a printing no-op when upstream is already split |
 | `add_convert_args(parser)` | Register CLI arguments |
 | `add_validate_args(parser)` | Register CLI arguments |
 | `add_split_args(parser)` | Register CLI arguments |
+
+By convention (not enforced by the contract) recipes also define
+`classify_key()`, per-component sanitizers, and a `maybe_transpose()` for
+conv-layout fixes.
 
 Register the recipe in `recipes/__init__.py`:
 

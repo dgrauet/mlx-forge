@@ -31,6 +31,15 @@ class TestDefaultShouldQuantize:
         w = mx.zeros((512, 1))
         assert default_should_quantize("layer.weight", w) is False
 
+    def test_conv_kernel_rejected(self):
+        # MLX conv weights are 3-D+; the house rule is Linear matrices only.
+        w = mx.zeros((64, 3, 3, 32))
+        assert default_should_quantize("conv_in.weight", w) is False
+
+    def test_embedding_table_rejected(self):
+        w = mx.zeros((32000, 512))
+        assert default_should_quantize("model.embed_tokens.weight", w) is False
+
 
 class TestQuantizeWeightsMaterialization:
     """Every tensor leaving quantize_weights must be materialized.
