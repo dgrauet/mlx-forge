@@ -907,20 +907,18 @@ class TestLeakedPrefixDetection:
         with pytest.raises(SystemExit):
             ltx_25.validate(argparse.Namespace(model_dir=str(pack)))
 
-    def test_a_vocoder_key_with_a_second_prefix_is_not_flagged(self, tmp_path, capsys):
-        # vocoder.vocoder.ups.5.weight is correct output (see
-        # sanitize_vocoder_key and _LEAKED_PREFIX_COMPONENTS' docstring), not
-        # a leaked prefix — the vocoder file has two sibling generators
-        # sharing a "vocoder." container, one of them itself named
-        # "vocoder". A real pack is full of these; the check must not flag
-        # them.
+    def test_a_vocoder_key_with_a_leaked_prefix_fails(self, tmp_path):
+        # vocoder.vocoder.ups.5.weight is exactly the defect that shipped:
+        # the sanitizer failed to flatten the main generator (itself named
+        # "vocoder") to the component root, and the loader crashed on 667
+        # unknown parameters. validate() must catch it.
         pack = _full_pack(tmp_path)
         count = ltx_25.EXPECTED_TENSOR_COUNTS["vocoder"]
         weights = {f"vocoder.w{i}.weight": mx.zeros((2, 2)) for i in range(count - 1)}
         weights["vocoder.vocoder.ups.5.weight"] = mx.zeros((2, 2))
         mx.save_safetensors(str(pack / "vocoder.safetensors"), weights)
-        ltx_25.validate(argparse.Namespace(model_dir=str(pack)))  # must not raise
-        assert "All checks passed" in capsys.readouterr().out
+        with pytest.raises(SystemExit):
+            ltx_25.validate(argparse.Namespace(model_dir=str(pack)))
 
 
 class TestSharedComponentsAreAllGated:

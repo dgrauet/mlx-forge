@@ -162,6 +162,14 @@ class TestAudioClassification:
             "decoder.conv_in.conv.bias"
         )
         assert sanitize_vocoder_key("vocoder.ups.0.weight") == "ups.0.weight"
+        # The main generator, itself named "vocoder", flattens to the root
+        # (the published 2.3 layout); its siblings keep their one level.
+        assert sanitize_vocoder_key("vocoder.vocoder.act_post.act.alpha") == "act_post.act.alpha"
+        assert (
+            sanitize_vocoder_key("vocoder.bwe_generator.act_post.act.alpha")
+            == "bwe_generator.act_post.act.alpha"
+        )
+        assert sanitize_vocoder_key("vocoder.mel_stft.mel_basis") == "mel_stft.mel_basis"
         assert sanitize_vocoder_key("audio_vae.decoder.conv_in.conv.bias") is None
 
 

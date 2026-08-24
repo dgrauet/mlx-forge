@@ -11,9 +11,11 @@ The one difference for those two is the source prefix: 2.3's monolith names a
 VAE weight `vae.decoder.…`, while 2.5's per-role file names it `decoder.…`.
 The test bridges that and asserts everything downstream of it is identical.
 
-The vocoder is the deliberate exception:
-`test_vocoder_deliberately_diverges_from_2_3` below asserts a *divergence*
-from 2.3, not parity with it — see `sanitize_vocoder_key`'s docstring for why.
+The vocoder was briefly a deliberate exception (the 2.5 sanitizer kept the
+main generator nested one level deeper than 2.3's flattened layout); the
+ltx-2-mlx loader crashed on the 667 renamed parameters, settling the
+question: the 2.3 emitted layout is the published contract, and the vocoder
+is under the same parity lock as everything else.
 """
 
 import json
@@ -54,27 +56,23 @@ class TestSanitizerParity:
                 continue
             assert ltx_25.sanitize_audio_vae_key(key) == ltx_23.sanitize_audio_vae_key(key), key
 
-    def test_vocoder_deliberately_diverges_from_2_3(self):
-        # 2.3's sanitizer uses key.replace("vocoder.", "") — it strips every
-        # occurrence, not just the leading one, so the vocoder file's two
-        # sibling generators (the main one, itself named "vocoder", and
-        # "bwe_generator") land at different depths: the main one flattens to
-        # the component root ("act_post..."), its sibling keeps one level
-        # ("bwe_generator.act_post..."). That is a known latent defect, kept
-        # in ltx_23.py because its published packs and the ComfyUI nodes that
-        # load them already depend on the flattened names — changing it there
-        # is a breaking change to a shipped artefact.
-        #
-        # 2.5 has no runtime yet, so nothing depends on the flattened form,
-        # and sanitize_vocoder_key strips only the leading "vocoder." — both
-        # generators keep their name at the same depth. This test pins that
-        # difference explicitly rather than letting a future "fix" for 2.5
-        # silently re-import 2.3's bug via a parity assertion like the ones
-        # above.
-        key = "vocoder.vocoder.act_post.act.alpha"
-        assert key in keys(AUDIO)
-        assert ltx_25.sanitize_vocoder_key(key) == "vocoder.act_post.act.alpha"
-        assert ltx_23.sanitize_vocoder_key(key) == "act_post.act.alpha"
+    def test_vocoder(self):
+        # The regression that shipped: the main generator (itself named
+        # "vocoder") must flatten to the component root exactly as 2.3 emits
+        # it — the loader crashed on the nested form. Architecture identical,
+        # so ANY naming divergence from 2.3 here is a recipe bug.
+        for key in keys(AUDIO):
+            if not key.startswith("vocoder."):
+                continue
+            assert ltx_25.sanitize_vocoder_key(key) == ltx_23.sanitize_vocoder_key(key), key
+
+    def test_vocoder_sanitized_keys_do_not_collide(self):
+        # Flattening the main generator moves 667 keys to the component
+        # root; none may collide with bwe_generator.* or mel_stft.*.
+        sanitized = [
+            ltx_25.sanitize_vocoder_key(k) for k in keys(AUDIO) if k.startswith("vocoder.")
+        ]
+        assert len(sanitized) == len(set(sanitized))
 
     def test_the_parity_claim_is_not_vacuous(self):
         # A parity test over an empty key set passes and proves nothing. The

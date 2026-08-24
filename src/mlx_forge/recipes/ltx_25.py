@@ -241,29 +241,32 @@ def sanitize_audio_vae_key(key: str) -> str | None:
 
 
 def sanitize_vocoder_key(key: str) -> str | None:
-    """Convert a vocoder key to MLX format.
+    """Convert a vocoder key to MLX format — 2.3's emitted layout, exactly.
 
-    A single prefix strip, not LTX-2.3's `key.replace("vocoder.", "")`. The
-    vocoder file holds two sibling generators of identical internal
-    structure — the main HiFiGAN-style one, named `vocoder`, and a
-    bandwidth-extension one, named `bwe_generator` — under a shared
-    `vocoder.` container: `vocoder.vocoder.act_post...` and
-    `vocoder.bwe_generator.act_post...`. `replace()` strips every occurrence
-    of "vocoder.", so it flattens the first generator to the component root
-    (`act_post...`) while its sibling keeps its name one level down
-    (`bwe_generator.act_post...`) — two parallel modules land at different
-    depths, and no MLX module tree can mirror upstream that way. A single
-    strip keeps both at the same depth: `vocoder.act_post...` and
-    `bwe_generator.act_post...`.
+    The upstream file holds three children under a shared "vocoder."
+    container: the main HiFiGAN-style generator, itself named "vocoder"
+    (667 tensors), its sibling "bwe_generator" (557), and "mel_stft" (3).
+    The published LTX-2 vocoder contract — what ltx-2-mlx and the 2.3 packs
+    ship and load — flattens the main generator to the component root:
+    `vocoder.act_post...`, `bwe_generator.act_post...`, `mel_stft...`.
 
-    2.3's sanitizer keeps `replace()` regardless — its published packs and
-    the ComfyUI nodes that load them already depend on the flattened names,
-    so fixing it there is a breaking change to a shipped artefact. 2.5 has no
-    runtime yet, so getting it right costs nothing here.
+    An earlier revision of this recipe kept the main generator nested
+    (`vocoder.vocoder.act_post...`), reading the extra level as sibling
+    symmetry worth preserving; the loader crashed on the 667 unknown
+    parameters. Same architecture, same names — the flat base IS the
+    contract, and test_ltx25_sanitizer_parity pins it against ltx_23.
+
+    Implemented as two positional strips rather than 2.3's
+    `key.replace("vocoder.", "")`: the result is identical on every real
+    key, but a hypothetical interior ".vocoder." deeper in a name cannot be
+    mangled by it.
     """
-    if key.startswith("vocoder."):
-        return key[len("vocoder.") :]
-    return None
+    if not key.startswith("vocoder."):
+        return None
+    k = key[len("vocoder.") :]
+    if k.startswith("vocoder."):
+        k = k[len("vocoder.") :]
+    return k
 
 
 # ---------------------------------------------------------------------------
@@ -1244,15 +1247,13 @@ TEXT_ENCODER_ASSET_FILES = tuple(ASSET_FILENAMES.values())
 #: sanitizers strip "encoder."/"decoder." from the front of every key,
 #: leaving nothing PyTorch-shaped to look for, so they are not in this list.
 #:
-#: `vocoder` is deliberately absent. Its upstream file holds two sibling
-#: generators of identical structure under a shared "vocoder." container: the
-#: main one, itself named "vocoder", and "bwe_generator". sanitize_vocoder_key
-#: strips only the single leading "vocoder." (see its docstring), so the main
-#: generator's keys legitimately keep a second "vocoder." one level down —
-#: `vocoder.vocoder.ups.5.weight` is correct output, not a leaked prefix.
-#: There is no unsanitized-prefix condition this check could distinguish from
-#: correct output, so it has nothing to assert here.
-_LEAKED_PREFIX_COMPONENTS = ("audio_vae", "duration_head")
+#: `vocoder` is included since the sanitizer flattens the main generator to
+#: the component root (the published LTX-2 layout): an emitted
+#: `vocoder.vocoder.*` key now means exactly what this check exists to catch
+#: — a sanitizer that failed to strip the internal level. That defect shipped
+#: once (the loader crashed on 667 unknown parameters), which is why the
+#: check gates it now.
+_LEAKED_PREFIX_COMPONENTS = ("audio_vae", "duration_head", "vocoder")
 
 #: Components with conv weights worth layout-checking, and at what rank.
 #: Video VAEs are Conv3d; audio VAE and vocoder are Conv1d/Conv2d family but
