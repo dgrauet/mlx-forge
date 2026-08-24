@@ -73,6 +73,21 @@ class TestSplitModel:
         assert data["split"] is True
         assert "transformer.safetensors" in data["files"]
 
+    def test_marker_merges_existing_manifest(self, tmp_path):
+        """split must not clobber convert's manifest (recipe, gating, licence)."""
+        weights = {"transformer.weight": mx.zeros((2, 2))}
+        self._create_unified(tmp_path, weights)
+        marker = tmp_path / "split_model.json"
+        marker.write_text(json.dumps({"recipe": "ltx-2.3", "gated": True}))
+
+        split_model(tmp_path, {"transformer": "transformer.safetensors"})
+
+        data = json.loads(marker.read_text())
+        assert data["recipe"] == "ltx-2.3"
+        assert data["gated"] is True
+        assert data["split"] is True
+        assert data["files"]["transformer.safetensors"] == 1
+
     def test_missing_source_raises(self, tmp_path):
         with pytest.raises(SystemExit):
             split_model(tmp_path, {"a": "a.safetensors"})

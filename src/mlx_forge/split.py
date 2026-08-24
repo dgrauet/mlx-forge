@@ -76,17 +76,19 @@ def split_model(
         mx.save_safetensors(str(output_path), weights)
         result[filename] = len(weights)
 
-    # Write marker file
+    # Write marker file — merge with an existing manifest rather than clobber
+    # it: convert writes recipe identity, gating and licence provenance into
+    # split_model.json, and losing the gating declaration here would let a
+    # gated pack's first upload go through open.
     marker = model_dir / "split_model.json"
+    info: dict = {}
+    if marker.exists():
+        with open(marker) as f:
+            info = json.load(f)
+    info["split"] = True
+    info["files"] = dict(result)
     with open(marker, "w") as f:
-        json.dump(
-            {
-                "split": True,
-                "files": {name: count for name, count in result.items()},
-            },
-            f,
-            indent=2,
-        )
+        json.dump(info, f, indent=2)
 
     print(f"\nSplit complete. Original {source_filename} can be removed to save disk space.")
     print(f"To remove: rm '{unified_path}'")
