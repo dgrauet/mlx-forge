@@ -846,10 +846,28 @@ def _full_pack(tmp_path, *, omit=(), quantized_counts=None):
                 f"transformer_blocks.{i}.attn1.to_q.weight": mx.zeros((4, 4))
                 for i in range(ltx_25.TRANSFORMER_BLOCK_COUNT)
             }
-        mx.save_safetensors(str(tmp_path / ltx_25.VARIANT_FILENAMES["dev"]), transformer_weights)
+        # Real packs carry the upstream model_version in the safetensors
+        # header (validate checks it); mirror that.
+        mx.save_safetensors(
+            str(tmp_path / ltx_25.VARIANT_FILENAMES["dev"]),
+            transformer_weights,
+            metadata={"model_version": "2.5.0"},
+        )
 
     (tmp_path / "split_model.json").write_text(
         _json.dumps({"recipe": "ltx-2.5", "transformer_variants": ["dev"]})
+    )
+    # Real packs carry embedded_config.json with model_version at the root
+    # (validate checks both); the transformer section mirrors the lowercased
+    # norm-type casing the recipe emits.
+    (tmp_path / "embedded_config.json").write_text(
+        _json.dumps(
+            {
+                "transformer": {"text_encoder_norm_type": "per_token_rms"},
+                "scheduler": {},
+                "model_version": "2.5.0",
+            }
+        )
     )
     return tmp_path
 

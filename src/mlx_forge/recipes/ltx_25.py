@@ -638,6 +638,31 @@ def output_size_mb(variants: list[str], *, skip_shared: bool, lora: list[str] | 
 # ---------------------------------------------------------------------------
 
 
+def _embedded_config_payload(raw_config: str, model_version: str | None) -> dict:
+    """The embedded_config.json payload: the upstream config, plus two
+    consumer-driven touches.
+
+    Verbatim except for exactly these, both requested by the consuming
+    runtime (ltx-2-mlx) after end-to-end validation:
+
+    * `model_version` is added at the root — the upstream ecosystem gates
+      behaviour on it (e.g. ANCESTRAL_SAMPLER_SINCE_VERSION), and the value
+      comes from the same checkpoint header as the config itself.
+    * `transformer.text_encoder_norm_type` is lowercased to the 2.3 casing
+      ("per_token_rms") that every published LTX config uses; 2.5's header
+      carries the enum name ("PER_TOKEN_RMS").
+
+    Nothing else is renamed, filtered, or added.
+    """
+    config = json.loads(raw_config)
+    norm_type = config.get("transformer", {}).get("text_encoder_norm_type")
+    if isinstance(norm_type, str):
+        config["transformer"]["text_encoder_norm_type"] = norm_type.lower()
+    if model_version:
+        config["model_version"] = model_version
+    return config
+
+
 def read_header_metadata(path: Path) -> dict:
     """The `__metadata__` mapping of a local safetensors file.
 
@@ -646,7 +671,10 @@ def read_header_metadata(path: Path) -> dict:
     with open(path, "rb") as handle:
         length = int.from_bytes(handle.read(8), "little")
         header = json.loads(handle.read(length))
-    return header.get("__metadata__", {})
+    # `or {}`, not a .get default: mx.save_safetensors writes an explicit
+    # `"__metadata__": null` when no metadata is passed, and .get's default
+    # does not apply to a present-but-null key.
+    return header.get("__metadata__") or {}
 
 
 def _remote_header_metadata(repo: str, filename: str) -> dict:
@@ -906,6 +934,7 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
     download_dir = _source_download_dir(output_dir)
     dit_config_raw: str | None = None
     dit_config_variant: str | None = None
+    dit_model_version: str | None = None
     for variant in variants:
         path = UPSTREAM_TRANSFORMERS[variant]
         local = download_dir / path
@@ -915,6 +944,7 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
         else:
             print(f"  Fetching header over HTTP: {path}")
             header_metadata = _remote_header_metadata(UPSTREAM_REPO, path)
+        dit_model_version = header_metadata.get("model_version") or dit_model_version
         raw_config = header_metadata.get("config")
         if not raw_config:
             raise SystemExit(
@@ -943,7 +973,11 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
         return
 
     with open(config_path, "w") as handle:
-        json.dump(json.loads(dit_config_raw), handle, indent=2)
+        json.dump(
+            _embedded_config_payload(dit_config_raw, dit_model_version),
+            handle,
+            indent=2,
+        )
     print(f"\nWrote {config_path}")
 
 
@@ -1015,6 +1049,7 @@ def convert(args) -> None:
     # because a pack carries exactly one embedded_config.json.
     dit_config_raw: str | None = None
     dit_config_variant: str | None = None
+    dit_model_version: str | None = None
     for source in _selected_sources(variants, skip_shared=args.skip_shared):
         download_hf_files(UPSTREAM_REPO, [source.path], download_dir)
         local = download_dir / source.path
@@ -1052,6 +1087,7 @@ def convert(args) -> None:
 
             if source.path in UPSTREAM_TRANSFORMERS.values():
                 variant = _TRANSFORMER_VARIANT_BY_PATH[source.path]
+                dit_model_version = header_metadata.get("model_version") or dit_model_version
                 raw_config = header_metadata.get("config")
                 if not raw_config:
                     raise SystemExit(
@@ -1110,6 +1146,17 @@ def convert(args) -> None:
                     sanitizer=SANITIZERS[component_name],
                     transform=transform,
                     output_filename=output_filename,
+                    # The upstream ecosystem gates behaviour on model_version
+                    # (e.g. ANCESTRAL_SAMPLER_SINCE_VERSION); carry it — and
+                    # the config blob — from this source file's header into
+                    # every file converted from it. Only what the source
+                    # actually carries is propagated, verbatim.
+                    metadata={
+                        k: header_metadata[k]
+                        for k in ("model_version", "config")
+                        if header_metadata.get(k)
+                    }
+                    or None,
                 )
 
             # The upscalers carry their own config in the checkpoint's
@@ -1120,7 +1167,9 @@ def convert(args) -> None:
                     component_name = source.components[0]
                     config_path = output_dir / f"{component_name}_config.json"
                     with open(config_path, "w") as handle:
-                        json.dump(json.loads(config), handle, indent=2)
+                        # Wrapped under "config" like the 2.3 recipe emits its
+                        # upscaler configs, so consumers see a single shape.
+                        json.dump({"config": json.loads(config)}, handle, indent=2)
 
             del weights
             gc.collect()
@@ -1132,14 +1181,19 @@ def convert(args) -> None:
     # LTXModelConfig.from_checkpoint_dir(), which looks for
     # embedded_config.json (then config.json) at the pack root; without it,
     # that reader falls back to LTX-2.3 defaults, silently, which are wrong
-    # for 2.5. Written verbatim — no renaming, filtering, or added fields —
+    # for 2.5. Written through _embedded_config_payload (verbatim except the
+    # two consumer-driven touches its docstring lists),
     # once every selected transformer's raw config has been checked to agree
     # (dit_config_raw is None only if no transformer was selected, which
     # SOURCE_FILES makes impossible: --variant always names at least one).
     if dit_config_raw is not None:
         config_path = output_dir / "embedded_config.json"
         with open(config_path, "w") as handle:
-            json.dump(json.loads(dit_config_raw), handle, indent=2)
+            json.dump(
+                _embedded_config_payload(dit_config_raw, dit_model_version),
+                handle,
+                indent=2,
+            )
 
     # LoRAs ship as-is: no conversion, just downloaded and copied under their
     # upstream basename. `_selected_loras` empties this under --skip-shared or
@@ -1405,6 +1459,14 @@ def validate(args) -> None:
             gc.collect()
             mx.clear_cache()
 
+    print("\n== Embedded Config ==")
+    if validate_file_exists(model_dir, "embedded_config.json", result):
+        embedded = json.loads((model_dir / "embedded_config.json").read_text())
+        result.check(
+            bool(embedded.get("model_version")),
+            "embedded_config.json carries model_version",
+        )
+
     print("\n== Transformer Variants ==")
     variants = split_info.get("transformer_variants") or list(VARIANT_FILENAMES)
     qconfig = read_quantize_config(model_dir)
@@ -1414,6 +1476,11 @@ def validate(args) -> None:
         filename = VARIANT_FILENAMES[variant]
         if not validate_file_exists(model_dir, filename, result):
             continue
+        header_md = read_header_metadata(model_dir / filename)
+        result.check(
+            bool(header_md.get("model_version")),
+            f"{variant}: safetensors header carries model_version",
+        )
         weights = load_safetensors(model_dir / filename)
         # Structural checks, quantized or not: a sanitizer regression is
         # invisible to every other check here. The patterns are exactly what

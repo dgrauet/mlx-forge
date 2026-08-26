@@ -605,6 +605,7 @@ def process_component(
     sanitizer: Callable[[str], str | None],
     transform: WeightTransform | None = None,
     output_filename: str | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> int:
     """Process one component: sanitize keys, optionally transform, materialize, save.
 
@@ -617,6 +618,9 @@ def process_component(
         sanitizer: Function to rename keys. Returns None to skip a key.
         transform: Optional per-weight transform (e.g. conv transposition).
         output_filename: Override output filename (default: {component_name}.safetensors).
+        metadata: Optional string mapping written as the file's safetensors
+            `__metadata__` — e.g. the upstream checkpoint's model_version and
+            config blob, which downstream runtimes gate behaviour on.
 
     Returns:
         Number of weights saved.
@@ -643,7 +647,10 @@ def process_component(
     fname = output_filename or f"{component_name}.safetensors"
     output_file = output_dir / fname
     print(f"  Saving {count} weights to {output_file.name}...")
-    mx.save_safetensors(str(output_file), component_weights)
+    if metadata:
+        mx.save_safetensors(str(output_file), component_weights, metadata=metadata)
+    else:
+        mx.save_safetensors(str(output_file), component_weights)
 
     del component_weights
     gc.collect()
@@ -679,6 +686,12 @@ def quantize_component(
         return
 
     print(f"\n  Quantizing {component_name} to int{bits} (group_size={group_size})...")
+    # The conversion may have written upstream metadata (model_version, config)
+    # into the file's header; mx.load drops it, so read it off the header now
+    # and carry it through the rewrite — quantizing must not strip it.
+    with open(filepath, "rb") as handle:
+        header_length = int.from_bytes(handle.read(8), "little")
+        existing_metadata = json.loads(handle.read(header_length)).get("__metadata__")
     weights = load_safetensors(filepath)
 
     # quantize_weights() empties `weights` as it runs (see its docstring) to keep
@@ -691,7 +704,10 @@ def quantize_component(
     )
 
     print(f"  Saving quantized {component_name} ({len(result)} keys)...")
-    mx.save_safetensors(str(filepath), result)
+    if existing_metadata:
+        mx.save_safetensors(str(filepath), result, metadata=existing_metadata)
+    else:
+        mx.save_safetensors(str(filepath), result)
 
     del result, weights
     gc.collect()
