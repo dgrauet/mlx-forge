@@ -74,10 +74,14 @@ METADATA = RecipeMetadata(
     # our 2.3 packs ship. Deliberately the plain-text LICENSE, not the
     # LICENSE.md the upstream card links: it is the rendering whose bytes we
     # distribute, and the only one convert() can check against the weights.
-    license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+    # Upstream restructured its GitHub repo in late August 2026: LICENSE
+    # became a two-entry index, and the LTX-2.x agreement (August 11, 2026 —
+    # the text every 2.5 checkpoint embeds) moved to LICENSE-2_x. Same terms,
+    # re-indented; verify_embedded_license still checks word-for-word.
+    license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
     license_file="LICENSE",
     # LTX-2.5 publishes no LICENSE on the Hub, so the copy comes from GitHub.
-    license_source="github:Lightricks/LTX-2/LICENSE",
+    license_source="github:Lightricks/LTX-2/LICENSE-2_x",
     quantization_scope="transformer block and text-encoder Linear weights",
     gated=True,
 )
@@ -710,13 +714,16 @@ def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
     This is what makes that defensible: the text we distribute is provably the
     agreement attached to the weights we converted.
 
-    The comparison is normalised — `rstrip` per line — because the two
-    renderings differ by trailing whitespace and a final newline (34 441 bytes
-    on GitHub against 34 562 embedded, same 580 lines, identical once trailing
-    whitespace is removed). That is a weaker guarantee than byte equality, and
-    it is stated here rather than only in a design document: whitespace is not
-    terms, but a check that tolerates anything tolerates too much, so nothing
-    else — leading indentation included — is normalised away.
+    The comparison is normalised — `strip` per line — because upstream's
+    renderings of the same 580 lines have differed twice by whitespace alone:
+    trailing space and a final newline originally, then leading indentation
+    when the agreement moved from LICENSE to LICENSE-2_x in August 2026
+    (the embedded text keeps the old centred indentation; the new file is
+    flush-left, word-for-word identical). That is a weaker guarantee than
+    byte equality, and it is stated here rather than only in a design
+    document: whitespace is not terms, but a check that tolerates anything
+    tolerates too much, so nothing else — words, line structure, punctuation
+    — is normalised away.
 
     Raises:
         SystemExit: The checkpoint carries no licence, or its text differs.
@@ -728,8 +735,8 @@ def verify_embedded_license(header_metadata: dict, license_path: Path) -> None:
             "so the copy we ship cannot be checked against it. Refusing to convert."
         )
 
-    shipped_lines = [line.rstrip() for line in license_path.read_text().splitlines()]
-    embedded_lines = [line.rstrip() for line in embedded.splitlines()]
+    shipped_lines = [line.strip() for line in license_path.read_text().splitlines()]
+    embedded_lines = [line.strip() for line in embedded.splitlines()]
     if shipped_lines != embedded_lines:
         raise SystemExit(
             f"ERROR: {license_path} does not match the agreement embedded in the weights. "

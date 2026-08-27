@@ -132,9 +132,9 @@ declaration — never a paraphrase, never a guess:
 ```python
 license="other",                    # SPDX id; "other" identifies nothing alone
 license_name="ltx-2-community-license-agreement",
-license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x",
 license_file="LICENSE",             # or a tuple: ("LICENSE", "Notice.txt")
-license_source="github:Lightricks/LTX-2/LICENSE",  # when upstream ships none on the Hub
+license_source="github:Lightricks/LTX-2/LICENSE-2_x",  # when upstream ships none on the Hub
 ```
 
 An upstream that publishes its agreement outside the Hub — LTX-2.5 has no

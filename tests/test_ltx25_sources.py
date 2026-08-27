@@ -196,6 +196,14 @@ class TestEmbeddedLicenceCheck:
         )
         verify_embedded_license({"license": AUGUST}, shipped)  # must not raise
 
+    def test_accepts_a_text_differing_only_in_indentation(self, tmp_path):
+        # August 2026: upstream moved the agreement to LICENSE-2_x and
+        # re-rendered it flush-left; the embedded text keeps the centred
+        # indentation. Word-for-word identical — must pass.
+        shipped = tmp_path / "LICENSE"
+        shipped.write_text("LTX-2.x Community License Agreement\nLicense date: August 11, 2026\n")
+        verify_embedded_license({"license": AUGUST}, shipped)  # must not raise
+
     def test_rejects_a_text_whose_words_differ(self, tmp_path):
         shipped = tmp_path / "LICENSE"
         shipped.write_text("LTX-2 Community License Agreement\nLicense date: January 5, 2026\n")

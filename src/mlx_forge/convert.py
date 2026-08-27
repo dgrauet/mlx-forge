@@ -304,18 +304,23 @@ def ensure_license_file(
 
         if github:
             repo, path = github
-            if Path(path).name != name:
-                # license_source names exactly one GitHub file. A declared
-                # license_file whose basename differs from that file (the
-                # multi-file case docs/recipe-anatomy.md documents for
-                # Hunyuan3D's ("LICENSE", "Notice.txt")) would otherwise fetch
+            if len(declared) > 1 and Path(path).name != name:
+                # license_source names exactly one GitHub file. With several
+                # declared license_file entries (the multi-file case
+                # docs/recipe-anatomy.md documents for Hunyuan3D's
+                # ("LICENSE", "Notice.txt")) a basename mismatch would fetch
                 # the same path again and write its bytes under the wrong
                 # name — a silently wrong licence file recorded as verified.
                 # Refuse loudly instead; see RecipeMetadata.license_source.
+                # With a single declared entry the mapping is unambiguous:
+                # fetch the named path, ship it under the declared name —
+                # upstream renaming LICENSE to LICENSE-2_x must not force
+                # the shipped filename to follow.
                 return refuse(
                     f"license_source names {path}, which does not match the "
-                    f"declared license_file entry {name!r}; a GitHub "
-                    "license_source can only describe a single file"
+                    f"declared license_file entries {sorted(declared)}; with "
+                    "several entries a GitHub license_source cannot say which "
+                    "one it describes"
                 )
             try:
                 content, revision = fetch_github_license(repo, path)

@@ -126,6 +126,43 @@ class TestFetchFromGithub:
         with pytest.raises(SystemExit, match="undocumented source"):
             ensure_license_file(tmp_path, info)
 
+    def test_a_renamed_upstream_file_ships_under_the_declared_name(self, tmp_path, monkeypatch):
+        # Upstream renamed LICENSE to LICENSE-2_x (August 2026 restructure);
+        # with a single declared license_file entry the mapping is
+        # unambiguous: fetch the named path, ship under the declared name.
+        monkeypatch.setattr(
+            convert_mod,
+            "fetch_github_license",
+            lambda repo, path: (LICENCE_TEXT, "abc123"),
+        )
+        info = {
+            "source": "Lightricks/LTX-2.5",
+            "license_file": ["LICENSE"],
+            "license_source": "github:Lightricks/LTX-2/LICENSE-2_x",
+        }
+
+        written = ensure_license_file(tmp_path, info)
+
+        assert written == [tmp_path / "LICENSE"]
+        assert (tmp_path / "LICENSE").read_bytes() == LICENCE_TEXT
+
+    def test_several_declared_files_still_refuse_a_mismatched_source(self, tmp_path, monkeypatch):
+        # The multi-file guard stays: with two declared entries the source
+        # cannot say which one it describes.
+        monkeypatch.setattr(
+            convert_mod,
+            "fetch_github_license",
+            lambda repo, path: (LICENCE_TEXT, "abc123"),
+        )
+        info = {
+            "source": "a/b",
+            "license_file": ["LICENSE", "Notice.txt"],
+            "license_source": "github:o/r/LICENSE-2_x",
+        }
+
+        with pytest.raises(SystemExit, match="cannot say which"):
+            ensure_license_file(tmp_path, info)
+
     def test_a_hub_source_is_untouched_by_the_new_branch(self, tmp_path, monkeypatch):
         # The ten existing recipes declare no license_source; their path must
         # not acquire a GitHub detour.
