@@ -27,6 +27,14 @@ def test_keep_reduces_to_indices_zero_and_one():
     assert m.keep("norm.weight")
 
 
+def test_keep_only_treats_all_digit_segments_as_indices():
+    m = _load()
+    assert m.keep("t5_encoder.block.0.w")
+    assert m.keep("vae_lightvae_v2.decoder.1.w")
+    assert not m.keep("blocks.2.w")
+    assert m.keep("norm.weight")
+
+
 def test_harvest_produces_the_fixture_shape(monkeypatch):
     m = _load()
     header = {

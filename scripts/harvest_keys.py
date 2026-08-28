@@ -7,9 +7,10 @@ safetensors header is read — an 8-byte length prefix and the JSON header,
 fetched with HTTP Range requests — so this costs kilobytes against any
 checkpoint size.
 
-Keys are reduced by a deterministic rule: keep every key whose numeric path
-components are all 0 or 1, plus every key with no numeric component. Blocks 0
-and 1 exhibit every naming pattern a repeated stack has.
+Keys are reduced by a deterministic rule: keep every key whose all-digit
+dot-separated path segments (indices, not digits embedded in a name like
+"t5_encoder" or "ssv2_probe") are all 0 or 1. Blocks 0 and 1 exhibit every
+naming pattern a repeated stack has.
 
 Maintenance tool, not a test: needs network access and an HF login.
 
@@ -24,19 +25,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import urllib.request
 from pathlib import Path
 
 from huggingface_hub import hf_hub_url
 from huggingface_hub.utils import build_hf_headers
 
-_INDEX = re.compile(r"\d+")
-
 
 def keep(key: str) -> bool:
-    """Whether this key survives index reduction (all numeric parts are 0 or 1)."""
-    return all(int(n) <= 1 for n in _INDEX.findall(key))
+    """Whether this key survives index reduction: every all-digit path segment is 0 or 1."""
+    return all(int(seg) <= 1 for seg in key.split(".") if seg.isdigit())
 
 
 def read_header(repo: str, filename: str) -> dict:
