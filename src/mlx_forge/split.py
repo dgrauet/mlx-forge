@@ -6,6 +6,7 @@ to be loaded independently without pulling the entire file into memory.
 
 from __future__ import annotations
 
+import gc
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import cast
 import mlx.core as mx
 from tqdm import tqdm
 
-from .quantize import format_bytes
+from .quantize import _materialize, format_bytes
 
 
 def split_model(
@@ -73,8 +74,15 @@ def split_model(
         output_path = model_dir / filename
         total_bytes = sum(v.nbytes for v in weights.values())
         tqdm.write(f"Saving: {filename} ({len(weights)} tensors, {format_bytes(total_bytes)})")
+        # Lazy (mmap-backed) tensors save as zeros if anything evicts their
+        # buffers first — the same rule every recipe's process_component
+        # follows; the mmap has kept this path safe by luck, not by design.
+        _materialize(*weights.values())
         mx.save_safetensors(str(output_path), weights)
         result[filename] = len(weights)
+        weights.clear()
+        gc.collect()
+        mx.clear_cache()
 
     # Write marker file — merge with an existing manifest rather than clobber
     # it: convert writes recipe identity, gating and licence provenance into

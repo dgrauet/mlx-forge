@@ -118,3 +118,23 @@ class TestSplitModel:
 
         result = split_model(tmp_path, {"encoder": "encoder.safetensors"})
         assert result["encoder.safetensors"] == 3
+
+    def test_every_component_is_materialized_before_save(self, tmp_path, monkeypatch):
+        """CLAUDE.md: always materialize before mx.save_safetensors. Lazy
+        tensors save as zeros; split must not be the one path that skips it."""
+        import mlx_forge.split as split_mod
+
+        seen: list[int] = []
+        real = split_mod._materialize
+
+        def spy(*tensors):
+            seen.append(len(tensors))
+            real(*tensors)
+
+        monkeypatch.setattr(split_mod, "_materialize", spy)
+        weights = {"a.w": mx.ones((2, 2)), "b.w": mx.ones((2, 2)), "b.v": mx.ones((2,))}
+        self._create_unified(tmp_path, weights)
+
+        split_model(tmp_path, {"a": "a.safetensors", "b": "b.safetensors"})
+
+        assert seen == [1, 2]  # one call per component, all its tensors at once
