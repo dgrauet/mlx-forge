@@ -216,3 +216,30 @@ class TestShowCardDiffErrors:
         with pytest.raises(SystemExit):
             self._call(monkeypatch, hf_errors.HfHubHTTPError("503", response=MagicMock()))
         assert "has no card yet" not in capsys.readouterr().out
+
+
+class TestCardOnlyListing:
+    """In --card-only mode the remote is the whole truth; offline must not
+    silently publish local sizes."""
+
+    def test_offline_card_only_aborts(self, tmp_path):
+        from huggingface_hub.errors import HfHubHTTPError
+
+        import mlx_forge.cli as cli_mod
+
+        api = MagicMock()
+        api.model_info.side_effect = HfHubHTTPError("offline", response=MagicMock())
+        (tmp_path / "split_model.json").write_text("{}")
+        with pytest.raises(SystemExit):
+            cli_mod._card_file_listing(api, "acme/demo", tmp_path, card_only=True)
+
+    def test_offline_full_upload_falls_back_to_local(self, tmp_path):
+        from huggingface_hub.errors import HfHubHTTPError
+
+        import mlx_forge.cli as cli_mod
+
+        api = MagicMock()
+        api.model_info.side_effect = HfHubHTTPError("offline", response=MagicMock())
+        (tmp_path / "a.safetensors").write_bytes(b"x" * 4)
+        listing = cli_mod._card_file_listing(api, "acme/demo", tmp_path, card_only=False)
+        assert listing == {"a.safetensors": 4}

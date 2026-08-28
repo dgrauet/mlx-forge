@@ -403,8 +403,15 @@ def _card_file_listing(api, repo_id: str, model_dir, *, card_only: bool = False)
         for sibling in info.siblings or []:
             if sibling.size is not None:
                 listing[sibling.rfilename] = sibling.size
-    except (RepositoryNotFoundError, HfHubHTTPError, OSError, ConnectionError):
-        pass  # new repo, or offline: the local directory is the whole story
+    except RepositoryNotFoundError:
+        pass  # new repo: the local directory is the whole story
+    except (HfHubHTTPError, OSError, ConnectionError) as e:
+        if card_only:
+            # This mode publishes nothing local, so a listing it cannot read
+            # is a listing it must not invent from the local directory.
+            print(f"ERROR: --card-only could not list {repo_id}: {e}")
+            raise SystemExit(1)
+        # A full upload is about to push the local files anyway.
 
     if card_only and listing:
         # ...except the files this mode does push. A refresh carries the licence
