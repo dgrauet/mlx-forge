@@ -389,16 +389,20 @@ def quantize_command(split_info: dict, bits: int | None) -> str | None:
 
 
 def sibling_links(split_info: dict, supplied: list[str] | None) -> list[str]:
-    """The operator's links that the recipe does not already declare.
+    """The repo's own links: the ones already recorded, plus the operator's new ones.
 
     Keeps the manifest holding only what is specific to this repo — its
     "q8 variant: ..." siblings — rather than a frozen copy of the declaration.
-    Order is preserved and duplicates dropped, so passing a declared link again
-    is a no-op instead of printing it twice.
+    Starts from the recorded `extra_links` so `--link` ADDS, as its help
+    promises: a refresh that supplies only the new sibling used to replace
+    the whole list, silently dropping the links recorded by earlier
+    refreshes (a three-repo family lost its bf16<->q8 cross-links the day
+    the q4 sibling was added). Order is preserved and duplicates dropped, so
+    passing a declared or already-recorded link again is a no-op.
     """
     declared = list(split_info.get("links") or [])
-    seen = set(declared)
-    out = []
+    out = list(split_info.get("extra_links") or [])
+    seen = set(declared) | set(out)
     for link in supplied or []:
         if link not in seen:
             seen.add(link)

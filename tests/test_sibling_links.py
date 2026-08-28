@@ -51,6 +51,37 @@ def test_the_recipe_stays_live_after_a_sibling_is_recorded(tmp_path):
     assert card_links(grown) == [*DECLARED, "Paper: https://arxiv.invalid/1", SIBLING]
 
 
+def test_a_new_sibling_adds_to_the_recorded_ones(tmp_path):
+    """Regression: supplying only the NEW sibling must not drop the old ones.
+
+    Refreshing a card with --link "q4 variant: ..." replaced the whole
+    extra_links list, silently dropping the "q8 variant" link recorded by an
+    earlier refresh — a three-repo family lost its cross-links the day its
+    third sibling was published.
+    """
+    q4 = "q4 variant: https://huggingface.co/acme/demo-mlx-q4"
+    info = _info(extra_links=[SIBLING])
+    (tmp_path / "split_model.json").write_text(json.dumps(info))
+
+    stored = persist_card_metadata(tmp_path, info, usage_url=None, links=[q4], cli_snippet=None)
+
+    assert stored["extra_links"] == [SIBLING, q4]
+    assert card_links(stored) == [*DECLARED, SIBLING, q4]
+
+
+def test_a_recorded_sibling_supplied_again_is_a_no_op(tmp_path):
+    info = _info(extra_links=[SIBLING])
+    (tmp_path / "split_model.json").write_text(json.dumps(info))
+    before = (tmp_path / "split_model.json").read_text()
+
+    stored = persist_card_metadata(
+        tmp_path, info, usage_url=None, links=[SIBLING], cli_snippet=None
+    )
+
+    assert stored["extra_links"] == [SIBLING]
+    assert (tmp_path / "split_model.json").read_text() == before  # nothing rewritten
+
+
 def test_a_link_the_recipe_already_declares_is_not_recorded_twice(tmp_path):
     info = _info()
     (tmp_path / "split_model.json").write_text(json.dumps(info))
