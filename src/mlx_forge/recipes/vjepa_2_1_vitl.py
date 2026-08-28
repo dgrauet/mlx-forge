@@ -60,11 +60,12 @@ from ..convert import (
     default_output_dir,
     load_torch_state_dict,
     print_output_summary,
+    process_component,
     quantize_component,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import _materialize, read_quantize_config, write_quantize_config
+from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 
 # Canonical Meta CDN checkpoint for the ViT-L RoPE V-JEPA 2.1 encoder (the
@@ -338,29 +339,32 @@ def convert(args) -> None:
 
     print(f"\nProcessing encoder ({len(enc_state)} keys)...")
     t0 = time.monotonic()
-    enc_weights: dict[str, mx.array] = {}
     transposed = 0
-    for key in enc_state:
-        new_key = sanitize_key(key)
-        if new_key is None:
-            continue
-        w = _to_mx(enc_state[key])
-        before = w.shape
-        w = transform_weight(new_key, w)
-        if w.shape != before:
+
+    def _counting_transform(new_key: str, weight: mx.array, _component: str) -> mx.array:
+        nonlocal transposed
+        before = weight.shape
+        weight = transform_weight(new_key, weight)
+        if weight.shape != before:
             transposed += 1
-        _materialize(w)  # CRITICAL: lazy tensors save as zeros otherwise
-        enc_weights[new_key] = w
+        return weight
 
-    enc_count = len(enc_weights)
+    # component_prefix=None: the published pack holds bare keys.
+    enc_count = process_component(
+        enc_state,
+        ENCODER_COMPONENT,
+        list(enc_state),
+        output_dir,
+        None,
+        sanitizer=sanitize_key,
+        transform=_counting_transform,
+        load_weight=_to_mx,
+        output_filename=OUTPUT_FILENAME,
+    )
     print(f"  {enc_count} weights, {transposed} conv weight(s) transposed")
-
-    enc_file = output_dir / OUTPUT_FILENAME
-    print(f"  Saving to {enc_file.name}...")
-    mx.save_safetensors(str(enc_file), enc_weights)
     print(f"  Done in {time.monotonic() - t0:.1f}s")
 
-    del enc_state, enc_weights
+    del enc_state
     gc.collect()
     mx.clear_cache()
 
@@ -371,22 +375,22 @@ def convert(args) -> None:
 
     print(f"\nProcessing predictor ({len(pred_state)} keys)...")
     t0 = time.monotonic()
-    pred_weights: dict[str, mx.array] = {}
-    for key, val in pred_state.items():
-        # No conv transpose needed — predictor is all Linear / LayerNorm / bare params.
-        w = _to_mx(val)
-        _materialize(w)  # CRITICAL: lazy tensors save as zeros otherwise
-        pred_weights[key] = w
-
-    pred_count = len(pred_weights)
+    # No conv transpose needed — predictor is all Linear / LayerNorm / bare params.
+    # _unwrap_predictor already stripped the upstream prefix: identity sanitizer.
+    pred_count = process_component(
+        pred_state,
+        PREDICTOR_COMPONENT,
+        list(pred_state),
+        output_dir,
+        None,
+        sanitizer=lambda key: key,
+        load_weight=_to_mx,
+        output_filename=PREDICTOR_OUTPUT_FILENAME,
+    )
     print(f"  {pred_count} weights (no conv transpose)")
-
-    pred_file = output_dir / PREDICTOR_OUTPUT_FILENAME
-    print(f"  Saving to {pred_file.name}...")
-    mx.save_safetensors(str(pred_file), pred_weights)
     print(f"  Done in {time.monotonic() - t0:.1f}s")
 
-    del raw, pred_state, pred_weights
+    del raw, pred_state
     gc.collect()
     mx.clear_cache()
 
