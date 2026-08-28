@@ -68,6 +68,10 @@ class TestDtype:
         with pytest.raises(TypeError, match="comp.*'a'"):
             _run(tmp_path, {"a": mx.zeros((2,))}, dtype=lambda k, w: "float16")
 
+    def test_static_nonsense_dtype_is_a_typeerror_naming_the_component(self, tmp_path):
+        with pytest.raises(TypeError, match="comp"):
+            _run(tmp_path, {"a": mx.zeros((2,))}, dtype="float16")
+
 
 class TestLoadWeight:
     def test_raw_values_go_through_the_adapter(self, tmp_path):

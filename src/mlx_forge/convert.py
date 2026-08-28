@@ -662,10 +662,16 @@ def process_component(
         if transform is not None:
             weight = transform(new_key, weight, component_name)
 
-        if dtype is None or isinstance(dtype, mx.Dtype):
+        if dtype is None:
+            target = None
+        elif isinstance(dtype, mx.Dtype):
             target = dtype
+        elif callable(dtype):
+            target = cast(Callable[[str, mx.array], "mx.Dtype | None"], dtype)(new_key, weight)
         else:
-            target = dtype(new_key, weight)
+            raise TypeError(
+                f"{component_name}: dtype must be None, an mx.Dtype or a callable, got {dtype!r}"
+            )
         if target is not None:
             if not isinstance(target, mx.Dtype):
                 raise TypeError(
