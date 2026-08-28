@@ -13,7 +13,7 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import mlx.core as mx
 from huggingface_hub import hf_hub_download
@@ -605,32 +605,46 @@ def process_component(
     component_name: str,
     keys: list[str],
     output_dir: Path,
-    component_prefix: str,
+    component_prefix: str | None,
     *,
     sanitizer: Callable[[str], str | None],
     transform: WeightTransform | None = None,
     output_filename: str | None = None,
     metadata: dict[str, str] | None = None,
+    dtype: mx.Dtype | Callable[[str, mx.array], mx.Dtype | None] | None = None,
+    load_weight: Callable[[Any], mx.array] | None = None,
+    finalize: Callable[[dict[str, mx.array]], dict[str, mx.array]] | None = None,
 ) -> int:
-    """Process one component: sanitize keys, optionally transform, materialize, save.
+    """Process one component: sanitize keys, adapt, transform, cast, materialize, save.
+
+    Per key, in this order — the order every recipe's former hand-rolled loop used:
+    `sanitizer` (None skips) → `load_weight` (raw value → mx.array, for torch/numpy
+    sources) → `transform` → `dtype` cast → store under
+    `f"{component_prefix}.{new_key}"`, or the bare `new_key` when
+    `component_prefix is None` (some published packs hold bare keys, and must
+    keep holding them). After the loop `finalize` may rewrite the whole dict
+    (QKV fusion), then everything is materialized in one call and saved.
 
     Args:
-        checkpoint_weights: Full checkpoint weight dict.
-        component_name: Name of the component (for display).
-        keys: List of checkpoint keys belonging to this component.
+        checkpoint_weights: Full checkpoint weight dict (values may be raw
+            torch/numpy objects when `load_weight` is given).
+        component_name: Name of the component (for display and the default filename).
+        keys: Checkpoint keys belonging to this component.
         output_dir: Directory to write the output safetensors file.
-        component_prefix: Prefix to prepend to sanitized keys in output.
-        sanitizer: Function to rename keys. Returns None to skip a key.
+        component_prefix: Prefix prepended to sanitized keys, or None for bare keys.
+        sanitizer: Renames keys; returns None to skip a key.
         transform: Optional per-weight transform (e.g. conv transposition).
-        output_filename: Override output filename (default: {component_name}.safetensors).
-        metadata: Optional string mapping written as the file's safetensors
-            `__metadata__` — e.g. the upstream checkpoint's model_version and
-            config blob, which downstream runtimes gate behaviour on.
+        output_filename: Override for `{component_name}.safetensors`.
+        metadata: Optional string mapping written as the file's `__metadata__`.
+        dtype: None keeps each weight's dtype; an mx.Dtype casts every weight;
+            a callable `(new_key, weight) -> mx.Dtype | None` decides per weight.
+        load_weight: Adapter applied to each raw value before anything else.
+        finalize: Receives the complete dict after the loop, returns the dict to save.
 
     Returns:
         Number of weights saved.
     """
-    component_weights = {}
+    component_weights: dict[str, mx.array] = {}
 
     for key in tqdm(keys, desc=f"  {component_name}", leave=False):
         new_key = sanitizer(key)
@@ -638,15 +652,42 @@ def process_component(
             continue
 
         weight = checkpoint_weights[key]
+        if load_weight is not None:
+            weight = load_weight(weight)
+        if not isinstance(weight, mx.array):
+            raise TypeError(
+                f"{component_name}: value for {key!r} is {type(weight).__name__}, not mx.array; "
+                "pass load_weight= to adapt torch/numpy sources"
+            )
         if transform is not None:
             weight = transform(new_key, weight, component_name)
 
-        _materialize(weight)
-        component_weights[f"{component_prefix}.{new_key}"] = weight
+        if dtype is None or isinstance(dtype, mx.Dtype):
+            target = dtype
+        else:
+            target = dtype(new_key, weight)
+        if target is not None:
+            if not isinstance(target, mx.Dtype):
+                raise TypeError(
+                    f"{component_name}: dtype policy returned {target!r} for {new_key!r}; "
+                    "expected an mx.Dtype or None"
+                )
+            weight = weight.astype(target)
+
+        stored_key = new_key if component_prefix is None else f"{component_prefix}.{new_key}"
+        component_weights[stored_key] = weight
+
+    if finalize is not None:
+        component_weights = finalize(component_weights)
+        if not isinstance(component_weights, dict):
+            got = type(component_weights).__name__
+            raise TypeError(f"{component_name}: finalize must return a dict, got {got}")
 
     if not component_weights:
         print(f"  No weights for {component_name}, skipping")
         return 0
+
+    _materialize(*component_weights.values())
 
     count = len(component_weights)
     fname = output_filename or f"{component_name}.safetensors"
