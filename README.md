@@ -132,13 +132,15 @@ mlx-forge quantize model.safetensors --key-prefix transformer. --bits 4
 
 ```
 mlx_forge/
-├── cli.py           # CLI entry point
+├── cli.py           # CLI entry point (convert/validate/split/quantize/upload)
 ├── convert.py       # Shared conversion utilities (download, load, classify, process)
+├── metadata.py      # RecipeMetadata: what a recipe declares about its model
 ├── transpose.py     # Conv weight layout transposition (generic)
 ├── quantize.py      # Quantization engine (generic)
 ├── split.py         # Model splitting (generic)
 ├── validate.py      # Validation framework (generic)
 ├── upload.py        # HuggingFace Hub upload + model card (generic)
+├── templates/       # Model card Jinja templates
 └── recipes/
     ├── __init__.py  # Registry (AVAILABLE_RECIPES) + the contract every recipe must satisfy
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation

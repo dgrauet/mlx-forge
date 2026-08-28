@@ -28,6 +28,7 @@ mlx-forge --help                               # list recipes & commands
 src/mlx_forge/
 ├── cli.py           # CLI dispatcher (convert/validate/split/quantize/upload)
 ├── convert.py       # Shared conversion utilities (download, load, classify, process)
+├── metadata.py      # RecipeMetadata: what a recipe declares about its model
 ├── transpose.py     # Conv weight layout transposition (PyTorch -> MLX)
 ├── quantize.py      # Generic quantization engine
 ├── split.py         # Split unified safetensors into components
