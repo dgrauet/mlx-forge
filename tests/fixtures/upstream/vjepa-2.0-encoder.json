@@ -1,0 +1,39 @@
+{
+  "vitl.pt": {
+    "dtypes": {
+      "F32": 292
+    },
+    "keys": [
+      "module.backbone.blocks.0.attn.proj.bias",
+      "module.backbone.blocks.0.attn.proj.weight",
+      "module.backbone.blocks.0.attn.qkv.bias",
+      "module.backbone.blocks.0.attn.qkv.weight",
+      "module.backbone.blocks.0.mlp.fc1.bias",
+      "module.backbone.blocks.0.mlp.fc1.weight",
+      "module.backbone.blocks.0.mlp.fc2.bias",
+      "module.backbone.blocks.0.mlp.fc2.weight",
+      "module.backbone.blocks.0.norm1.bias",
+      "module.backbone.blocks.0.norm1.weight",
+      "module.backbone.blocks.0.norm2.bias",
+      "module.backbone.blocks.0.norm2.weight",
+      "module.backbone.blocks.1.attn.proj.bias",
+      "module.backbone.blocks.1.attn.proj.weight",
+      "module.backbone.blocks.1.attn.qkv.bias",
+      "module.backbone.blocks.1.attn.qkv.weight",
+      "module.backbone.blocks.1.mlp.fc1.bias",
+      "module.backbone.blocks.1.mlp.fc1.weight",
+      "module.backbone.blocks.1.mlp.fc2.bias",
+      "module.backbone.blocks.1.mlp.fc2.weight",
+      "module.backbone.blocks.1.norm1.bias",
+      "module.backbone.blocks.1.norm1.weight",
+      "module.backbone.blocks.1.norm2.bias",
+      "module.backbone.blocks.1.norm2.weight",
+      "module.backbone.norm.bias",
+      "module.backbone.norm.weight",
+      "module.backbone.patch_embed.proj.bias",
+      "module.backbone.patch_embed.proj.weight"
+    ],
+    "metadata_keys": [],
+    "tensor_count": 292
+  }
+}

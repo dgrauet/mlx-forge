@@ -1,0 +1,56 @@
+{
+  "model.safetensors": {
+    "dtypes": {
+      "F32": 727
+    },
+    "keys": [
+      "embeddings.cls_token",
+      "embeddings.mask_token",
+      "embeddings.patch_embeddings.projection.bias",
+      "embeddings.patch_embeddings.projection.weight",
+      "embeddings.position_embeddings",
+      "encoder.layer.0.attention.attention.key.bias",
+      "encoder.layer.0.attention.attention.key.weight",
+      "encoder.layer.0.attention.attention.query.bias",
+      "encoder.layer.0.attention.attention.query.weight",
+      "encoder.layer.0.attention.attention.value.bias",
+      "encoder.layer.0.attention.attention.value.weight",
+      "encoder.layer.0.attention.output.dense.bias",
+      "encoder.layer.0.attention.output.dense.weight",
+      "encoder.layer.0.layer_scale1.lambda1",
+      "encoder.layer.0.layer_scale2.lambda1",
+      "encoder.layer.0.mlp.weights_in.bias",
+      "encoder.layer.0.mlp.weights_in.weight",
+      "encoder.layer.0.mlp.weights_out.bias",
+      "encoder.layer.0.mlp.weights_out.weight",
+      "encoder.layer.0.norm1.bias",
+      "encoder.layer.0.norm1.weight",
+      "encoder.layer.0.norm2.bias",
+      "encoder.layer.0.norm2.weight",
+      "encoder.layer.1.attention.attention.key.bias",
+      "encoder.layer.1.attention.attention.key.weight",
+      "encoder.layer.1.attention.attention.query.bias",
+      "encoder.layer.1.attention.attention.query.weight",
+      "encoder.layer.1.attention.attention.value.bias",
+      "encoder.layer.1.attention.attention.value.weight",
+      "encoder.layer.1.attention.output.dense.bias",
+      "encoder.layer.1.attention.output.dense.weight",
+      "encoder.layer.1.layer_scale1.lambda1",
+      "encoder.layer.1.layer_scale2.lambda1",
+      "encoder.layer.1.mlp.weights_in.bias",
+      "encoder.layer.1.mlp.weights_in.weight",
+      "encoder.layer.1.mlp.weights_out.bias",
+      "encoder.layer.1.mlp.weights_out.weight",
+      "encoder.layer.1.norm1.bias",
+      "encoder.layer.1.norm1.weight",
+      "encoder.layer.1.norm2.bias",
+      "encoder.layer.1.norm2.weight",
+      "layernorm.bias",
+      "layernorm.weight"
+    ],
+    "metadata_keys": [
+      "format"
+    ],
+    "tensor_count": 727
+  }
+}

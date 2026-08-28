@@ -1,0 +1,43 @@
+{
+  "Wan2.2_VAE.pth": {
+    "dtypes": {
+      "F32": 196
+    },
+    "keys": [
+      "conv1.bias",
+      "conv1.weight",
+      "conv2.bias",
+      "conv2.weight",
+      "decoder.conv1.bias",
+      "decoder.conv1.weight",
+      "decoder.head.0.gamma",
+      "decoder.middle.0.residual.0.gamma",
+      "decoder.middle.1.norm.gamma",
+      "decoder.middle.1.proj.bias",
+      "decoder.middle.1.proj.weight",
+      "decoder.middle.1.to_qkv.bias",
+      "decoder.middle.1.to_qkv.weight",
+      "decoder.upsamples.0.upsamples.0.residual.0.gamma",
+      "decoder.upsamples.0.upsamples.1.residual.0.gamma",
+      "decoder.upsamples.1.upsamples.0.residual.0.gamma",
+      "decoder.upsamples.1.upsamples.1.residual.0.gamma",
+      "encoder.conv1.bias",
+      "encoder.conv1.weight",
+      "encoder.downsamples.0.downsamples.0.residual.0.gamma",
+      "encoder.downsamples.0.downsamples.1.residual.0.gamma",
+      "encoder.downsamples.1.downsamples.0.residual.0.gamma",
+      "encoder.downsamples.1.downsamples.0.shortcut.bias",
+      "encoder.downsamples.1.downsamples.0.shortcut.weight",
+      "encoder.downsamples.1.downsamples.1.residual.0.gamma",
+      "encoder.head.0.gamma",
+      "encoder.middle.0.residual.0.gamma",
+      "encoder.middle.1.norm.gamma",
+      "encoder.middle.1.proj.bias",
+      "encoder.middle.1.proj.weight",
+      "encoder.middle.1.to_qkv.bias",
+      "encoder.middle.1.to_qkv.weight"
+    ],
+    "metadata_keys": [],
+    "tensor_count": 196
+  }
+}

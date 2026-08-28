@@ -1,0 +1,43 @@
+{
+  "vitl.pt": {
+    "dtypes": {
+      "F32": 160
+    },
+    "keys": [
+      "module.backbone.mask_tokens.0",
+      "module.backbone.mask_tokens.1",
+      "module.backbone.predictor_blocks.0.attn.proj.bias",
+      "module.backbone.predictor_blocks.0.attn.proj.weight",
+      "module.backbone.predictor_blocks.0.attn.qkv.bias",
+      "module.backbone.predictor_blocks.0.attn.qkv.weight",
+      "module.backbone.predictor_blocks.0.mlp.fc1.bias",
+      "module.backbone.predictor_blocks.0.mlp.fc1.weight",
+      "module.backbone.predictor_blocks.0.mlp.fc2.bias",
+      "module.backbone.predictor_blocks.0.mlp.fc2.weight",
+      "module.backbone.predictor_blocks.0.norm1.bias",
+      "module.backbone.predictor_blocks.0.norm1.weight",
+      "module.backbone.predictor_blocks.0.norm2.bias",
+      "module.backbone.predictor_blocks.0.norm2.weight",
+      "module.backbone.predictor_blocks.1.attn.proj.bias",
+      "module.backbone.predictor_blocks.1.attn.proj.weight",
+      "module.backbone.predictor_blocks.1.attn.qkv.bias",
+      "module.backbone.predictor_blocks.1.attn.qkv.weight",
+      "module.backbone.predictor_blocks.1.mlp.fc1.bias",
+      "module.backbone.predictor_blocks.1.mlp.fc1.weight",
+      "module.backbone.predictor_blocks.1.mlp.fc2.bias",
+      "module.backbone.predictor_blocks.1.mlp.fc2.weight",
+      "module.backbone.predictor_blocks.1.norm1.bias",
+      "module.backbone.predictor_blocks.1.norm1.weight",
+      "module.backbone.predictor_blocks.1.norm2.bias",
+      "module.backbone.predictor_blocks.1.norm2.weight",
+      "module.backbone.predictor_embed.bias",
+      "module.backbone.predictor_embed.weight",
+      "module.backbone.predictor_norm.bias",
+      "module.backbone.predictor_norm.weight",
+      "module.backbone.predictor_proj.bias",
+      "module.backbone.predictor_proj.weight"
+    ],
+    "metadata_keys": [],
+    "tensor_count": 160
+  }
+}

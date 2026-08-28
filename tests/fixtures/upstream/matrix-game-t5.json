@@ -1,0 +1,33 @@
+{
+  "models_t5_umt5-xxl-enc-bf16.pth": {
+    "dtypes": {
+      "BF16": 242
+    },
+    "keys": [
+      "blocks.0.attn.k.weight",
+      "blocks.0.attn.o.weight",
+      "blocks.0.attn.q.weight",
+      "blocks.0.attn.v.weight",
+      "blocks.0.ffn.fc1.weight",
+      "blocks.0.ffn.fc2.weight",
+      "blocks.0.ffn.gate.0.weight",
+      "blocks.0.norm1.weight",
+      "blocks.0.norm2.weight",
+      "blocks.0.pos_embedding.embedding.weight",
+      "blocks.1.attn.k.weight",
+      "blocks.1.attn.o.weight",
+      "blocks.1.attn.q.weight",
+      "blocks.1.attn.v.weight",
+      "blocks.1.ffn.fc1.weight",
+      "blocks.1.ffn.fc2.weight",
+      "blocks.1.ffn.gate.0.weight",
+      "blocks.1.norm1.weight",
+      "blocks.1.norm2.weight",
+      "blocks.1.pos_embedding.embedding.weight",
+      "norm.weight",
+      "token_embedding.weight"
+    ],
+    "metadata_keys": [],
+    "tensor_count": 242
+  }
+}

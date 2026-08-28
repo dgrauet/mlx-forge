@@ -1,0 +1,45 @@
+{
+  "vjepa2_1_vitl.pt": {
+    "dtypes": {
+      "F32": 302
+    },
+    "keys": [
+      "module.backbone.blocks.0.attn.proj.bias",
+      "module.backbone.blocks.0.attn.proj.weight",
+      "module.backbone.blocks.0.attn.qkv.bias",
+      "module.backbone.blocks.0.attn.qkv.weight",
+      "module.backbone.blocks.0.mlp.fc1.bias",
+      "module.backbone.blocks.0.mlp.fc1.weight",
+      "module.backbone.blocks.0.mlp.fc2.bias",
+      "module.backbone.blocks.0.mlp.fc2.weight",
+      "module.backbone.blocks.0.norm1.bias",
+      "module.backbone.blocks.0.norm1.weight",
+      "module.backbone.blocks.0.norm2.bias",
+      "module.backbone.blocks.0.norm2.weight",
+      "module.backbone.blocks.1.attn.proj.bias",
+      "module.backbone.blocks.1.attn.proj.weight",
+      "module.backbone.blocks.1.attn.qkv.bias",
+      "module.backbone.blocks.1.attn.qkv.weight",
+      "module.backbone.blocks.1.mlp.fc1.bias",
+      "module.backbone.blocks.1.mlp.fc1.weight",
+      "module.backbone.blocks.1.mlp.fc2.bias",
+      "module.backbone.blocks.1.mlp.fc2.weight",
+      "module.backbone.blocks.1.norm1.bias",
+      "module.backbone.blocks.1.norm1.weight",
+      "module.backbone.blocks.1.norm2.bias",
+      "module.backbone.blocks.1.norm2.weight",
+      "module.backbone.img_mod_embed",
+      "module.backbone.norms_block.0.bias",
+      "module.backbone.norms_block.0.weight",
+      "module.backbone.norms_block.1.bias",
+      "module.backbone.norms_block.1.weight",
+      "module.backbone.patch_embed.proj.bias",
+      "module.backbone.patch_embed.proj.weight",
+      "module.backbone.patch_embed_img.proj.bias",
+      "module.backbone.patch_embed_img.proj.weight",
+      "module.backbone.video_mod_embed"
+    ],
+    "metadata_keys": [],
+    "tensor_count": 302
+  }
+}

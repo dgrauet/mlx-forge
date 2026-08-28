@@ -1,0 +1,53 @@
+{
+  "hunyuan3d-paintpbr-v2-1/image_encoder/model.safetensors": {
+    "dtypes": {
+      "F16": 520
+    },
+    "keys": [
+      "vision_model.embeddings.class_embedding",
+      "vision_model.embeddings.patch_embedding.weight",
+      "vision_model.embeddings.position_embedding.weight",
+      "vision_model.encoder.layers.0.layer_norm1.bias",
+      "vision_model.encoder.layers.0.layer_norm1.weight",
+      "vision_model.encoder.layers.0.layer_norm2.bias",
+      "vision_model.encoder.layers.0.layer_norm2.weight",
+      "vision_model.encoder.layers.0.mlp.fc1.bias",
+      "vision_model.encoder.layers.0.mlp.fc1.weight",
+      "vision_model.encoder.layers.0.mlp.fc2.bias",
+      "vision_model.encoder.layers.0.mlp.fc2.weight",
+      "vision_model.encoder.layers.0.self_attn.k_proj.bias",
+      "vision_model.encoder.layers.0.self_attn.k_proj.weight",
+      "vision_model.encoder.layers.0.self_attn.out_proj.bias",
+      "vision_model.encoder.layers.0.self_attn.out_proj.weight",
+      "vision_model.encoder.layers.0.self_attn.q_proj.bias",
+      "vision_model.encoder.layers.0.self_attn.q_proj.weight",
+      "vision_model.encoder.layers.0.self_attn.v_proj.bias",
+      "vision_model.encoder.layers.0.self_attn.v_proj.weight",
+      "vision_model.encoder.layers.1.layer_norm1.bias",
+      "vision_model.encoder.layers.1.layer_norm1.weight",
+      "vision_model.encoder.layers.1.layer_norm2.bias",
+      "vision_model.encoder.layers.1.layer_norm2.weight",
+      "vision_model.encoder.layers.1.mlp.fc1.bias",
+      "vision_model.encoder.layers.1.mlp.fc1.weight",
+      "vision_model.encoder.layers.1.mlp.fc2.bias",
+      "vision_model.encoder.layers.1.mlp.fc2.weight",
+      "vision_model.encoder.layers.1.self_attn.k_proj.bias",
+      "vision_model.encoder.layers.1.self_attn.k_proj.weight",
+      "vision_model.encoder.layers.1.self_attn.out_proj.bias",
+      "vision_model.encoder.layers.1.self_attn.out_proj.weight",
+      "vision_model.encoder.layers.1.self_attn.q_proj.bias",
+      "vision_model.encoder.layers.1.self_attn.q_proj.weight",
+      "vision_model.encoder.layers.1.self_attn.v_proj.bias",
+      "vision_model.encoder.layers.1.self_attn.v_proj.weight",
+      "vision_model.post_layernorm.bias",
+      "vision_model.post_layernorm.weight",
+      "vision_model.pre_layrnorm.bias",
+      "vision_model.pre_layrnorm.weight",
+      "visual_projection.weight"
+    ],
+    "metadata_keys": [
+      "format"
+    ],
+    "tensor_count": 520
+  }
+}
