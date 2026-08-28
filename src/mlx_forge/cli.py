@@ -393,7 +393,7 @@ def _card_file_listing(api, repo_id: str, model_dir, *, card_only: bool = False)
     truth: a local directory holding a different build would otherwise publish
     sizes that do not match the repo.
     """
-    from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
+    from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
 
     from .upload import iter_model_files
 
@@ -403,6 +403,13 @@ def _card_file_listing(api, repo_id: str, model_dir, *, card_only: bool = False)
         for sibling in info.siblings or []:
             if sibling.size is not None:
                 listing[sibling.rfilename] = sibling.size
+    except GatedRepoError as e:
+        if card_only:
+            # A gated repo without access is not "new" — the local directory
+            # would invent a listing for a repo that already exists.
+            print(f"ERROR: --card-only could not list {repo_id}: {e}")
+            raise SystemExit(1)
+        # A full upload is about to push the local files anyway.
     except RepositoryNotFoundError:
         pass  # new repo: the local directory is the whole story
     except (HfHubHTTPError, OSError, ConnectionError) as e:
@@ -442,13 +449,22 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
     from huggingface_hub import hf_hub_download
     from huggingface_hub.errors import (
         EntryNotFoundError,
+        GatedRepoError,
         HfHubHTTPError,
+        LocalEntryNotFoundError,
         RepositoryNotFoundError,
     )
 
     try:
         published = open(hf_hub_download(repo_id, "README.md")).read()
         etat = f"against the card published at {repo_id}"
+    except (GatedRepoError, LocalEntryNotFoundError) as e:
+        # GatedRepoError subclasses RepositoryNotFoundError, and an offline
+        # failure is wrapped in LocalEntryNotFoundError (a subclass of
+        # EntryNotFoundError) — both must be caught before the "genuinely
+        # new" clause below, or a gated/offline repo is reported as new.
+        print(f"ERROR: could not read the published card of {repo_id}: {e}")
+        raise SystemExit(1)
     except (EntryNotFoundError, RepositoryNotFoundError):
         # Genuinely new: no repo, or a repo with no README yet.
         published = ""

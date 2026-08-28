@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from huggingface_hub import errors as hf_errors
 
 from mlx_forge.cli import _get_recipe, main
 
@@ -199,22 +200,31 @@ class TestShowCardDiffErrors:
         )
 
     def test_a_missing_card_is_reported_as_new(self, monkeypatch, capsys):
-        from huggingface_hub import errors as hf_errors
-
         self._call(monkeypatch, hf_errors.EntryNotFoundError("no README"))
         assert "has no card yet" in capsys.readouterr().out
 
     def test_a_missing_repo_is_reported_as_new(self, monkeypatch, capsys):
-        from huggingface_hub import errors as hf_errors
-
         self._call(monkeypatch, hf_errors.RepositoryNotFoundError("no repo", response=MagicMock()))
         assert "has no card yet" in capsys.readouterr().out
 
     def test_a_hub_failure_aborts_instead_of_pretending(self, monkeypatch, capsys):
-        from huggingface_hub import errors as hf_errors
-
         with pytest.raises(SystemExit):
             self._call(monkeypatch, hf_errors.HfHubHTTPError("503", response=MagicMock()))
+        assert "has no card yet" not in capsys.readouterr().out
+
+    def test_a_gated_repo_aborts_instead_of_pretending(self, monkeypatch, capsys):
+        # GatedRepoError subclasses RepositoryNotFoundError, so it must be
+        # caught before the "genuinely new" clause.
+        with pytest.raises(SystemExit):
+            self._call(monkeypatch, hf_errors.GatedRepoError("gated", response=MagicMock()))
+        assert "has no card yet" not in capsys.readouterr().out
+
+    def test_an_offline_failure_aborts_instead_of_pretending(self, monkeypatch, capsys):
+        # hf_hub_download wraps an offline failure in LocalEntryNotFoundError,
+        # which subclasses EntryNotFoundError, so it must be caught before
+        # the "genuinely new" clause.
+        with pytest.raises(SystemExit):
+            self._call(monkeypatch, hf_errors.LocalEntryNotFoundError("offline"))
         assert "has no card yet" not in capsys.readouterr().out
 
 
@@ -243,3 +253,15 @@ class TestCardOnlyListing:
         (tmp_path / "a.safetensors").write_bytes(b"x" * 4)
         listing = cli_mod._card_file_listing(api, "acme/demo", tmp_path, card_only=False)
         assert listing == {"a.safetensors": 4}
+
+    def test_gated_card_only_aborts(self, tmp_path):
+        # GatedRepoError subclasses RepositoryNotFoundError, whose handler
+        # swallows it — --card-only must not fall through to inventing a
+        # listing from the local directory of a repo it cannot see.
+        import mlx_forge.cli as cli_mod
+
+        api = MagicMock()
+        api.model_info.side_effect = hf_errors.GatedRepoError("gated", response=MagicMock())
+        (tmp_path / "split_model.json").write_text("{}")
+        with pytest.raises(SystemExit):
+            cli_mod._card_file_listing(api, "acme/demo", tmp_path, card_only=True)
