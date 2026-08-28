@@ -5,41 +5,45 @@ from tests.parity._harness import ComponentParity, cast_all_to, cast_f32_to_bf16
 
 PUB = "published/matrix-game-3.0-mlx.json"
 
-# --- DiT finalize_keys: reconstruct the harvest-filtered Sequential siblings ---
+# --- DiT complete_upstream_keys: reconstruct the harvest-filtered Sequential siblings ---
 #
 # scripts/harvest_keys.py's keep() drops any key with an all-digit path segment > 1.
 # _DIT_SEQUENTIAL_MAP (matrix_game_3_0.py:114-131) renames PyTorch nn.Sequential
 # indices to named Linear layers, e.g. ".ffn.2." -> ".ffn_linear2.". A raw upstream
 # key like "...ffn.2.weight" has digit segment "2" > 1, so it never survives the
-# upstream fixture's own harvest — sanitize_dit_key never gets a chance to run on
-# it. But the PUBLISHED fixture was harvested from the already-converted file, where
-# the key is "...ffn_linear2.weight" — no digit segment at all, so it trivially
-# survives that harvest. The result: for every Sequential group with a kept "index 0"
-# sibling (survives upstream reduction) and a dropped "index 2/3" sibling (renamed to
-# a name with no digit, so present in the published reduction), our emitted set is
-# missing the high-index sibling purely because of this fixture-harvest asymmetry,
-# not because the sanitizer disagrees with the published pack. Reconstruct each
-# missing sibling from its "index 0"-derived kept counterpart, using the exact
-# renamed-name pairs _DIT_SEQUENTIAL_MAP produces.
-_DIT_SEQUENTIAL_SIBLINGS = [
-    ("ffn_linear1", ("ffn_linear2",)),
-    ("text_embedding_linear1", ("text_embedding_linear2",)),
-    ("time_embedding_linear1", ("time_embedding_linear2",)),
-    ("action_model.keyboard_embed_linear1", ("action_model.keyboard_embed_linear2",)),
-    (
-        "action_model.mouse_mlp_linear1",
-        ("action_model.mouse_mlp_linear2", "action_model.mouse_mlp_layernorm"),
-    ),
+# upstream fixture's own harvest. But the PUBLISHED fixture was harvested from the
+# already-converted file, where the key is "...ffn_linear2.weight" — no digit segment
+# at all, so it trivially survives that harvest. The result: for every Sequential
+# group with a kept "index 0" sibling (survives upstream reduction) and a dropped
+# "index 2/3" sibling, our raw-key set is missing the high-index sibling purely
+# because of this fixture-harvest asymmetry, not because the sanitizer disagrees with
+# the published pack.
+#
+# Reconstruct the missing sibling on the RAW/upstream side — before sanitize_dit_key
+# runs — from its "index 0" kept counterpart, using the same raw index patterns
+# _DIT_SEQUENTIAL_MAP itself matches on. This way the renamed name in the emitted set
+# is produced by the real sanitizer, not hardcoded here: mutating or deleting one of
+# these _DIT_SEQUENTIAL_MAP rules changes what the sanitizer emits for the
+# reconstructed key too, so the row stays a live gate on the rename rule instead of
+# going blind to it (a post-hoc rewrite of the *sanitizer's output* names, as an
+# earlier version of this test did, would keep passing even if the rename rule
+# powering it were deleted).
+_DIT_UPSTREAM_SIBLING_PAIRS = [
+    (".ffn.0.", ".ffn.2."),
+    ("text_embedding.0.", "text_embedding.2."),
+    ("time_embedding.0.", "time_embedding.2."),
+    (".action_model.keyboard_embed.0.", ".action_model.keyboard_embed.2."),
+    (".action_model.mouse_mlp.0.", ".action_model.mouse_mlp.2."),
+    (".action_model.mouse_mlp.0.", ".action_model.mouse_mlp.3."),
 ]
 
 
-def finalize_dit_keys(keys: set[str]) -> set[str]:
+def complete_dit_upstream_keys(keys: set[str]) -> set[str]:
     out = set(keys)
     for key in keys:
-        for low, highs in _DIT_SEQUENTIAL_SIBLINGS:
+        for low, high in _DIT_UPSTREAM_SIBLING_PAIRS:
             if low in key:
-                for high in highs:
-                    out.add(key.replace(low, high))
+                out.add(key.replace(low, high))
     return out
 
 
@@ -75,9 +79,9 @@ TABLE = [
         dtype_map=cast_f32_to_bf16,
         # sanitize_dit_key never returns None (matrix_game_3_0.py:169-180) — the key
         # count gap is entirely the harvest-reduction asymmetry above, handled by
-        # finalize_keys, not a genuine drop.
+        # complete_upstream_keys, not a genuine drop.
         sanitizer_drops_keys=False,
-        finalize_keys=finalize_dit_keys,
+        complete_upstream_keys=complete_dit_upstream_keys,
     ),
     pytest.param(
         ComponentParity(
@@ -91,7 +95,7 @@ TABLE = [
             "dit_distilled",
             dtype_map=cast_f32_to_bf16,
             sanitizer_drops_keys=False,
-            finalize_keys=finalize_dit_keys,
+            complete_upstream_keys=complete_dit_upstream_keys,
         ),
         marks=pytest.mark.xfail(
             reason=(

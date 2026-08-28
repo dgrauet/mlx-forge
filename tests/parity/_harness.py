@@ -44,6 +44,12 @@ class ComponentParity:
     finalize_keys: Callable[[set[str]], set[str]] | None = (
         None  # name-level rewrite, e.g. QKV fusion
     )
+    complete_upstream_keys: Callable[[set[str]], set[str]] | None = (
+        None  # applied to the raw upstream keys BEFORE the sanitizer runs, so any
+        #  reconstructed sibling still goes through the real sanitizer instead of
+        #  hardcoding its output name — see finalize_keys vs. complete_upstream_keys
+        #  in task-4-report.md
+    )
     sanitizer_drops_keys: bool = False
 
 
@@ -58,8 +64,12 @@ def check_parity(spec: ComponentParity) -> None:
     published = _record(spec.published_fixture, spec.published_file)
     derived = upstream.get("source") == "derived-from-published"
 
+    raw_keys = set(upstream["keys"])
+    if spec.complete_upstream_keys is not None:
+        raw_keys = spec.complete_upstream_keys(raw_keys)
+
     emitted = set()
-    for key in upstream["keys"]:
+    for key in raw_keys:
         new_key = spec.sanitizer(key)
         if new_key is None:
             continue

@@ -22,18 +22,21 @@ def fuse_qkv_keys(keys: set[str]) -> set[str]:
     return out
 
 
-# paint_unet finalize_keys: reconstruct the harvest-filtered ".ff.net.2." -> ".ff.proj_out."
-# siblings, the same fixture-harvest asymmetry documented in test_matrix_game.py's
-# finalize_dit_keys (a raw "...ff.net.2...." key has digit segment "2" > 1 so it never
-# survives the upstream fixture's own harvest; the renamed "...ff.proj_out...." has no
-# digit segment, so it trivially survives the published fixture's harvest). Reconstruct
-# it from its "ff.proj_in" sibling (sanitize_paint_unet_key's ".ff.net.0.proj." ->
-# ".ff.proj_in." rule, hunyuan3d_21.py:201).
-def finalize_paint_unet_keys(keys: set[str]) -> set[str]:
+# paint_unet complete_upstream_keys: reconstruct the harvest-filtered ".ff.net.2."
+# sibling on the RAW side, the same fixture-harvest asymmetry documented in
+# test_matrix_game.py's complete_dit_upstream_keys (a raw "...ff.net.2...." key has
+# digit segment "2" > 1 so it never survives the upstream fixture's own harvest; the
+# renamed "...ff.proj_out...." has no digit segment, so it trivially survives the
+# published fixture's harvest). Reconstruct the raw ".ff.net.2." key from its
+# ".ff.net.0.proj." sibling — the same raw pattern sanitize_paint_unet_key's own
+# ".ff.net.0.proj." -> ".ff.proj_in." rule matches on (hunyuan3d_21.py:201) — so the
+# real sanitizer (".ff.net.2." -> ".ff.proj_out.", hunyuan3d_21.py:202) produces the
+# renamed name, not this function.
+def complete_paint_unet_upstream_keys(keys: set[str]) -> set[str]:
     out = set(keys)
     for key in keys:
-        if ".ff.proj_in." in key:
-            out.add(key.replace(".ff.proj_in.", ".ff.proj_out."))
+        if ".ff.net.0.proj." in key:
+            out.add(key.replace(".ff.net.0.proj.", ".ff.net.2."))
     return out
 
 
@@ -91,7 +94,7 @@ TABLE = [
             F16,
             # ".to_out.1." -> None (dropout) is a genuine drop (hunyuan3d_21.py:194-195).
             sanitizer_drops_keys=True,
-            finalize_keys=finalize_paint_unet_keys,
+            complete_upstream_keys=complete_paint_unet_upstream_keys,
         ),
         marks=pytest.mark.xfail(
             reason=(
