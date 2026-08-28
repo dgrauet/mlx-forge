@@ -106,3 +106,17 @@ def test_no_recipe_hand_rolls_the_file(recipe_name: str):
         and not line.strip().startswith("#")
     ]
     assert offenders == [], f"{recipe_name}: use write/read_quantize_config instead"
+
+
+def test_quantize_file_writes_the_shared_record(tmp_path):
+    """The generic quantizer must write the same file the helper writes —
+    hand-written JSON here is the drift the helper was introduced to remove."""
+    import mlx.core as mx
+
+    from mlx_forge.quantize import QUANTIZE_CONFIG_FILENAME, quantize_file, read_quantize_config
+
+    src = tmp_path / "m.safetensors"
+    mx.save_safetensors(str(src), {"layer.weight": mx.ones((64, 64))})
+    quantize_file(src, bits=4, group_size=32, config_path=tmp_path / QUANTIZE_CONFIG_FILENAME)
+
+    assert read_quantize_config(tmp_path) == {"bits": 4, "group_size": 32}

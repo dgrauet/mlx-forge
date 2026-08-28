@@ -181,7 +181,9 @@ def quantize_file(
         bits: Quantization bits.
         group_size: Quantization group size.
         should_quantize: Predicate for which weights to quantize.
-        config_path: If set, write quantize_config.json to this path.
+        config_path: If set, the quantization record is written next to it,
+            under the canonical `quantize_config.json` name (its parent
+            directory is used; its basename is fixed by write_quantize_config).
 
     Returns:
         Path to output file.
@@ -206,16 +208,11 @@ def quantize_file(
     elapsed = time.monotonic() - t0
     print(f"  Done in {elapsed:.1f}s")
 
-    # Write quantize config
+    # Record through the shared helper so the shape cannot drift from what
+    # read_quantize_config / validate expect. config_path's directory is the
+    # record's home; its basename is fixed by the helper.
     if config_path is not None:
-        qconfig = {
-            "quantization": {
-                "bits": bits,
-                "group_size": group_size,
-            }
-        }
-        with open(config_path, "w") as f:
-            json.dump(qconfig, f, indent=2)
+        write_quantize_config(config_path.parent, bits=bits, group_size=group_size)
 
     del result, weights
     gc.collect()

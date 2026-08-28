@@ -14,9 +14,6 @@ violation into an actionable message instead of an AttributeError traceback.
 
 from __future__ import annotations
 
-import argparse
-from typing import Protocol
-
 from ..metadata import RecipeMetadata
 
 AVAILABLE_RECIPES = {
@@ -39,21 +36,6 @@ COMMAND_REQUIREMENTS: dict[str, tuple[str, str]] = {
     "validate": ("add_validate_args", "validate"),
     "split": ("add_split_args", "split"),
 }
-
-
-class RecipeModule(Protocol):
-    """Structural type of a recipe module.
-
-    A recipe whose model needs no splitting still implements `split` — as a
-    no-op that says so — rather than omitting it.
-    """
-
-    def add_convert_args(self, parser: argparse.ArgumentParser) -> None: ...
-    def convert(self, args: argparse.Namespace) -> None: ...
-    def add_validate_args(self, parser: argparse.ArgumentParser) -> None: ...
-    def validate(self, args: argparse.Namespace) -> None: ...
-    def add_split_args(self, parser: argparse.ArgumentParser) -> None: ...
-    def split(self, args: argparse.Namespace) -> None: ...
 
 
 def missing_recipe_attrs(module: object, command: str) -> list[str]:
