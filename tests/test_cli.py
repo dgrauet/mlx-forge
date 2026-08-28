@@ -182,3 +182,37 @@ class TestRecipeHelp:
                 main()
             assert exc_info.value.code == 0
         assert "model_dir" in capsys.readouterr().out
+
+
+class TestShowCardDiffErrors:
+    """A dry run must not report a network or auth failure as a brand-new repo."""
+
+    def _call(self, monkeypatch, exc):
+        import mlx_forge.cli as cli_mod
+
+        def boom(repo_id, filename):
+            raise exc
+
+        monkeypatch.setattr("huggingface_hub.hf_hub_download", boom)
+        return cli_mod._show_card_diff(
+            api=MagicMock(), repo_id="acme/demo", card="# new", model_dir=None, card_only=False
+        )
+
+    def test_a_missing_card_is_reported_as_new(self, monkeypatch, capsys):
+        from huggingface_hub import errors as hf_errors
+
+        self._call(monkeypatch, hf_errors.EntryNotFoundError("no README"))
+        assert "has no card yet" in capsys.readouterr().out
+
+    def test_a_missing_repo_is_reported_as_new(self, monkeypatch, capsys):
+        from huggingface_hub import errors as hf_errors
+
+        self._call(monkeypatch, hf_errors.RepositoryNotFoundError("no repo", response=MagicMock()))
+        assert "has no card yet" in capsys.readouterr().out
+
+    def test_a_hub_failure_aborts_instead_of_pretending(self, monkeypatch, capsys):
+        from huggingface_hub import errors as hf_errors
+
+        with pytest.raises(SystemExit):
+            self._call(monkeypatch, hf_errors.HfHubHTTPError("503", response=MagicMock()))
+        assert "has no card yet" not in capsys.readouterr().out

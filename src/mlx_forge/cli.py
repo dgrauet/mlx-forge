@@ -433,13 +433,24 @@ def _show_card_diff(api, repo_id: str, card: str, model_dir, *, card_only: bool)
     import re
 
     from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import (
+        EntryNotFoundError,
+        HfHubHTTPError,
+        RepositoryNotFoundError,
+    )
 
     try:
         published = open(hf_hub_download(repo_id, "README.md")).read()
         etat = f"against the card published at {repo_id}"
-    except Exception:
+    except (EntryNotFoundError, RepositoryNotFoundError):
+        # Genuinely new: no repo, or a repo with no README yet.
         published = ""
         etat = f"{repo_id} has no card yet — everything below is new"
+    except (HfHubHTTPError, OSError, ConnectionError) as e:
+        # Anything else (auth, gating, network) is not "new"; a diff against
+        # an empty string would then claim "no content would be lost".
+        print(f"ERROR: could not read the published card of {repo_id}: {e}")
+        raise SystemExit(1)
 
     print(f"\n{'=' * 60}")
     print(f"DRY RUN — nothing is written or uploaded ({etat})")
