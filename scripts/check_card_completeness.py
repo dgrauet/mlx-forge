@@ -17,6 +17,7 @@ V-JEPA 2.1 has no Hub base_model because Meta publishes it as a direct .pt
 download, and inventing one would be worse than leaving it out.
 """
 
+import argparse
 import json
 import re
 import sys
@@ -35,8 +36,11 @@ EXPECTED_ABSENCES = {
     ),
 }
 
-api = HfApi()
-AUTHOR = sys.argv[sys.argv.index("--author") + 1] if "--author" in sys.argv else "dgrauet"
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument("--author", default="dgrauet", help="Hub namespace to scan")
+    return parser.parse_args(argv)
 
 
 def _json(repo: str, filename: str) -> dict:
@@ -87,46 +91,54 @@ def gaps_for(repo: str, data: dict, siblings: list[str]) -> list[str]:
     return out
 
 
-repos: dict[str, dict] = {}
-for model in sorted(api.list_models(author=AUTHOR), key=lambda m: m.id):
-    info = api.model_info(model.id)
-    repos[model.id] = {
-        "card_data": info.cardData or {},
-        "split_info": _json(model.id, "split_model.json"),
-        "qconfig": _json(model.id, "quantize_config.json").get("quantization", {}),
-    }
+def main() -> None:
+    args = parse_args()
+    api = HfApi()
 
-# Builds of one model share a name up to the -q<bits> suffix.
-families: dict[str, list[str]] = defaultdict(list)
-for repo in repos:
-    families[re.sub(r"-q\d+$", "", repo)].append(repo)
+    repos: dict[str, dict] = {}
+    for model in sorted(api.list_models(author=args.author), key=lambda m: m.id):
+        info = api.model_info(model.id)
+        repos[model.id] = {
+            "card_data": info.cardData or {},
+            "split_info": _json(model.id, "split_model.json"),
+            "qconfig": _json(model.id, "quantize_config.json").get("quantization", {}),
+        }
 
-rows = []
-for repo, data in repos.items():
-    siblings = [s for s in families[re.sub(r"-q\d+$", "", repo)] if s != repo]
-    name = repo.split("/")[1]
-    found = gaps_for(repo, data, siblings)
-    excused = [g for g in found if (name, g) in EXPECTED_ABSENCES]
-    rows.append((name, [g for g in found if g not in excused], excused))
+    # Builds of one model share a name up to the -q<bits> suffix.
+    families: dict[str, list[str]] = defaultdict(list)
+    for repo in repos:
+        families[re.sub(r"-q\d+$", "", repo)].append(repo)
 
-width = max(len(name) for name, _, _ in rows)
-complete = 0
-derivable = 0
-for name, found, excused in rows:
-    if not found:
-        complete += 1
-        suffix = f"  (expected: {', '.join(excused)})" if excused else ""
-        print(f"   {name:<{width}}  complete{suffix}")
-    else:
-        if all(g.startswith("NEEDS-OPERATOR") for g in found):
-            derivable += 1
-        print(f"<< {name:<{width}}  " + "; ".join(found))
+    rows = []
+    for repo, data in repos.items():
+        siblings = [s for s in families[re.sub(r"-q\d+$", "", repo)] if s != repo]
+        name = repo.split("/")[1]
+        found = gaps_for(repo, data, siblings)
+        excused = [g for g in found if (name, g) in EXPECTED_ABSENCES]
+        rows.append((name, [g for g in found if g not in excused], excused))
 
-print(f"\ncomplete: {complete}/{len(rows)}")
-print(f"complete but for a usage snippet only the operator can write: {complete + derivable}")
-for (name, gap), reason in sorted(EXPECTED_ABSENCES.items()):
-    print(f"expected absence — {name}: {gap} ({reason})")
+    width = max(len(name) for name, _, _ in rows)
+    complete = 0
+    derivable = 0
+    for name, found, excused in rows:
+        if not found:
+            complete += 1
+            suffix = f"  (expected: {', '.join(excused)})" if excused else ""
+            print(f"   {name:<{width}}  complete{suffix}")
+        else:
+            if all(g.startswith("NEEDS-OPERATOR") for g in found):
+                derivable += 1
+            print(f"<< {name:<{width}}  " + "; ".join(found))
 
-# Only the declarative gaps fail the run: the rest waits on a human-verified
-# command, and a check that can never pass is one nobody runs.
-sys.exit(1 if complete + derivable < len(rows) else 0)
+    print(f"\ncomplete: {complete}/{len(rows)}")
+    print(f"complete but for a usage snippet only the operator can write: {complete + derivable}")
+    for (name, gap), reason in sorted(EXPECTED_ABSENCES.items()):
+        print(f"expected absence — {name}: {gap} ({reason})")
+
+    # Only the declarative gaps fail the run: the rest waits on a human-verified
+    # command, and a check that can never pass is one nobody runs.
+    sys.exit(1 if complete + derivable < len(rows) else 0)
+
+
+if __name__ == "__main__":
+    main()

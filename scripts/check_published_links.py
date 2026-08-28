@@ -16,16 +16,21 @@ Maintenance tool, not a test: network access and a HF login, so CI skips it.
     uv run python scripts/check_published_links.py [--author NAME] [--no-links]
 """
 
+import argparse
 import re
 import sys
 import urllib.request
 
 from huggingface_hub import HfApi, hf_hub_download
 
-AUTHOR = sys.argv[sys.argv.index("--author") + 1] if "--author" in sys.argv else "dgrauet"
-CHECK_LINKS = "--no-links" not in sys.argv
 
-api = HfApi()
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument("--author", default="dgrauet", help="Hub namespace to scan")
+    parser.add_argument(
+        "--no-links", dest="check_links", action="store_false", help="skip link checks"
+    )
+    return parser.parse_args(argv)
 
 
 def structural_problems(repo: str, text: str, files: set[str]) -> list[str]:
@@ -89,33 +94,41 @@ def unreachable(url: str) -> str | None:
     return None if status == 200 else str(status)
 
 
-cards: dict[str, tuple[str, set[str]]] = {}
-for model in sorted(api.list_models(author=AUTHOR), key=lambda m: m.id):
-    info = api.model_info(model.id)
-    try:
-        with open(hf_hub_download(model.id, "README.md")) as handle:
-            cards[model.id] = (handle.read(), {s.rfilename for s in (info.siblings or [])})
-    except Exception as error:  # noqa: BLE001
-        print(f"<< {model.id}: no README ({error})")
+def main() -> None:
+    args = parse_args()
+    api = HfApi()
 
-problems: list[tuple[str, str]] = []
-for repo, (text, files) in cards.items():
-    problems += [(repo.split("/")[1], p) for p in structural_problems(repo, text, files)]
+    cards: dict[str, tuple[str, set[str]]] = {}
+    for model in sorted(api.list_models(author=args.author), key=lambda m: m.id):
+        info = api.model_info(model.id)
+        try:
+            with open(hf_hub_download(model.id, "README.md")) as handle:
+                cards[model.id] = (handle.read(), {s.rfilename for s in (info.siblings or [])})
+        except Exception as error:  # noqa: BLE001
+            print(f"<< {model.id}: no README ({error})")
 
-if CHECK_LINKS:
-    urls: dict[str, set[str]] = {}
-    for repo, (text, _) in cards.items():
-        for url in re.findall(r"https?://[^\s)\"'<>]+", text):
-            urls.setdefault(url.rstrip(".,"), set()).add(repo.split("/")[1])
-    print(f"checking {len(urls)} distinct URLs across {len(cards)} cards...")
-    for url, on in sorted(urls.items()):
-        failure = unreachable(url)
-        if failure:
-            problems.append((", ".join(sorted(on)), f"{failure} {url}"))
+    problems: list[tuple[str, str]] = []
+    for repo, (text, files) in cards.items():
+        problems += [(repo.split("/")[1], p) for p in structural_problems(repo, text, files)]
 
-print(f"\ncards checked: {len(cards)}")
-if problems:
-    for where, problem in problems:
-        print(f"<< {where}: {problem}")
-    sys.exit(1)
-print("no problem found")
+    if args.check_links:
+        urls: dict[str, set[str]] = {}
+        for repo, (text, _) in cards.items():
+            for url in re.findall(r"https?://[^\s)\"'<>]+", text):
+                urls.setdefault(url.rstrip(".,"), set()).add(repo.split("/")[1])
+        print(f"checking {len(urls)} distinct URLs across {len(cards)} cards...")
+        for url, on in sorted(urls.items()):
+            failure = unreachable(url)
+            if failure:
+                problems.append((", ".join(sorted(on)), f"{failure} {url}"))
+
+    print(f"\ncards checked: {len(cards)}")
+    if problems:
+        for where, problem in problems:
+            print(f"<< {where}: {problem}")
+        sys.exit(1)
+    print("no problem found")
+
+
+if __name__ == "__main__":
+    main()
