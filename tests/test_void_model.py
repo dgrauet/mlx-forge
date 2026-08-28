@@ -11,6 +11,7 @@ import json
 import mlx.core as mx
 import pytest
 
+from mlx_forge import convert as convert_module
 from mlx_forge.convert import load_safetensors
 from mlx_forge.recipes import void_model
 from mlx_forge.recipes.void_model import (
@@ -146,15 +147,20 @@ class TestConvertEndToEnd:
         Checked by spying on _materialize rather than by inspecting the saved
         values: at this fixture's size nothing evicts, so a round-trip assertion
         would pass even with the materialize call removed (verified).
+
+        void_model no longer calls _materialize itself -- convert() now goes
+        through convert.process_component(), which materializes every
+        component's weights in one call. Spy on that shared entry point
+        instead of a symbol void_model no longer imports.
         """
         seen: list[int] = []
-        real = void_model._materialize
+        real = convert_module._materialize
 
         def spy(*tensors):
             seen.extend(id(t) for t in tensors)
             real(*tensors)
 
-        monkeypatch.setattr(void_model, "_materialize", spy)
+        monkeypatch.setattr(convert_module, "_materialize", spy)
         loaded: dict[str, mx.array] = {}
         real_load = void_model.load_safetensors
 

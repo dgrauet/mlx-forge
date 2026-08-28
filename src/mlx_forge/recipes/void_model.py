@@ -38,11 +38,12 @@ from ..convert import (
     fmt_size,
     load_safetensors,
     print_output_summary,
+    process_component,
     quantize_component,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import _materialize, read_quantize_config, write_quantize_config
+from ..quantize import read_quantize_config, write_quantize_config
 
 REPO_ID = "netflix/void-model"
 
@@ -160,24 +161,20 @@ def _convert_pass(
 
     print(f"\nProcessing {len(weights)} keys...")
     t0 = time.monotonic()
-    output: dict[str, mx.array] = {}
-    for key in weights:
-        new_key = sanitize_key(key)
-        if new_key is None:
-            continue
-        weight = weights[key]
-        # All VOID weights are Linear (2D) or bias/norm (1D) -- no conv transposition needed
-        _materialize(weight)
-        output[new_key] = weight
+    # All VOID weights are Linear (2D) or bias/norm (1D) -- no conv transposition needed.
+    # component_prefix=None: the published packs hold bare keys.
+    count = process_component(
+        weights,
+        pass_name,
+        list(weights),
+        output_dir,
+        None,
+        sanitizer=sanitize_key,
+        output_filename=pass_filename,
+    )
+    print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
 
-    count = len(output)
-    out_file = pass_filename
-    print(f"  Saving {count} weights to {out_file}...")
-    mx.save_safetensors(str(output_dir / out_file), output)
-    elapsed = time.monotonic() - t0
-    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
-
-    del output, weights
+    del weights
     gc.collect()
     mx.clear_cache()
     return count
