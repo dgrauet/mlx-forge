@@ -1391,6 +1391,8 @@ def validate(args) -> None:
     if delta:
         print("[INFO] Delta mode (skipping shared component checks)")
 
+    qconfig = read_quantize_config(model_dir)
+
     if not delta:
         print("\n== Text Encoder Assets ==")
         for filename in TEXT_ENCODER_ASSET_FILES:
@@ -1412,7 +1414,6 @@ def validate(args) -> None:
                 result.check(False, f"{filename} parses as JSON")
 
         print("\n== VAE and Component Weights ==")
-        qconfig = read_quantize_config(model_dir)
         quantized_components = set(qconfig.get("components", {})) if qconfig is not None else set()
         for component, expected in EXPECTED_TENSOR_COUNTS.items():
             filename = f"{component}.safetensors"
@@ -1476,7 +1477,6 @@ def validate(args) -> None:
 
     print("\n== Transformer Variants ==")
     variants = split_info.get("transformer_variants") or list(VARIANT_FILENAMES)
-    qconfig = read_quantize_config(model_dir)
     if qconfig is not None:
         print(f"Model is quantized: int{qconfig.get('bits', '?')}")
     for variant in variants:

@@ -136,6 +136,10 @@ METADATA = RecipeMetadata(
     name="vjepa-2.1-vitl",
     source="facebookresearch/vjepa2 (app/vjepa_2_1)",
     license="mit",
+    quantization_scope=(
+        "encoder blocks.* and predictor predictor_blocks.* Linear .weight matrices only, "
+        "leaving norms, biases, the patch embeddings and modality embeds in full precision"
+    ),
     usage_url="https://github.com/dgrauet/vjepa2-mlx",
     # Verbatim from the inference project's own README. Raw string: a
     # trailing backslash must stay a shell continuation, not swallow its

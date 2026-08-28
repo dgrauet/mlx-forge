@@ -85,6 +85,11 @@ METADATA = RecipeMetadata(
     license_name="tencent-hunyuan-community",
     license_link="https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE",
     license_file=("LICENSE", "Notice.txt"),
+    quantization_scope=(
+        "shape stage: DiT block Linear weights, leaving embedders, norms, the MoE gate, "
+        "the final layer and the pooler in bf16; paint stage: 2-D UNet Linear weights, "
+        "leaving convs, norms, time embeddings and the learned-text-CLIP embedding in bf16"
+    ),
     usage_url="https://github.com/dgrauet/Hunyuan3D-2.1-mlx",
     # Verbatim from the inference project's own README. Raw string: a
     # trailing backslash must stay a shell continuation, not swallow its

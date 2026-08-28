@@ -331,3 +331,26 @@ def test_the_base_model_link_is_not_declared_by_the_void_recipe():
 
     metadata = importlib.import_module(AVAILABLE_RECIPES["void-model"]).METADATA
     assert not any("Base model weights" in link for link in metadata.links)
+
+
+def test_every_quantizing_recipe_declares_its_scope():
+    """A q4/q8 card must say which layers were quantized. Recipes that
+    support --quantize but declare no quantization_scope shipped cards
+    that named the bit width and nothing else."""
+    import argparse
+    import importlib
+
+    from mlx_forge.recipes import AVAILABLE_RECIPES
+
+    missing = []
+    for name in AVAILABLE_RECIPES:
+        # AVAILABLE_RECIPES maps a recipe name to its module path (the same
+        # helper tests/test_license_compliance.py defines locally).
+        recipe = importlib.import_module(AVAILABLE_RECIPES[name])
+        parser = argparse.ArgumentParser()
+        recipe.add_convert_args(parser)
+        supports_quantize = any("--quantize" in a.option_strings for a in parser._actions)
+        metadata = getattr(recipe, "METADATA", None)
+        if supports_quantize and metadata is not None and not metadata.quantization_scope:
+            missing.append(name)
+    assert missing == [], f"quantizing recipes without quantization_scope: {missing}"

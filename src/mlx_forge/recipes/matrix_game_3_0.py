@@ -139,6 +139,11 @@ METADATA = RecipeMetadata(
     # upstream identifier. apache-2.0 is satisfied by the identifier alone, so
     # there is no license_file to ship.
     license="apache-2.0",
+    quantization_scope=(
+        "DiT transformer-block Linear weights only (both base and distilled variants), "
+        "leaving patch/time embeddings, the output head, norms, camera-injection layers, "
+        "modulation parameters and text embeddings in bf16; T5 encoder and VAEs untouched"
+    ),
     # The same project the Related Projects link points at. Declared as the
     # usage_url too, so the card actually tells a reader what runs these
     # weights: matrix-game-3.0-mlx was the one published card with no Usage
