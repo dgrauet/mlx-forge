@@ -254,7 +254,9 @@ def generate_model_card(
         # crashed the card. Guarded as well, since the two keys will coexist.
         build_note=(bn if isinstance(bn := split_info.get("build_note"), str) else None),
         usage_url=usage_url,
-        cli_snippet=(cli_snippet or "").format(repo_id=repo_id) or None,
+        # str.replace, not str.format: an operator snippet may legitimately
+        # contain shell braces ("${HOME}"), which .format would choke on.
+        cli_snippet=(cli_snippet or "").replace("{repo_id}", repo_id) or None,
         usage_note=split_info.get("usage_note"),
         links=links or [],
         model_files=model_files,
@@ -697,6 +699,17 @@ def upload_model(
         The repo URL.
     """
     if add_only:
+        ignored = [
+            flag
+            for flag, value in (("--private", private), ("--collection", collection_title))
+            if value
+        ]
+        if ignored:
+            print(
+                f"WARNING: {', '.join(ignored)} ignored — --add-only only adds files to an "
+                "existing repo and never changes its visibility or collections."
+            )
+
         # Verify the repo exists (refuse if not — this mode is incremental)
         try:
             info = api.model_info(repo_id)

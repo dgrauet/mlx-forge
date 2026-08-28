@@ -466,3 +466,29 @@ class TestCardOnlyRemoteRefresh:
         (tmp_path / "split_model.json").write_text(json.dumps({"source": "Org/M"}))
         with pytest.raises(SystemExit):
             upload_model(tmp_path, api=self._remote(), repo_id="test/repo", card_only=True)
+
+
+def test_add_only_warns_about_flags_it_ignores(tmp_path, capsys):
+    from unittest.mock import MagicMock
+
+    from mlx_forge.upload import upload_model
+
+    api = MagicMock()
+    info = MagicMock()
+    info.siblings = []
+    api.model_info.return_value = info
+    (tmp_path / "a.safetensors").write_bytes(b"x")
+
+    upload_model(
+        tmp_path,
+        api=api,
+        repo_id="acme/demo",
+        commit_message="m",
+        private=True,
+        collection_title="My collection",
+        add_only=True,
+    )
+
+    out = capsys.readouterr().out
+    assert "--private" in out and "ignored" in out
+    assert "--collection" in out

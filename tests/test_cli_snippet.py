@@ -140,3 +140,21 @@ def test_our_own_project_is_installed_from_where_it_exists(recipe):
             f"{recipe}: `pip install {project}` — that project is not on PyPI; "
             "install it from its repository, as its README does"
         )
+
+
+def test_an_operator_snippet_with_shell_braces_renders(tmp_path):
+    """`${HOME}` in a --cli-snippet must not raise KeyError at render time."""
+    import json
+
+    from mlx_forge.upload import generate_model_card
+
+    (tmp_path / "split_model.json").write_text(json.dumps({"recipe": "demo", "source": "a/b"}))
+    card = generate_model_card(
+        tmp_path,
+        split_info={"recipe": "demo", "source": "a/b"},
+        config={},
+        repo_id="acme/demo-mlx",
+        cli_snippet='export MODEL_DIR="${HOME}/models/{repo_id}"',
+        file_listing={},
+    )
+    assert 'export MODEL_DIR="${HOME}/models/acme/demo-mlx"' in card

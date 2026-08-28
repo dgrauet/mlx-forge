@@ -250,7 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Delta upload: skip files whose names already exist on the remote repo. "
             "Useful after `convert --skip-shared` to push only the new variant. "
-            "Refuses to run if the repo doesn't exist."
+            "Refuses to run if the repo doesn't exist. Ignores --private and --collection."
         ),
     )
 
