@@ -78,7 +78,9 @@ safetensors headers — evidence a recipe's own code never touches, and so
 cannot make agree with itself by construction. **A recipe's expected-tensor-count
 table (or any other hand-derived per-component number `validate()` checks
 against) must be reconciled against a harvested fixture, not merely restated
-by its own tests.**
+by its own tests.** `scripts/harvest_keys.py --repo … --file … --out …` does
+the same for any recipe; new recipes should ship a harvested fixture rather
+than invented keys.
 
 ---
 
