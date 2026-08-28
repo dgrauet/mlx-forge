@@ -62,3 +62,42 @@ def test_recipe_module_paths_are_importable():
 
     for name, module_path in AVAILABLE_RECIPES.items():
         assert importlib.import_module(module_path), name
+
+
+class TestPythonVersionsAgree:
+    """The classifiers must not advertise a Python the CI matrix never runs."""
+
+    def test_classifiers_match_the_ci_matrix(self):
+        import re
+        import tomllib
+
+        pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+        advertised = {
+            c.rsplit(" :: ", 1)[-1]
+            for c in pyproject["project"]["classifiers"]
+            if c.startswith("Programming Language :: Python :: 3.")
+        }
+        ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        matrix = set(re.findall(r'"(3\.\d+)"', ci))
+        assert advertised == matrix, f"classifiers {advertised} vs CI matrix {matrix}"
+
+    def test_ci_lint_uses_the_locked_ruff(self):
+        ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        assert "uvx ruff" not in ci, "lint must run the lockfile-pinned ruff (uv run ruff)"
+
+
+class TestArchitectureTrees:
+    """README and CLAUDE.md each draw the source tree; both drifted (metadata.py
+    and templates/ missing). Every top-level module must appear in both."""
+
+    @pytest.mark.parametrize("doc", ["README.md", "CLAUDE.md"])
+    def test_every_module_is_drawn(self, doc):
+        text = (REPO_ROOT / doc).read_text()
+        modules = sorted(
+            p.name
+            for p in (REPO_ROOT / "src" / "mlx_forge").glob("*.py")
+            if p.name != "__init__.py"
+        )
+        missing = [m for m in modules if m not in text]
+        assert missing == [], f"{doc} architecture tree omits {missing}"
+        assert "templates/" in text, f"{doc} architecture tree omits templates/"

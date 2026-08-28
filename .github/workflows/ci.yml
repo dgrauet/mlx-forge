@@ -14,8 +14,9 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
-      - run: uvx ruff check src/ tests/
-      - run: uvx ruff format --check src/ tests/
+      - run: uv sync --extra dev
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
 
   type:
     # ty check is now blocking — baseline cleared 2026-05-01 (5 → 0).
