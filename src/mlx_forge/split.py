@@ -46,17 +46,23 @@ def split_model(
     all_weights = cast(dict[str, mx.array], mx.load(str(unified_path)))
     print(f"Loaded {len(all_weights)} tensors")
 
-    # Group weights by output file
-    file_weights: dict[str, dict[str, mx.array]] = defaultdict(dict)
-    unmatched: dict[str, mx.array] = {}
+    # Group weights by output file. Nested so that key/value fall out of
+    # scope with this function's frame instead of lingering as split_model
+    # locals holding the last-popped tensor alive for the rest of the run.
+    def _group(source: dict[str, mx.array]) -> tuple[dict[str, dict[str, mx.array]], dict]:
+        grouped: dict[str, dict[str, mx.array]] = defaultdict(dict)
+        leftover: dict[str, mx.array] = {}
+        for key in list(source):
+            value = source.pop(key)
+            prefix = key.split(".")[0]
+            if prefix in component_map:
+                grouped[component_map[prefix]][key] = value
+            else:
+                leftover[key] = value
+        return grouped, leftover
 
-    for key, value in all_weights.items():
-        prefix = key.split(".")[0]
-        if prefix in component_map:
-            output_file = component_map[prefix]
-            file_weights[output_file][key] = value
-        else:
-            unmatched[key] = value
+    file_weights, unmatched = _group(all_weights)
+    del all_weights
 
     if unmatched:
         if fallback_filename:
@@ -66,8 +72,12 @@ def split_model(
             file_weights[fallback_filename].update(unmatched)
         else:
             print(f"WARNING: {len(unmatched)} unmatched keys skipped")
+    unmatched.clear()
 
-    # Save each component
+    # Save each component. Popping every key out of all_weights above (and
+    # deleting it) means file_weights holds the only references left, so
+    # weights.clear() below drops the last reference and gc.collect() +
+    # mx.clear_cache() actually reclaim the component's memory.
     result = {}
     sorted_items = sorted(file_weights.items())
     for filename, weights in tqdm(sorted_items, desc="Saving components", leave=False):

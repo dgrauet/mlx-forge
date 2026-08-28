@@ -1,6 +1,8 @@
 """Tests for split_model utility."""
 
+import gc
 import json
+import weakref
 
 import mlx.core as mx
 import pytest
@@ -138,3 +140,52 @@ class TestSplitModel:
         split_model(tmp_path, {"a": "a.safetensors", "b": "b.safetensors"})
 
         assert seen == [1, 2]  # one call per component, all its tensors at once
+
+    def test_each_component_is_actually_released_after_saving(self, tmp_path, monkeypatch):
+        """Regression test for the "free between components" claim.
+
+        Before the fix, `all_weights` (the `mx.load` dict) and `sorted_items`
+        kept a reference to every array for the whole save loop, so
+        `weights.clear()` + `gc.collect()` + `mx.clear_cache()` had nothing
+        left to reclaim. This proves an array is actually collected right
+        after its component is saved: a weakref taken on one tensor of a
+        component dies by the time that component's `gc.collect()` runs, which
+        is only possible if no other object (all_weights, sorted_items, or a
+        lingering loop-local) still holds it.
+
+        This does NOT prove peak process memory stays low, or that MLX's own
+        GPU-side buffers are freed (that's `mx.clear_cache()`'s job, not
+        Python's) — only that the Python-level reference chain is severed
+        component by component, as the fix and comment claim.
+        """
+        import mlx_forge.split as split_mod
+
+        weights = {"a.w": mx.ones((4, 4)), "b.w": mx.ones((4, 4))}
+        self._create_unified(tmp_path, weights)
+
+        refs: list[weakref.ReferenceType] = []
+        real_save = split_mod.mx.save_safetensors
+
+        def spy_save(path, arrs):
+            # Snapshot a weakref to this component's tensor before it is
+            # saved and cleared, so we can check it dies at the next
+            # gc.collect() — i.e. this component only, not the whole run.
+            refs.append(weakref.ref(next(iter(arrs.values()))))
+            real_save(path, arrs)
+
+        monkeypatch.setattr(split_mod.mx, "save_safetensors", spy_save)
+
+        collect_calls = []
+        real_collect = gc.collect
+
+        def spy_collect():
+            real_collect()
+            collect_calls.append(refs[-1]() is None if refs else None)
+
+        monkeypatch.setattr(split_mod.gc, "collect", spy_collect)
+
+        split_model(tmp_path, {"a": "a.safetensors", "b": "b.safetensors"})
+
+        # One gc.collect() per component, and each component's tensor is
+        # already gone by the time its own collect() runs.
+        assert collect_calls == [True, True]
