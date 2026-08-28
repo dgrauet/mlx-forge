@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12](https://github.com/dgrauet/mlx-forge/compare/v0.4.11...v0.4.12) (2026-08-28)
+
+
+### Features
+
+* add the LTX-2.5 recipe ([#88](https://github.com/dgrauet/mlx-forge/issues/88)) ([d8fe8a0](https://github.com/dgrauet/mlx-forge/commit/d8fe8a0dbfae730435d1e26768aa565e6e0db634))
+* **ltx-2.5:** carry model_version and config into pack headers and configs ([#93](https://github.com/dgrauet/mlx-forge/issues/93)) ([0003606](https://github.com/dgrauet/mlx-forge/commit/00036067485d64de6604bc8947e91db758f6f7bd))
+
+
+### Bug Fixes
+
+* address the Important findings from the project audit ([#91](https://github.com/dgrauet/mlx-forge/issues/91)) ([86a75bf](https://github.com/dgrauet/mlx-forge/commit/86a75bf8c00c2bb01963cf25a7a7cbdcce527561))
+* **ltx-2.5:** flatten the vocoder's main generator to the 2.3 layout ([#92](https://github.com/dgrauet/mlx-forge/issues/92)) ([fc0f1ec](https://github.com/dgrauet/mlx-forge/commit/fc0f1ec1166007c528711f012ba0547e115b4c4c))
+* **ltx-2.5:** follow upstream's licence-file restructure to LICENSE-2_x ([#94](https://github.com/dgrauet/mlx-forge/issues/94)) ([deef75b](https://github.com/dgrauet/mlx-forge/commit/deef75bdcbdacea3570ce3206b7bc42dd5880ea7))
+* stop split from clobbering the manifest; record hunyuan3d quantization ([#90](https://github.com/dgrauet/mlx-forge/issues/90)) ([11efc0b](https://github.com/dgrauet/mlx-forge/commit/11efc0b2e5d7bff5f76c809b6a3cac6768477a48))
+* **upload:** --link adds to the recorded extra_links instead of replacing them ([#95](https://github.com/dgrauet/mlx-forge/issues/95)) ([d21c73b](https://github.com/dgrauet/mlx-forge/commit/d21c73b544b7bbccd9a2afce9703f444f1aa9228))
+
 ## [0.4.11](https://github.com/dgrauet/mlx-forge/compare/v0.4.10...v0.4.11) (2026-08-15)
 
 
