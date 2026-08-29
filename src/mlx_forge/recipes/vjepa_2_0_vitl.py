@@ -70,11 +70,12 @@ from ..convert import (
     load_safetensors,
     load_torch_state_dict,
     print_output_summary,
+    process_component,
     quantize_component,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import _materialize, read_quantize_config, write_quantize_config
+from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
     count_layer_indices,
@@ -344,20 +345,21 @@ def _process_encoder(source_path: Path, output_dir: Path) -> int:
 
     raw = _load_pt_encoder(source_path)
     print(f"  Sanitizing {len(raw)} keys...")
-    output: dict[str, mx.array] = {}
-    for key, weight in raw.items():
-        new_key = _sanitize_encoder_key(key)
-        weight = _encoder_transform(new_key, weight)
-        _materialize(weight)
-        output[f"encoder.{new_key}"] = weight
 
-    count = len(output)
-    out_path = output_dir / "encoder.safetensors"
-    print(f"  Saving {count} weights → {out_path.name}...")
-    mx.save_safetensors(str(out_path), output)
+    def _transform(new_key: str, weight: mx.array, _component: str) -> mx.array:
+        return _encoder_transform(new_key, weight)
+
+    count = process_component(
+        raw,
+        "encoder",
+        list(raw),
+        output_dir,
+        "encoder",
+        sanitizer=_sanitize_encoder_key,
+        transform=_transform,
+    )
     print(f"  Done in {time.monotonic() - t0:.1f}s")
-
-    del output, raw
+    del raw
     gc.collect()
     mx.clear_cache()
     return count
@@ -378,19 +380,17 @@ def _process_predictor(source_path: Path, output_dir: Path) -> int:
         return 0
 
     print(f"  Sanitizing {len(raw)} keys...")
-    output: dict[str, mx.array] = {}
-    for key, weight in raw.items():
-        new_key = _sanitize_encoder_key(key)  # strips `module.backbone.`
-        _materialize(weight)  # no transpose — predictor has no conv weights
-        output[f"predictor.{new_key}"] = weight
-
-    count = len(output)
-    out_path = output_dir / "predictor.safetensors"
-    print(f"  Saving {count} weights → {out_path.name}...")
-    mx.save_safetensors(str(out_path), output)
+    # strips `module.backbone.`; no transpose — predictor has no conv weights
+    count = process_component(
+        raw,
+        "predictor",
+        list(raw),
+        output_dir,
+        "predictor",
+        sanitizer=_sanitize_encoder_key,
+    )
     print(f"  Done in {time.monotonic() - t0:.1f}s")
-
-    del output, raw
+    del raw
     gc.collect()
     mx.clear_cache()
     return count
@@ -418,19 +418,16 @@ def _process_probe(
     print(f"  Detected classifier heads: {heads}")
 
     print(f"  Sanitizing {len(raw)} keys...")
-    output: dict[str, mx.array] = {}
-    for key, weight in raw.items():
-        new_key = _sanitize_probe_key(key)
-        _materialize(weight)
-        output[f"{comp_name}.{new_key}"] = weight
-
-    count = len(output)
-    out_path = output_dir / f"{comp_name}.safetensors"
-    print(f"  Saving {count} weights → {out_path.name}...")
-    mx.save_safetensors(str(out_path), output)
+    count = process_component(
+        raw,
+        comp_name,
+        list(raw),
+        output_dir,
+        comp_name,
+        sanitizer=_sanitize_probe_key,
+    )
     print(f"  Done in {time.monotonic() - t0:.1f}s")
-
-    del output, raw
+    del raw
     gc.collect()
     mx.clear_cache()
     return count, heads
