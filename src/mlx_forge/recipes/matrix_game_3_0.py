@@ -32,11 +32,12 @@ from ..convert import (
     load_safetensors,
     load_torch_state_dict,
     print_output_summary,
+    process_component,
     quantize_component,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import _materialize, read_quantize_config, write_quantize_config
+from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import transpose_conv
 from ..validate import (
     ValidationResult,
@@ -455,27 +456,22 @@ def _convert_dit(args, download_dir: Path, output_dir: Path, component: str, hf_
 
     print(f"\nProcessing {len(dit_weights)} {component} keys...")
     t0 = time.monotonic()
-    dit_output: dict[str, mx.array] = {}
-    for key in dit_weights:
-        new_key = sanitize_dit_key(key)
-        if new_key is None:
-            continue
-        weight = dit_weights[key]
-        weight = maybe_transpose(new_key, weight, "dit")
-        _materialize(weight)
+    count = process_component(
+        dit_weights,
+        component,
+        list(dit_weights),
+        output_dir,
+        component,
+        sanitizer=sanitize_dit_key,
+        # maybe_transpose's "dit" branch is keyed on the literal string "dit", not on
+        # which DiT variant is being converted (dit vs dit_distilled need the same
+        # patch_embedding Conv3d->Linear handling) — pin it, don't forward `component`.
+        transform=lambda new_key, weight, _component: maybe_transpose(new_key, weight, "dit"),
         # Store in bfloat16 (source distilled checkpoint is float32, base is already bf16)
-        if weight.dtype == mx.float32:
-            weight = weight.astype(mx.bfloat16)
-        dit_output[f"{component}.{new_key}"] = weight
-
-    count = len(dit_output)
-    out_file = f"{component}.safetensors"
-    print(f"  Saving {count} weights to {out_file}...")
-    mx.save_safetensors(str(output_dir / out_file), dit_output)
-    elapsed = time.monotonic() - t0
-    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
-
-    del dit_output, dit_weights
+        dtype=lambda _key, weight: mx.bfloat16 if weight.dtype == mx.float32 else None,
+    )
+    print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+    del dit_weights
     gc.collect()
     mx.clear_cache()
     return count
@@ -490,21 +486,18 @@ def _convert_t5_pth(pth_path: str, output_dir: Path) -> int:
 
     print(f"\nProcessing {len(t5_raw)} T5 keys...")
     t0 = time.monotonic()
-    t5_output: dict[str, mx.array] = {}
-    for key, value in t5_raw.items():
-        new_key = sanitize_t5_key(key)
-        if new_key is None:
-            continue
-        weight = mx.array(value.float().numpy()).astype(mx.bfloat16)
-        t5_output[f"t5_encoder.{new_key}"] = weight
-
-    count = len(t5_output)
-    print(f"  Saving {count} weights to t5_encoder.safetensors...")
-    mx.save_safetensors(str(output_dir / "t5_encoder.safetensors"), t5_output)
-    elapsed = time.monotonic() - t0
-    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
-
-    del t5_output, t5_raw
+    count = process_component(
+        t5_raw,
+        "t5_encoder",
+        list(t5_raw),
+        output_dir,
+        "t5_encoder",
+        sanitizer=sanitize_t5_key,
+        load_weight=lambda value: mx.array(value.float().numpy()),
+        dtype=mx.bfloat16,
+    )
+    print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+    del t5_raw
     gc.collect()
     mx.clear_cache()
     return count
@@ -536,23 +529,22 @@ def _convert_vae_pth(pth_path: str, output_path: Path, prefix: str) -> int:
 
     print(f"\nProcessing {len(vae_raw)} VAE keys...")
     t0 = time.monotonic()
-    vae_output: dict[str, mx.array] = {}
-    for key, value in vae_raw.items():
-        new_key = sanitize_vae_key(key)
-        if new_key is None:
-            continue
-        weight = mx.array(value.float().numpy())
-        weight = maybe_transpose(new_key, weight, "vae")
-        _materialize(weight)
-        vae_output[f"{prefix}.{new_key}"] = weight
-
-    count = len(vae_output)
-    print(f"  Saving {count} weights to {output_path.name}...")
-    mx.save_safetensors(str(output_path), vae_output)
-    elapsed = time.monotonic() - t0
-    print(f"  Done: {count} weights saved in {elapsed:.1f}s")
-
-    del vae_output, vae_raw
+    count = process_component(
+        vae_raw,
+        prefix,
+        list(vae_raw),
+        output_path.parent,
+        prefix,
+        sanitizer=sanitize_vae_key,
+        # maybe_transpose's "vae" branch is keyed on the literal string "vae", not on
+        # which VAE variant is being converted — pin it, don't forward `prefix`
+        # (vae_lightvae, vae_lightvae_v2 would otherwise skip conv transposition).
+        transform=lambda new_key, weight, _component: maybe_transpose(new_key, weight, "vae"),
+        load_weight=lambda value: mx.array(value.float().numpy()),
+        output_filename=output_path.name,
+    )
+    print(f"  Done: {count} weights saved in {time.monotonic() - t0:.1f}s")
+    del vae_raw
     gc.collect()
     mx.clear_cache()
     return count
