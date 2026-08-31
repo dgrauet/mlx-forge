@@ -65,6 +65,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    add_source_arg,
     default_output_dir,
     fmt_size,
     load_safetensors,
@@ -874,11 +875,10 @@ def validate(args) -> None:  # noqa: C901
 
 def add_convert_args(parser) -> None:
     """Register convert arguments for the vjepa-2.0-vitl recipe."""
-    parser.add_argument(
-        "--source",
-        type=str,
-        default=None,
+    add_source_arg(
+        parser,
         help="Path to vitl.pt (V-JEPA 2.0 ViT-L encoder checkpoint). Required.",
+        required=True,
     )
     parser.add_argument(
         "--ssv2-source",

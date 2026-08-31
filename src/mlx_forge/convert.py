@@ -6,10 +6,12 @@ model components during PyTorch-to-MLX conversion.
 
 from __future__ import annotations
 
+import argparse
 import gc
 import json
 import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -75,6 +77,36 @@ def add_common_convert_args(
         help="Quantization group size (default: 64)",
     )
     parser.add_argument("--dry-run", action="store_true", help=dry_run_help)
+
+
+class _DeprecatedAlias(argparse.Action):
+    """Store into `dest` like `store`, warning once that the spelling is deprecated."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(f"WARNING: {option_string} is deprecated, use --source", file=sys.stderr)
+        setattr(namespace, self.dest, values)
+
+
+def add_source_arg(
+    parser: argparse.ArgumentParser,
+    *,
+    help: str,
+    required: bool = False,
+    aliases: tuple[str, ...] = (),
+) -> None:
+    """Register the recipe's single local-source flag as `--source`.
+
+    Every recipe that reads one local path instead of downloading spells it
+    the same way; `aliases` keeps a recipe's former spelling working (hidden
+    from --help, one deprecation warning) so documented commands do not break.
+    Multi-file recipes (matrix-game's --dit/--t5/--vae-checkpoint) are not
+    "one source" and keep their own flags.
+    """
+    parser.add_argument(
+        "--source", dest="source", type=str, default=None, required=required, help=help
+    )
+    for alias in aliases:
+        parser.add_argument(alias, dest="source", action=_DeprecatedAlias, help=argparse.SUPPRESS)
 
 
 def load_torch_state_dict(

@@ -24,6 +24,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    add_source_arg,
     default_output_dir,
     download_hf_files,
     load_safetensors,
@@ -376,8 +377,8 @@ def convert(args) -> None:
 
 def _convert_shape(args, output_dir: Path) -> None:
     """Convert shape generation stage (DiT + ShapeVAE + DINOv2-large)."""
-    if args.checkpoint:
-        ckpt_path = Path(args.checkpoint)
+    if args.source:
+        ckpt_path = Path(args.source)
     else:
         print(f"Downloading shape checkpoint from {HF_REPO_ID}...")
         dl_dir = Path("./downloads/hunyuan3d-2.1")
@@ -463,13 +464,13 @@ def _convert_paint(args, output_dir: Path) -> None:
     total_weights = 0
 
     # Download all files if needed
-    if not args.local_path:
+    if not args.source:
         dl_dir = Path("./downloads/hunyuan3d-2.1")
         print(f"Downloading paint model from {HF_REPO_ID}...")
         download_hf_files(HF_REPO_ID, PAINT_FILES, dl_dir)
         base_dir = dl_dir / PAINT_SUBDIR
     else:
-        base_dir = Path(args.local_path)
+        base_dir = Path(args.source)
 
     # --- UNet (.bin format, torch) ---
     print("Converting paint UNet...")
@@ -785,14 +786,10 @@ def add_convert_args(parser) -> None:
         choices=["shape", "paint"],
         help="Conversion stage: 'shape' or 'paint' (default: shape)",
     )
-    parser.add_argument(
-        "--checkpoint", type=str, default=None, help="Path to local .ckpt file (shape stage only)"
-    )
-    parser.add_argument(
-        "--local-path",
-        type=str,
-        default=None,
-        help="Local path to paintpbr model directory (paint stage)",
+    add_source_arg(
+        parser,
+        help="Local shape .ckpt (shape stage) or paint model directory (paint stage)",
+        aliases=("--checkpoint", "--local-path"),
     )
     parser.add_argument(
         "--dino-path",

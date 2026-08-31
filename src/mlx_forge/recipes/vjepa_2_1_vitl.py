@@ -57,6 +57,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    add_source_arg,
     default_output_dir,
     load_torch_state_dict,
     print_output_summary,
@@ -647,11 +648,10 @@ def validate(args) -> None:
 
 def add_convert_args(parser) -> None:
     """Register convert arguments."""
-    parser.add_argument(
-        "--source",
-        type=str,
-        default=None,
+    add_source_arg(
+        parser,
         help="Path to the Meta V-JEPA 2.1 ViT-L RoPE encoder .pt checkpoint (required).",
+        required=True,
     )
     add_common_convert_args(
         parser,

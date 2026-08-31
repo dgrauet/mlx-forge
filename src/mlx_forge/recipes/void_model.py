@@ -33,6 +33,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    add_source_arg,
     default_output_dir,
     download_hf_files,
     fmt_size,
@@ -412,10 +413,8 @@ def validate(args) -> None:
 
 def add_convert_args(parser) -> None:
     """Add VOID model convert arguments to a parser."""
-    parser.add_argument(
-        "--source",
-        type=str,
-        default=None,
+    add_source_arg(
+        parser,
         help="Path to directory containing void_pass1.safetensors and void_pass2.safetensors "
         "(required).",
     )

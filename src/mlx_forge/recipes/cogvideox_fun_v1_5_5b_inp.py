@@ -35,6 +35,7 @@ import mlx.core as mx
 
 from ..convert import (
     add_common_convert_args,
+    add_source_arg,
     copy_required_files,
     default_output_dir,
     download_hf_files,
@@ -734,10 +735,8 @@ def validate(args) -> None:
 
 def add_convert_args(parser) -> None:
     """Add CogVideoX-Fun convert arguments to a parser."""
-    parser.add_argument(
-        "--source",
-        type=str,
-        default=None,
+    add_source_arg(
+        parser,
         help="Path to local model directory (skips HF download). "
         "Must contain transformer/, text_encoder/, and vae/ subdirectories.",
     )
