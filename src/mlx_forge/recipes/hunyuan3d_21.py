@@ -28,11 +28,12 @@ from ..convert import (
     download_hf_files,
     load_safetensors,
     load_torch_state_dict,
+    process_component,
     quantize_component,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
-from ..quantize import _materialize, read_quantize_config, write_quantize_config
+from ..quantize import read_quantize_config, write_quantize_config
 from ..transpose import needs_transpose, transpose_conv
 from ..validate import (
     ValidationResult,
@@ -394,25 +395,20 @@ def _convert_shape(args, output_dir: Path) -> None:
         section_weights = ckpt[section_key]
         print(f"Processing {component_name} ({len(section_weights)} keys)...")
 
-        sanitizer = SHAPE_SANITIZERS[component_name]
-        component_weights: dict[str, mx.array] = {}
-        for key, tensor in section_weights.items():
-            new_key = sanitizer(key)
-            if new_key is None:
-                continue
-            weight = mx.array(tensor.float().numpy())
-            weight = weight.astype(mx.float16)
-            weight = shape_maybe_transpose(new_key, weight, component_name)
-            _materialize(weight)
-            component_weights[f"{component_name}.{new_key}"] = weight
-
-        output_file = output_dir / f"{component_name}.safetensors"
-        mx.save_safetensors(str(output_file), component_weights)
-        count = len(component_weights)
+        count = process_component(
+            section_weights,
+            component_name,
+            list(section_weights),
+            output_dir,
+            component_name,
+            sanitizer=SHAPE_SANITIZERS[component_name],
+            transform=shape_maybe_transpose,
+            load_weight=lambda tensor: mx.array(tensor.float().numpy()),
+            dtype=mx.float16,
+        )
         total_weights += count
-        print(f"  Saved {count} weights to {output_file}")
 
-        del component_weights, section_weights
+        del section_weights
         gc.collect()
         mx.clear_cache()
 
@@ -445,24 +441,21 @@ def _convert_component(
     component: str,
     out_file: Path,
 ) -> int:
-    """Convert, sanitize, transpose, and save a component."""
-    converted = {}
-    for key, val in raw.items():
-        new_key = sanitizer(key)
-        if new_key is None:
-            continue
-        val = transposer(new_key, val, component)
-        val = val.astype(mx.float16)
-        _materialize(val)
-        converted[new_key] = val
+    """Convert, sanitize, transpose, cast to fp16 and save a paint-stage component.
 
-    mx.save_safetensors(str(out_file), converted)
-    count = len(converted)
-    print(f"  Saved {count} weights to {out_file}")
-    del converted
-    gc.collect()
-    mx.clear_cache()
-    return count
+    component_prefix=None: the published paint files hold bare keys.
+    """
+    return process_component(
+        raw,
+        component,
+        list(raw),
+        out_file.parent,
+        None,
+        sanitizer=sanitizer,
+        transform=transposer,
+        dtype=mx.float16,
+        output_filename=out_file.name,
+    )
 
 
 def _convert_paint(args, output_dir: Path) -> None:
@@ -531,24 +524,20 @@ def _convert_paint(args, output_dir: Path) -> None:
         dino_path = dl_dir / "model.safetensors"
 
     raw = load_safetensors(dino_path)
-    sanitized = {}
-    for key, val in raw.items():
-        new_key = sanitize_paint_dino_key(key)
-        if new_key is None:
-            continue
-        val = paint_maybe_transpose(new_key, val, "dino")
-        val = val.astype(mx.float16)
-        _materialize(val)
-        sanitized[new_key] = val
+    count = process_component(
+        raw,
+        "dino",
+        list(raw),
+        output_dir,
+        None,
+        sanitizer=sanitize_paint_dino_key,
+        transform=paint_maybe_transpose,
+        dtype=mx.float16,
+        finalize=fuse_dino_qkv,
+        output_filename="paint_dino.safetensors",
+    )
+    total_weights += count
     del raw
-
-    sanitized = fuse_dino_qkv(sanitized)
-
-    out_file = output_dir / "paint_dino.safetensors"
-    mx.save_safetensors(str(out_file), sanitized)
-    total_weights += len(sanitized)
-    print(f"  Saved {len(sanitized)} weights to {out_file}")
-    del sanitized
     gc.collect()
     mx.clear_cache()
 
