@@ -30,9 +30,12 @@ def test_write_config_files_records_quantize_config(tmp_path, monkeypatch):
     assert qconfig["bits"] == 8
     assert qconfig["group_size"] == 64
     assert qconfig["quantized_components"] == ["dit"]
-    # The legacy record stays for packs whose tooling still reads it.
+    # split_model.json records the same flat quantization shape every recipe
+    # uses; quantize_config.json above stays the authority for bits/group_size.
     split_model = json.loads((tmp_path / "split_model.json").read_text())
-    assert split_model["quantization"]["bits"] == 8
+    assert split_model["quantized"] is True
+    assert split_model["quantization_bits"] == 8
+    assert split_model["quantization_group_size"] == 64
 
 
 def test_write_config_files_unquantized_writes_no_config(tmp_path, monkeypatch):

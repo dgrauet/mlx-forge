@@ -39,7 +39,9 @@ from ..convert import (
     load_weights,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
+    source_download_dir,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
@@ -357,7 +359,9 @@ def _dry_run(args, output_dir: Path) -> None:
         print(f"\nSource:     {args.source} (local)")
     else:
         print(f"\nSource:     {REPO_ID} (HuggingFace)")
-        print(f"Download:   ~{fmt_size(_CHECKPOINT_DOWNLOAD_MB)} → ./models/ideogram-4-src")
+        print(
+            f"Download:   ~{fmt_size(_CHECKPOINT_DOWNLOAD_MB)} → {source_download_dir(output_dir)}"
+        )
         print(f"Files:      {len(_ALL_HF_FILES)} files")
 
     print(f"\nOutput dir: {output_dir}")
@@ -407,7 +411,7 @@ def convert(args) -> None:
         source_dir = Path(args.source)
         print(f"Using local source: {source_dir}")
     else:
-        source_dir = Path("models") / "ideogram-4-src"
+        source_dir = source_download_dir(output_dir)
         print(f"Downloading {len(_ALL_HF_FILES)} files from {REPO_ID}...")
         print(f"(~{fmt_size(_CHECKPOINT_DOWNLOAD_MB)} total, may take a while)")
         download_hf_files(REPO_ID, _ALL_HF_FILES, source_dir)
@@ -446,14 +450,13 @@ def convert(args) -> None:
     with open(output_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
 
-    # Write split_model.json
+    # split_model.json is written once, after the optional quantization
+    # below, so `quantized` reflects what actually happened.
     split_info: dict = {
         "format": "split",
         "components": COMPONENTS,
         **METADATA.as_split_fields(),
-        "quantized": False,
     }
-    write_split_model(output_dir, split_info)
 
     # Copy pipeline files
     print("\nCopying pipeline files...")
@@ -489,11 +492,6 @@ def convert(args) -> None:
             should_quantize=_should_quantize_text_encoder,
         )
 
-        split_info["quantized"] = True
-        split_info["quantization_bits"] = args.bits
-        split_info["quantization_group_size"] = args.group_size
-        write_split_model(output_dir, split_info)
-
         write_quantize_config(
             output_dir,
             bits=args.bits,
@@ -506,6 +504,13 @@ def convert(args) -> None:
             if p.is_file():
                 size_mb = p.stat().st_size / (1024 * 1024)
                 print(f"  {p.name}: {size_mb:.1f} MB")
+
+    split_info.update(
+        quantization_manifest_fields(
+            quantized=args.quantize, bits=args.bits, group_size=args.group_size
+        )
+    )
+    write_split_model(output_dir, split_info)
 
     print("\nDone!")
 

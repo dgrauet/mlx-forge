@@ -62,6 +62,7 @@ from ..convert import (
     load_torch_state_dict,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
     write_split_model,
 )
@@ -444,10 +445,8 @@ def convert(args) -> None:
             ENCODER_COMPONENT: OUTPUT_FILENAME,
             PREDICTOR_COMPONENT: PREDICTOR_OUTPUT_FILENAME,
         },
-        "quantized": bool(args.quantize),
         **METADATA.as_split_fields(),
     }
-    write_split_model(output_dir, split_info)
 
     # ----- Optional quantization -----
     if args.quantize:
@@ -466,6 +465,13 @@ def convert(args) -> None:
             should_quantize=should_quantize_predictor,
         )
         write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
+
+    split_info.update(
+        quantization_manifest_fields(
+            quantized=args.quantize, bits=args.bits, group_size=args.group_size
+        )
+    )
+    write_split_model(output_dir, split_info)
 
     # ----- Summary -----
     print(f"\n{'=' * 60}")

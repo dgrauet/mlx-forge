@@ -104,3 +104,20 @@ def test_a_recipe_declaration_round_trips_through_the_manifest(recipe):
 
     assert resolved is not None, f"{recipe}'s own manifest does not identify it"
     assert resolved.name == metadata.name
+
+
+def test_hunyuan3d_manifest_uses_the_flat_quantization_keys(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    import mlx_forge.convert as convert
+    from mlx_forge.recipes.hunyuan3d_21 import _write_config_files
+
+    monkeypatch.setattr(convert, "ensure_license_file", lambda *a, **k: [])
+    args = SimpleNamespace(stage="shape", quantize=True, bits=4, group_size=32)
+    _write_config_files(tmp_path, {"components": ["dit"]}, ["dit"], args, "dit")
+    manifest = json.loads((tmp_path / "split_model.json").read_text())
+    assert manifest["quantized"] is True
+    assert manifest["quantization_bits"] == 4
+    assert manifest["quantization_group_size"] == 32
+    assert "quantization" not in manifest

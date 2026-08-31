@@ -30,7 +30,9 @@ from ..convert import (
     load_safetensors,
     load_torch_state_dict,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
+    source_download_dir,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
@@ -381,7 +383,7 @@ def _convert_shape(args, output_dir: Path) -> None:
         ckpt_path = Path(args.source)
     else:
         print(f"Downloading shape checkpoint from {HF_REPO_ID}...")
-        dl_dir = Path("./downloads/hunyuan3d-2.1")
+        dl_dir = source_download_dir(output_dir)
         download_hf_files(HF_REPO_ID, [SHAPE_CKPT_SUBPATH], dl_dir)
         ckpt_path = dl_dir / SHAPE_CKPT_SUBPATH
 
@@ -465,7 +467,7 @@ def _convert_paint(args, output_dir: Path) -> None:
 
     # Download all files if needed
     if not args.source:
-        dl_dir = Path("./downloads/hunyuan3d-2.1")
+        dl_dir = source_download_dir(output_dir)
         print(f"Downloading paint model from {HF_REPO_ID}...")
         download_hf_files(HF_REPO_ID, PAINT_FILES, dl_dir)
         base_dir = dl_dir / PAINT_SUBDIR
@@ -520,7 +522,7 @@ def _convert_paint(args, output_dir: Path) -> None:
     if args.dino_path:
         dino_path = Path(args.dino_path) / "model.safetensors"
     else:
-        dl_dir = Path("./downloads/dinov2-giant")
+        dl_dir = source_download_dir(output_dir) / "dinov2-giant"
         download_hf_files(HF_REPO_DINO_GIANT, ["model.safetensors"], dl_dir)
         dino_path = dl_dir / "model.safetensors"
 
@@ -651,12 +653,12 @@ def _write_config_files(output_dir, config, components, args, quantize_target):
         **METADATA.for_variant(args.stage).as_split_fields(),
         "components": {name: f"{name}.safetensors" for name in config["components"]},
     }
+    split_model.update(
+        quantization_manifest_fields(
+            quantized=args.quantize, bits=args.bits, group_size=args.group_size
+        )
+    )
     if args.quantize:
-        split_model["quantization"] = {
-            "bits": args.bits,
-            "group_size": args.group_size,
-            "quantized_components": [quantize_target],
-        }
         # quantize_config.json is the shared-layer record: upload.py recovers
         # bits/group_size from it for the model card, and validate gates the
         # scales/biases checks on it. Recording quantization only in

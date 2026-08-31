@@ -44,7 +44,9 @@ from ..convert import (
     load_weights,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
+    source_download_dir,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
@@ -429,7 +431,7 @@ def convert(args) -> None:
 
     # Determine source: local path or HF download
     local_source = Path(args.source) if args.source else None
-    download_dir = Path("models") / "cogvideox-fun-v1.5-5b-inp-src"
+    download_dir = source_download_dir(output_dir)
 
     if not local_source:
         # Download all files from HuggingFace
@@ -474,7 +476,8 @@ def convert(args) -> None:
     # Copy pipeline config files (tokenizer, scheduler, model_index)
     copy_pipeline_configs(source_dir, output_dir)
 
-    # Split model manifest
+    # Split model manifest — written once, below, after the optional
+    # quantization so `quantized` reflects what actually happened.
     split_info: dict = {
         "format": "split",
         "components": COMPONENTS,
@@ -485,7 +488,6 @@ def convert(args) -> None:
             "text_encoder": "T5-v1.1-XXL encoder (24 layers, d_model=4096).",
         },
     }
-    write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # 5. Optional quantization (transformer + text_encoder, skip vae)
@@ -511,10 +513,12 @@ def convert(args) -> None:
             skip_components=sorted(skip),
         )
 
-        split_info["quantized"] = True
-        split_info["quantization_bits"] = args.bits
-        split_info["quantization_group_size"] = args.group_size
-        write_split_model(output_dir, split_info)
+    split_info.update(
+        quantization_manifest_fields(
+            quantized=args.quantize, bits=args.bits, group_size=args.group_size
+        )
+    )
+    write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # Summary

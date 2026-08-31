@@ -33,7 +33,9 @@ from ..convert import (
     load_torch_state_dict,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
+    source_download_dir,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
@@ -567,7 +569,7 @@ def convert(args) -> None:
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    download_dir = Path("models") / "matrix-game-3.0-src"
+    download_dir = source_download_dir(output_dir)
 
     total_weights = 0
 
@@ -673,13 +675,13 @@ def convert(args) -> None:
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
 
-    # Split model manifest
+    # Split model manifest — written once, below, after the optional
+    # quantization so `quantized` reflects what actually happened.
     split_info: dict = {
         "format": "split",
         "components": COMPONENTS,
         **METADATA.as_split_fields(),
     }
-    write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # 9. Optional quantization (both DiT variants)
@@ -695,13 +697,16 @@ def convert(args) -> None:
                 should_quantize=should_quantize,
             )
 
-        split_info["quantized"] = True
-        split_info["quantization_bits"] = args.bits
-        split_info["quantization_group_size"] = args.group_size
         # Also record it where validate() looks: gating the scales/biases checks
         # on quantize_config.json meant they never ran for this recipe.
         write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
-        write_split_model(output_dir, split_info)
+
+    split_info.update(
+        quantization_manifest_fields(
+            quantized=args.quantize, bits=args.bits, group_size=args.group_size
+        )
+    )
+    write_split_model(output_dir, split_info)
 
     # -----------------------------------------------------------------------
     # Summary

@@ -363,3 +363,37 @@ class TestAddSourceArg:
         parser = argparse.ArgumentParser()
         add_source_arg(parser, help="ckpt", aliases=("--checkpoint",))
         assert "--checkpoint" not in parser.format_help()
+
+
+class TestSourceDownloadDir:
+    def test_sibling_of_output(self):
+        from pathlib import Path
+
+        from mlx_forge.convert import source_download_dir
+
+        assert source_download_dir(Path("/m/x-mlx")) == Path("/m/x-mlx-src")
+        assert source_download_dir(Path("models/y-mlx-q8")) == Path("models/y-mlx-q8-src")
+
+
+class TestQuantizationManifestFields:
+    def test_unquantized(self):
+        from mlx_forge.convert import quantization_manifest_fields
+
+        assert quantization_manifest_fields(quantized=False) == {"quantized": False}
+
+    def test_quantized_has_the_three_keys(self):
+        from mlx_forge.convert import quantization_manifest_fields
+
+        assert quantization_manifest_fields(quantized=True, bits=8, group_size=64) == {
+            "quantized": True,
+            "quantization_bits": 8,
+            "quantization_group_size": 64,
+        }
+
+    def test_quantized_requires_bits_and_group_size(self):
+        import pytest
+
+        from mlx_forge.convert import quantization_manifest_fields
+
+        with pytest.raises(ValueError):
+            quantization_manifest_fields(quantized=True)

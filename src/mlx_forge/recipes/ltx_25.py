@@ -39,7 +39,9 @@ from ..convert import (
     load_safetensors,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
+    source_download_dir,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
@@ -991,17 +993,10 @@ def _config_only(args, output_dir: Path, variants: list[str]) -> None:
 def _source_download_dir(output_dir: Path) -> Path:
     """Where `convert()` downloads upstream checkpoints for this run.
 
-    A sibling of `output_dir`, not a child of it (mirrors ltx_23's
-    `models/ltx-2.3-src`) — `upload.iter_model_files` walks `output_dir`
-    recursively with no exclusion for a nested source cache, so a download
-    directory placed inside the pack would ship 76+ GB of gated upstream
-    checkpoints to the public mirror alongside the converted weights.
-    `--output` can point anywhere, so this is derived from `output_dir`
-    rather than hardcoding "models/"; keeping it alongside `output_dir`
-    (rather than under a fixed tmp root) keeps the 42 GB downloads on the
-    same filesystem as the eventual output.
+    A sibling of `output_dir`, not a child of it — see `source_download_dir`
+    in convert.py for why.
     """
-    return output_dir.parent / f"{output_dir.name}-src"
+    return source_download_dir(output_dir)
 
 
 def convert(args) -> None:
@@ -1246,10 +1241,11 @@ def convert(args) -> None:
     info.update(
         {
             "transformer_variants": variants,
-            "quantized": bool(args.quantize),
-            "quantization_bits": args.bits if args.quantize else None,
             "delta": bool(args.skip_shared),
             "lora": lora_synced,
+            **quantization_manifest_fields(
+                quantized=args.quantize, bits=args.bits, group_size=args.group_size
+            ),
         }
     )
     write_split_model(output_dir, info)

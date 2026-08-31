@@ -40,7 +40,9 @@ from ..convert import (
     load_safetensors,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
+    source_download_dir,
     write_split_model,
 )
 from ..metadata import RecipeMetadata
@@ -207,7 +209,7 @@ def convert(args) -> None:
             raise SystemExit(1)
     else:
         # Download from HuggingFace
-        source_dir = Path("models") / "void-model-src"
+        source_dir = source_download_dir(output_dir)
         print(f"\nDownloading from {REPO_ID}...")
         download_hf_files(REPO_ID, PASS_FILES, source_dir)
 
@@ -239,18 +241,6 @@ def convert(args) -> None:
         json.dump(config, f, indent=2)
     print("\nSaved config.json")
 
-    # Without this, `mlx-forge upload models/void-model-mlx` cannot derive the
-    # repo name and refuses to run unless --repo-id is passed by hand.
-    write_split_model(
-        output_dir,
-        {
-            "format": "split",
-            "components": [Path(f).stem for f in PASS_FILES],
-            **METADATA.as_split_fields(),
-        },
-    )
-    print("Saved split_model.json")
-
     # -----------------------------------------------------------------------
     # Optional quantization (transformer weights only)
     # -----------------------------------------------------------------------
@@ -266,20 +256,21 @@ def convert(args) -> None:
 
         write_quantize_config(output_dir, bits=args.bits, group_size=args.group_size)
 
-        # The manifest above is written before quantizing, so it says nothing
-        # about it. Every published void repo went out that way, leaving the
-        # card unable to state its own width. Record it now that it is known.
-        write_split_model(
-            output_dir,
-            {
-                "format": "split",
-                "components": [Path(f).stem for f in PASS_FILES],
-                "quantized": True,
-                "quantization_bits": args.bits,
-                "quantization_group_size": args.group_size,
-                **METADATA.as_split_fields(),
-            },
-        )
+    # Without this, `mlx-forge upload models/void-model-mlx` cannot derive the
+    # repo name and refuses to run unless --repo-id is passed by hand. Written
+    # once, after quantizing, so `quantized` reflects what actually happened.
+    write_split_model(
+        output_dir,
+        {
+            "format": "split",
+            "components": [Path(f).stem for f in PASS_FILES],
+            **quantization_manifest_fields(
+                quantized=args.quantize, bits=args.bits, group_size=args.group_size
+            ),
+            **METADATA.as_split_fields(),
+        },
+    )
+    print("Saved split_model.json")
 
     # -----------------------------------------------------------------------
     # Summary

@@ -109,6 +109,34 @@ def add_source_arg(
         parser.add_argument(alias, dest="source", action=_DeprecatedAlias, help=argparse.SUPPRESS)
 
 
+def source_download_dir(output_dir: Path) -> Path:
+    """Where a recipe downloads its upstream files: a SIBLING of the output directory.
+
+    `<output>-src`, never a child — `upload.iter_model_files` walks the output
+    directory recursively with no exclusion for a source cache, so a nested
+    cache would be pushed to the Hub (76 GB of gated upstream weights, once).
+    A sibling also survives a custom --output, which `models/<x>-src` and
+    `./downloads/<x>` did not.
+    """
+    return output_dir.parent / f"{output_dir.name}-src"
+
+
+def quantization_manifest_fields(
+    *, quantized: bool, bits: int | None = None, group_size: int | None = None
+) -> dict:
+    """The manifest's quantization record, one shape for every recipe.
+
+    quantize_config.json stays the authority (upload/validate read it and
+    backfill from it); this only stops the manifests from disagreeing about
+    which keys exist and where they nest.
+    """
+    if not quantized:
+        return {"quantized": False}
+    if bits is None or group_size is None:
+        raise ValueError("a quantized manifest needs bits and group_size")
+    return {"quantized": True, "quantization_bits": bits, "quantization_group_size": group_size}
+
+
 def load_torch_state_dict(
     path: str | Path,
     *,

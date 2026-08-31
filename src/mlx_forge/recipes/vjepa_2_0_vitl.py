@@ -72,6 +72,7 @@ from ..convert import (
     load_torch_state_dict,
     print_output_summary,
     process_component,
+    quantization_manifest_fields,
     quantize_component,
     write_split_model,
 )
@@ -544,11 +545,8 @@ def convert(args) -> None:  # noqa: C901
     split_info: dict = {
         "format": "split",
         "components": {comp: f"{comp}.safetensors" for comp in components},
-        "quantized": bool(args.quantize),
         **METADATA.as_split_fields(),
     }
-    write_split_model(output_dir, split_info)
-    print("Saved split_model.json")
 
     # Optional quantization
     if args.quantize:
@@ -584,6 +582,14 @@ def convert(args) -> None:  # noqa: C901
             skip_keys_predictor=list(_PREDICTOR_SKIP_QUANT),
             skip_keys_probe=list(_PROBE_SKIP_QUANT),
         )
+
+    split_info.update(
+        quantization_manifest_fields(
+            quantized=args.quantize, bits=args.bits, group_size=args.group_size
+        )
+    )
+    write_split_model(output_dir, split_info)
+    print("Saved split_model.json")
 
     # Summary
     print(f"\n{'=' * 60}")
