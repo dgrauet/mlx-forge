@@ -21,6 +21,7 @@ are model facts, not style. Unifying them would create false equivalences.
 | **Key classification / sanitization** | Every checkpoint names its weights differently. `sanitize_*` encodes one upstream's naming, verified key by key. |
 | **Quantization scope** (`should_quantize`) | Which layers survive int4/int8 depends on the architecture — an embedding table is fine to quantize in one model and destroys quality in another. |
 | **Conv transposition** | PyTorch is channels-second, MLX channels-last, but *which* tensors are convs (and of what rank) is model-specific. `attn.proj.weight` is a Linear despite matching a patch-embed's name. |
+| **Output dtype policy** | Some checkpoints are shipped in a precision the model must not keep (Hunyuan3D's fp32 sections are served as fp16; Matrix-Game's fp32 distilled DiT as bf16). Expressed as `dtype=` on `process_component` — never as a loop. |
 | **Source format** | safetensors, `.pt`/`.pth` (4 recipes), fp8 with per-row scales (ideogram-4), sharded or single, sometimes nested inside a pickled container. |
 | **Component decomposition** | 1 output file (ernie-image-pe) to 6 (LTX-2.3, matrix-game), or two independent stages (hunyuan3d). |
 | **Pipeline files** | Which tokenizer/scheduler files the runtime needs, and whether they keep their directory. |
@@ -41,7 +42,10 @@ them is drifting.
 | Download from the Hub | `convert.download_hf_files` |
 | Load `.pt`/`.pth`/`.ckpt` | `convert.load_torch_state_dict` |
 | Load safetensors (sharded or not) | `convert.load_weights` / `load_safetensors` |
-| Per-component sanitize → transform → materialize → save | `convert.process_component` |
+| Per-component sanitize → transform → materialize → save | `convert.process_component(dtype=, load_weight=, finalize=, component_prefix=None)` — order rule for every recipe |
+| Register a local source flag | `convert.add_source_arg(parser, help=..., required=...)` |
+| Where to cache upstream downloads | `convert.source_download_dir(output_dir)` — a sibling `<output>-src`, not a child |
+| Quantization record (manifest) | `convert.quantization_manifest_fields(quantized=..., bits=..., group_size=...)` |
 | Quantize a component in place | `convert.quantize_component` |
 | Copy pipeline files, strictly | `convert.copy_required_files` |
 | Write `split_model.json` | `convert.write_split_model` |
@@ -52,16 +56,25 @@ them is drifting.
 | Publication metadata | `metadata.RecipeMetadata` |
 | Persist operator-supplied card metadata | `upload.persist_card_metadata` |
 
-Each of these replaced between 2 and 17 hand-written copies. Three latent
-defects were found in the process — the copies had drifted:
+**Every recipe now converts through `process_component`.** Its four parameters
+cover the major sources of variation:
 
-- two recipes' `validate()` reported failures and exited **0**;
-- matrix-game gated its quantization checks on a file it never wrote, so they
-  **never ran**;
-- `void-model --dry-run` **downloaded** several GB before honouring the flag.
+- `dtype`: None keeps each weight's dtype; an `mx.Dtype` casts every weight;
+  a callable `(key, weight) -> mx.Dtype | None` decides per weight.
+- `load_weight`: Adapter applied to each raw value (torch/numpy objects) before
+  anything else.
+- `finalize`: Receives the complete dict after the loop, returns the dict to
+  save (e.g. QKV fusion).
+- `component_prefix`: Prefix prepended to sanitized keys, or None for bare keys
+  (some published packs hold bare keys and must keep holding them).
 
-That is the argument for using the shared layer: not line count, but that
-independent copies diverge silently.
+This replaced between 2 and 17 hand-written copies in six recipes
+(`ltx-2.3`, `matrix-game-3.0`, `hunyuan3d-2.1`, `ernie-image`, `vjepa-2.1-vitl`,
+`vjepa-2.0-vitl`). `tests/parity/` pins all six to their published packs.
+The argument for using the shared layer is not line count, but that independent
+copies diverge silently: three latent defects were found during unification
+(`validate()` exit codes, matrix-game's gated checks, `void-model --dry-run`
+downloading).
 
 The same argument applies one level up, to numbers a recipe derives by hand
 rather than reuses. LTX-2.5's `validate()` checks each component's tensor
@@ -94,7 +107,7 @@ than invented keys.
 | `matrix-game-3.0` | Skywork/Matrix-Game-3.0 | safetensors + `.pth` | 6 | `--dit/--t5/--vae-checkpoint --skip-tokenizer` |
 | `cogvideox-fun-v1.5-5b-inp` | alibaba-pai/CogVideoX-Fun-V1.5-5b-InP | safetensors | 3 | `--source` |
 | `void-model` | netflix/void-model | safetensors | 2 passes | `--source` |
-| `hunyuan3d-2.1` | tencent/Hunyuan3D-2.1 | `.ckpt` + `.bin` + safetensors | 2 stages × 3 | `--stage --checkpoint --local-path --dino-path` |
+| `hunyuan3d-2.1` | tencent/Hunyuan3D-2.1 | `.ckpt` + `.bin` + safetensors | 2 stages × 3 | `--stage --source --dino-path` |
 | `ernie-image` | baidu/ERNIE-Image(-Turbo) | safetensors | 3 | `--variant --checkpoint` |
 | `ernie-image-pe` | baidu/ERNIE-Image-Turbo `/pe` | safetensors | 1 | `--checkpoint` |
 | `vjepa-2.1-vitl` | Meta CDN `.pt` (not on the Hub) | `.pt`, pickled wrapper | 2 | `--source` |

@@ -65,6 +65,12 @@ src/mlx_forge/
 
 Use the shared helpers rather than re-deriving them:
 
+- `convert.process_component(dtype=, load_weight=, finalize=, component_prefix=None)` —
+  convert every component through this shared loop. Its four parameters cover torch sources,
+  casts, whole-dict rewrites, and bare-key layouts; do not hand-roll the loop.
+- `convert.add_source_arg(parser, help=..., required=...)` — register a single local-source
+  flag as `--source`. Multi-file recipes (matrix-game's `--dit/--t5/--vae-checkpoint`) keep
+  their own flags.
 - `convert.add_common_convert_args()` — the
   `--output/--quantize/--bits/--group-size/--dry-run` block. Call it where
   `--output` belongs, then add recipe-specific arguments.
