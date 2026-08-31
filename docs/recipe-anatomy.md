@@ -60,7 +60,8 @@ them is drifting.
 cover the major sources of variation:
 
 - `dtype`: None keeps each weight's dtype; an `mx.Dtype` casts every weight;
-  a callable `(key, weight) -> mx.Dtype | None` decides per weight.
+  a callable `(new_key, weight) -> mx.Dtype | None` decides per weight. The key is
+  the sanitized name, not the raw upstream one.
 - `load_weight`: Adapter applied to each raw value (torch/numpy objects) before
   anything else.
 - `finalize`: Receives the complete dict after the loop, returns the dict to
@@ -69,8 +70,9 @@ cover the major sources of variation:
   (some published packs hold bare keys and must keep holding them).
 
 This replaced between 2 and 17 hand-written copies in six recipes
-(`ltx-2.3`, `matrix-game-3.0`, `hunyuan3d-2.1`, `ernie-image`, `vjepa-2.1-vitl`,
-`vjepa-2.0-vitl`). `tests/parity/` pins all six to their published packs.
+(`void-model`, `cogvideox-fun-v1.5-5b-inp`, `matrix-game-3.0`, `hunyuan3d-2.1`,
+`vjepa-2.1-vitl`, `vjepa-2.0-vitl`). `tests/parity/` pins all six to their
+published packs.
 The argument for using the shared layer is not line count, but that independent
 copies diverge silently: three latent defects were found during unification
 (`validate()` exit codes, matrix-game's gated checks, `void-model --dry-run`
