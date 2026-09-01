@@ -81,34 +81,19 @@ TABLE = [
         # with "main_image_encoder.model." (hunyuan3d_21.py:126-130) — a genuine drop.
         sanitizer_drops_keys=True,
     ),
-    pytest.param(
-        ComponentParity(
-            "hunyuan3d",
-            "paint_unet",
-            "upstream/hunyuan3d-paint-unet.json",
-            "diffusion_pytorch_model.bin",
-            PUB,
-            "paint_unet.safetensors",
-            h.sanitize_paint_unet_key,
-            None,
-            F16,
-            # ".to_out.1." -> None (dropout) is a genuine drop (hunyuan3d_21.py:194-195).
-            sanitizer_drops_keys=True,
-            complete_upstream_keys=complete_paint_unet_upstream_keys,
-        ),
-        marks=pytest.mark.xfail(
-            reason=(
-                "genuine drift, not a fixture artifact — hunyuan3d-2.1/paint_unet: "
-                "published pack (paint_unet.safetensors) still holds 28 un-renamed "
-                "'.processor.to_out_mr.0.*' keys (attn1/attn_refview, bias+weight, "
-                "across the down/mid/up blocks); current code would rename them away, "
-                "because sanitize_paint_unet_key does "
-                "'.processor.to_out_mr.0.' -> '.processor.to_out_mr.' "
-                "(hunyuan3d_21.py:199). See task-4-report.md."
-            ),
-            strict=True,
-        ),
-        id="paint_unet",
+    ComponentParity(
+        "hunyuan3d",
+        "paint_unet",
+        "upstream/hunyuan3d-paint-unet.json",
+        "diffusion_pytorch_model.bin",
+        PUB,
+        "paint_unet.safetensors",
+        h.sanitize_paint_unet_key,
+        None,
+        F16,
+        # ".to_out.1." -> None (dropout) is a genuine drop (hunyuan3d_21.py:194-195).
+        sanitizer_drops_keys=True,
+        complete_upstream_keys=complete_paint_unet_upstream_keys,
     ),
     ComponentParity(
         "hunyuan3d",

@@ -83,32 +83,18 @@ TABLE = [
         sanitizer_drops_keys=False,
         complete_upstream_keys=complete_dit_upstream_keys,
     ),
-    pytest.param(
-        ComponentParity(
-            "matrix-game",
-            "dit_distilled",
-            "upstream/matrix-game-dit-distilled.json",
-            "base_distilled_model/diffusion_pytorch_model.safetensors",
-            PUB,
-            "dit_distilled.safetensors",
-            mg.sanitize_dit_key,
-            "dit_distilled",
-            dtype_map=cast_f32_to_bf16,
-            sanitizer_drops_keys=False,
-            complete_upstream_keys=complete_dit_upstream_keys,
-        ),
-        marks=pytest.mark.xfail(
-            reason=(
-                "genuine drift, not a fixture artifact — matrix-game-3.0/dit_distilled: "
-                "published pack (dit_distilled.safetensors) holds F32 throughout "
-                "(1356 tensors); current code would emit BF16 throughout, because "
-                "_convert_dit (matrix_game_3_0.py:466-468) casts every F32 weight to "
-                "BF16 unconditionally and the distilled upstream checkpoint is F32 "
-                "throughout. See task-4-report.md."
-            ),
-            strict=True,
-        ),
-        id="dit_distilled",
+    ComponentParity(
+        "matrix-game",
+        "dit_distilled",
+        "upstream/matrix-game-dit-distilled.json",
+        "base_distilled_model/diffusion_pytorch_model.safetensors",
+        PUB,
+        "dit_distilled.safetensors",
+        mg.sanitize_dit_key,
+        "dit_distilled",
+        dtype_map=cast_f32_to_bf16,
+        sanitizer_drops_keys=False,
+        complete_upstream_keys=complete_dit_upstream_keys,
     ),
     ComponentParity(
         "matrix-game",

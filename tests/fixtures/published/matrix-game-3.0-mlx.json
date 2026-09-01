@@ -139,7 +139,7 @@
   },
   "dit_distilled.safetensors": {
     "dtypes": {
-      "F32": 1356
+      "BF16": 1356
     },
     "keys": [
       "dit_distilled.blocks.0.action_model.img_attn_k_norm.weight",
