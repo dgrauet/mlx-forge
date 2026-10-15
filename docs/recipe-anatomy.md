@@ -107,6 +107,7 @@ than invented keys.
 | `ltx-2.5` | Lightricks/LTX-2.5 (gated) | safetensors, pre-split | 2 DiT + text encoder + 2 video VAE + audio + duration head + upscalers | `--variant --skip-shared --lora --config-only` |
 | `ideogram-4` | ideogram-ai/ideogram-4-fp8 | **fp8** + scales | 4 | `--source` |
 | `matrix-game-3.0` | Skywork/Matrix-Game-3.0 | safetensors + `.pth` | 6 | `--dit/--t5/--vae-checkpoint --skip-tokenizer` |
+| `matrix-game-4.0` | Skywork/Matrix-Game-4.0 (+ pinned base `config.json`) | safetensors + `.pth` | 4 (3 scene DiTs + TAEHV); T5/VAE referenced in matrix-game-3.0-mlx | — |
 | `cogvideox-fun-v1.5-5b-inp` | alibaba-pai/CogVideoX-Fun-V1.5-5b-InP | safetensors | 3 | `--source` |
 | `void-model` | netflix/void-model | safetensors | 2 passes | `--source` |
 | `hunyuan3d-2.1` | tencent/Hunyuan3D-2.1 | `.ckpt` + `.bin` + safetensors | 2 stages × 3 | `--stage --source --dino-path` |
@@ -170,8 +171,8 @@ Declaring it makes `convert` fetch the file verbatim from upstream and `upload`
 **refuse to publish** without it. Leave it `None` for apache-2.0 or mit, which
 the SPDX identifier satisfies on its own.
 
-The fetch hangs off `write_split_model()`, the one function all eleven recipes
-call, so a recipe cannot forget it. It is best-effort there (a Hub hiccup must
+The fetch hangs off `write_split_model()`, the one function every recipe
+calls, so a recipe cannot forget it. It is best-effort there (a Hub hiccup must
 not destroy a long conversion) and strict in the upload path, which is where the
 obligation actually binds.
 

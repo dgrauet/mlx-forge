@@ -501,10 +501,20 @@ def download_hf_files(
     repo_id: str,
     filenames: list[str],
     download_dir: Path,
+    *,
+    revision: str | None = None,
 ) -> None:
     """Download files from HuggingFace Hub with error handling.
 
     Skips files already present in download_dir.
+
+    Args:
+        repo_id: Hub repository to download from.
+        filenames: Repo-relative paths to fetch.
+        download_dir: Local directory mirroring the repo tree.
+        revision: Commit, branch or tag to pin; None follows the default branch.
+            Pin it when upstream itself pins a dependency repo, so the
+            conversion reads the exact bytes the reference runtime verifies.
     """
     download_dir.mkdir(parents=True, exist_ok=True)
     for filename in filenames:
@@ -519,6 +529,7 @@ def download_hf_files(
                 repo_id=repo_id,
                 filename=filename,
                 local_dir=download_dir,
+                revision=revision,
             )
         except GatedRepoError:
             print(

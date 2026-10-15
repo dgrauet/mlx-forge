@@ -20,6 +20,7 @@ Convert, quantize, split, validate, and upload ML models for [Apple MLX](https:/
 | [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) (gated; pre-split video+audio DiT, 2 video VAEs, upscalers) | `ltx-2.5` | Stable |
 | [Ideogram 4](https://huggingface.co/ideogram-ai/ideogram-4-fp8) (FP8 text-to-image DiT) | `ideogram-4` | Stable |
 | [Matrix-Game 3.0](https://huggingface.co/Skywork/Matrix-Game-3.0) (interactive world model: DiT ×2 + UMT5-XXL + 3 VAEs) | `matrix-game-3.0` | Stable |
+| [Matrix-Game 4.0](https://huggingface.co/Skywork/Matrix-Game-4.0) (game re-renderer: 3 scene DiTs + TAEHV; T5/VAE shared with 3.0) | `matrix-game-4.0` | Experimental |
 | [CogVideoX-Fun 1.5](https://huggingface.co/alibaba-pai/CogVideoX-Fun-V1.5-5b-InP) (5B image-to-video inpainting) | `cogvideox-fun-v1.5-5b-inp` | Stable |
 | [VOID](https://huggingface.co/netflix/void-model) (Netflix dual-pass CogVideoX transformer) | `void-model` | Stable |
 | [Hunyuan3D 2.1](https://huggingface.co/tencent/Hunyuan3D-2.1) (3.3B shape DiT + 1.7B PBR paint UNet) | `hunyuan3d-2.1` | Stable |
@@ -145,7 +146,7 @@ mlx_forge/
     ├── __init__.py  # Registry (AVAILABLE_RECIPES) + the contract every recipe must satisfy
     ├── ltx_23.py    # LTX-2.3: key mapping, config, validation
     ├── ernie_image.py  # ERNIE-Image: 8B single-stream text-to-image DiT
-    └── ...          # 11 recipes in total — see AVAILABLE_RECIPES
+    └── ...          # 12 recipes in total — see AVAILABLE_RECIPES
 ```
 
 Generic tools live at the top level. Model-specific logic lives in **recipes**. Adding support for a new model means creating a new recipe file.
@@ -252,6 +253,7 @@ Each recipe has its own detailed guide with architecture, key mapping, known got
 - [ERNIE-Image](docs/models/ernie-image.md) — 8B single-stream text-to-image DiT (+ separate 3B `ernie-image-pe` Prompt Enhancer recipe)
 - [V-JEPA 2](docs/models/vjepa-2.md) — Meta video world model: ViT-L encoder + predictor, RoPE (2.1 `vjepa-2.1-vitl` / 2.0 `vjepa-2.0-vitl` + attentive probes)
 - [Matrix-Game 3.0](docs/models/matrix-game-3.0.md) — interactive world model: two DiT backbones, UMT5-XXL, three VAE variants
+- [Matrix-Game 4.0](docs/models/matrix-game-4.0.md) — scene-specialized causal video re-renderers (castle, ancient-egypt, racing) + TAEHV; T5/VAE referenced in the 3.0 pack
 
 `ideogram-4`, `cogvideox-fun-v1.5-5b-inp`, `void-model` and `hunyuan3d-2.1` have no
 dedicated guide yet — run `mlx-forge convert <recipe> --dry-run` for their conversion
