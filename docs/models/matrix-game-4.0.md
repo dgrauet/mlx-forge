@@ -41,6 +41,7 @@ mlx-forge validate matrix-game-4.0 models/matrix-game-4.0-mlx
  ├── driving_game/model.safetensors  (10.0 GB, BF16) ─► dit_racing.safetensors
  ├── */inference.json, */sink.png                    ─► copied, Hub tree kept
  ├── base/taew2_2.pth                (23 MB, fp16)   ─► taehv.safetensors
+ ├── LICENSE                                         ─► copied (Apache-2.0, the pack's licence)
  └── licenses/TAEHV-LICENSE                          ─► copied (MIT notice)
 
  alibaba-pai/Wan2.2-Fun-5B-Control @ b8bc1a65ab71 (pinned, as upstream's releases/models.json)
@@ -83,6 +84,10 @@ Each scene DiT is a causal finetune of Wan2.2-Fun-5B-Control (30 blocks, dim 307
 
 - **DiT**: the whole-file `model.` wrapper prefix is stripped (as the reference loader does), `ref_conv.*` is dropped if present, then Matrix-Game-3.0's Sequential → named-Linear mapping applies (`ffn.0` → `ffn_linear1`, `text_embedding.2` → `text_embedding_linear2`, …). `patch_embedding` Conv3d `(3072, 148, 1, 2, 2)` is reshaped to Linear `(3072, 592)`.
 - **TAEHV**: keys kept verbatim — the `encoder.N` / `decoder.N` indices encode where the parameter-free layers sit in the `nn.Sequential`. Every 4D tensor is a Conv2d and is transposed to channels-last.
+
+## Licence
+
+Apache-2.0, as upstream declares for the scene weights; the shared Wan/umT5 files are Apache-2.0 upstream too. The pack ships upstream's `LICENSE` and TAEHV's MIT notice under `licenses/`, both copied with the weights and checked by `validate`. Upstream's `licenses/MG4CF-LICENSE` is byte-identical to `LICENSE` and is not duplicated.
 
 ## Not converted
 

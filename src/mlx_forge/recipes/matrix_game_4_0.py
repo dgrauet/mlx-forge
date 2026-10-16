@@ -146,8 +146,12 @@ SCENE_FILES = [
     f"{folder}/{name}" for folder in SCENES.values() for name in ("inference.json", "sink.png")
 ]
 
-# TAEHV is MIT: its notice must travel with copies of the weights.
-LICENSE_FILES = ["licenses/TAEHV-LICENSE"]
+# Copied with the weights: upstream's Apache-2.0 LICENSE (section 4(a) asks
+# redistributors to pass a copy on; licenses/MG4CF-LICENSE upstream is the same
+# text, byte for byte, so it is not duplicated) and TAEHV's MIT notice, which
+# must travel with copies of those weights. Pipeline files rather than
+# METADATA.license_file, which the project reserves for bespoke licences.
+LICENSE_FILES = ["LICENSE", "licenses/TAEHV-LICENSE"]
 
 # Upstream DiT checkpoints are saved from a wrapper; the reference loader
 # (matrix_game/inference/loading.py) strips one of these whole-file prefixes.
@@ -184,9 +188,8 @@ METADATA = RecipeMetadata(
     name="matrix-game-4.0",
     source=REPO_ID,
     # Skywork/Matrix-Game-4.0 declares apache-2.0 for the scene weights; the
-    # shared Wan/umT5 files are apache-2.0 upstream too. TAEHV's MIT notice is
-    # shipped as a pipeline file (LICENSE_FILES), not through license_file,
-    # which describes the pack's own licence.
+    # shared Wan/umT5 files are apache-2.0 upstream too. The Apache text and
+    # TAEHV's MIT notice ship as pipeline files (LICENSE_FILES).
     license="apache-2.0",
     quantization_scope=(
         "DiT transformer-block Linear weights only (all three scenes), leaving the "
@@ -573,7 +576,7 @@ def _dry_run(args, output_dir: Path) -> None:
     print("  config.json, split_model.json")
     for scene, folder in SCENES.items():
         print(f"  {folder}/inference.json, {folder}/sink.png ({scene} contract)")
-    print("  licenses/TAEHV-LICENSE")
+    print(f"  {', '.join(LICENSE_FILES)}")
 
     print(f"\nReferenced, not copied ({SHARED_REPO_ID}@{SHARED_REVISION[:12]}):")
     for path in SHARED_FILES:

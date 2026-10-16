@@ -149,6 +149,11 @@ class TestLayout:
             assert f"{folder}/inference.json" in mg4.SCENE_FILES
             assert f"{folder}/sink.png" in mg4.SCENE_FILES
 
+    def test_licences_travel_with_the_weights(self):
+        # Apache-2.0 text for the scene weights, MIT notice for TAEHV.
+        assert mg4.LICENSE_FILES == ["LICENSE", "licenses/TAEHV-LICENSE"]
+        assert mg4.METADATA.license == "apache-2.0"
+
     def test_config_prefers_upstream_values_and_lists_scenes(self):
         cfg = mg4.build_config(
             {"in_dim": 148, "num_layers": 30}, {"racing": {"name": "City Racing"}}
