@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.13](https://github.com/dgrauet/mlx-forge/compare/v0.4.12...v0.4.13) (2026-10-20)
+
+
+### Features
+
+* add the Matrix-Game-4.0 recipe ([#102](https://github.com/dgrauet/mlx-forge/issues/102)) ([1ab97da](https://github.com/dgrauet/mlx-forge/commit/1ab97dae5e662d7d89b7a23a0e613c7ded75de2a))
+
+
+### Bug Fixes
+
+* **matrix-game-4.0:** ship the Apache-2.0 LICENSE with the weights ([#104](https://github.com/dgrauet/mlx-forge/issues/104)) ([b298d80](https://github.com/dgrauet/mlx-forge/commit/b298d80ce702020fa060908988241d64a312c00b))
+
 ## [0.4.12](https://github.com/dgrauet/mlx-forge/compare/v0.4.11...v0.4.12) (2026-08-28)
 
 
