@@ -520,7 +520,7 @@ class TestQuantizationIntegration:
 class TestDeltaWorkflowEndToEnd:
     """Wire test: convert delta → validate → upload --add-only → upload --card-only."""
 
-    def test_delta_workflow_glue(self, tmp_path, capsys):
+    def test_delta_workflow_glue(self, tmp_path, capsys, stub_github_licence):
         import argparse
         import json
         from unittest.mock import MagicMock, patch
