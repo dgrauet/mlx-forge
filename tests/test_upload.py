@@ -391,6 +391,7 @@ class TestUploadModeMutex:
             parser.parse_args(["upload", "models/foo", "--card-only", "--add-only"])
 
 
+@pytest.mark.usefixtures("stub_github_licence")
 class TestCardOnlyRemoteRefresh:
     """Remote-derived variants reach the card — assembled by the CLI, not here.
 

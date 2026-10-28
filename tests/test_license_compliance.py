@@ -130,25 +130,38 @@ def test_ltx_23_mirrors_its_upstream_declaration():
 # ---------------------------------------------------------------------------
 
 
+LTX23_LICENSE_LINK = "https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2"
+
+
 def _ltx_split_info() -> dict:
     return dict(load_recipe("ltx-2.3").METADATA.as_split_fields())
+
+
+def _hub_split_info() -> dict:
+    """LTX-2.3's declaration as it stood while its LICENSE lived on the Hub.
+
+    The copy mechanics below exercise the Hub fetch path, which the other
+    licence-carrying recipes still use; LTX-2.3 itself now fetches from GitHub.
+    """
+    info = _ltx_split_info()
+    info.pop("license_source")
+    return info
 
 
 def test_the_licence_link_shows_the_text_we_ship():
     """The link and the shipped copy must be one document, not two.
 
-    Upstream's card declares github.com/Lightricks/LTX-2/blob/main/LICENSE —
-    a 404, because that file is LICENSE.md. And the .md is no longer the same
-    agreement: on 2026-08-11 GitHub gained an "LTX-2.x" text dated August 2026,
-    30938 bytes against the 21399 the Hub still publishes, with §6 AI
-    Regulations obligations the shipped copy does not contain. A card saying
-    "a verbatim copy ships with them, and the upstream text is at X" must not
-    have X be a different document.
+    On 2026-10-22 upstream deleted the LICENSE it published on the Hub and
+    pointed its card at GitHub's LICENSE-2 (the LTX-2 agreement, revised in
+    wording). Not LICENSE (a two-entry index) nor LICENSE-2_x (LTX-2.5's
+    August 2026 agreement). A card saying "a verbatim copy ships with them, and
+    the upstream text is at X" must have X be the file we fetch.
     """
     metadata = load_recipe("ltx-2.3").METADATA
 
-    assert metadata.license_link == "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE"
-    assert "github.com/Lightricks/LTX-2/blob/main/LICENSE" not in (metadata.license_link or "")
+    assert metadata.license_link == LTX23_LICENSE_LINK
+    assert metadata.license_source == "github:Lightricks/LTX-2/LICENSE-2"
+    assert metadata.license_link.endswith("/" + metadata.license_source.rsplit("/", 1)[1])
 
 
 def test_a_recipe_shipping_a_licence_links_where_that_licence_lives():
@@ -172,7 +185,7 @@ def test_card_front_matter_names_and_links_the_agreement(tmp_path):
 
     assert front["license"] == "other"
     assert front["license_name"] == "ltx-2-community-license-agreement"
-    assert front["license_link"] == "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE"
+    assert front["license_link"] == LTX23_LICENSE_LINK
 
 
 def test_card_body_points_at_the_shipped_copy(tmp_path):
@@ -190,7 +203,7 @@ def test_card_body_points_at_the_shipped_copy(tmp_path):
     # to /tree/main/LICENSE, which is the directory route and 404s on a file.
     assert "(https://huggingface.co/dgrauet/ltx-2.3-mlx/blob/main/LICENSE)" in card
     assert "(./LICENSE)" not in card
-    assert "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE" in card
+    assert LTX23_LICENSE_LINK in card
     # One licence, stated once: no competing SPDX id elsewhere in the body.
     body = card.split("---\n", 2)[2]
     assert "apache" not in body.lower() and "MIT" not in body
@@ -248,7 +261,7 @@ def test_ensure_license_file_fetches_verbatim(tmp_path, monkeypatch):
 
     out = tmp_path / "model"
     out.mkdir()
-    convert.ensure_license_file(out, _ltx_split_info())
+    convert.ensure_license_file(out, _hub_split_info())
 
     assert seen == {"repo_id": "Lightricks/LTX-2.3", "filename": "LICENSE"}
     assert (out / "LICENSE").read_text() == text
@@ -276,7 +289,7 @@ def test_a_vouched_copy_is_kept_without_touching_the_network(tmp_path, monkeypat
     monkeypatch.setattr(convert, "hf_hub_download", explode)
 
     (tmp_path / "LICENSE").write_text("agreement\n")
-    info = _ltx_split_info()
+    info = _hub_split_info()
     info["license_provenance"] = {"LICENSE": {"repo": "x/y", "revision": None, "sha256": _DIGEST}}
 
     written = convert.ensure_license_file(tmp_path, info)
@@ -298,7 +311,7 @@ def test_a_copy_from_an_undocumented_source_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(convert, "hf_hub_download", explode)
 
     (tmp_path / "LICENSE").write_text("something else entirely\n")
-    info = _ltx_split_info()
+    info = _hub_split_info()
     info["license_provenance"] = {"LICENSE": {"repo": "x/y", "revision": None, "sha256": _DIGEST}}
 
     with pytest.raises(SystemExit, match="undocumented source"):
@@ -313,7 +326,7 @@ def test_an_unvouched_copy_is_checked_against_upstream(tmp_path, monkeypatch):
     monkeypatch.setattr(convert, "_upstream_revision", lambda repo: "deadbeef")
 
     (tmp_path / "LICENSE").write_text("agreement\n")
-    info = _ltx_split_info()
+    info = _hub_split_info()
     convert.ensure_license_file(tmp_path, info)
 
     assert info["license_provenance"]["LICENSE"] == {
@@ -336,7 +349,7 @@ def test_an_unvouched_copy_that_upstream_disowns_is_reported(tmp_path, monkeypat
     (tmp_path / "LICENSE").write_text("the January text\n")
 
     with pytest.raises(SystemExit, match="differs from"):
-        convert.ensure_license_file(tmp_path, _ltx_split_info())
+        convert.ensure_license_file(tmp_path, _hub_split_info())
     assert (tmp_path / "LICENSE").read_text() == "the January text\n", "must not overwrite"
 
 
@@ -349,7 +362,7 @@ def test_ensure_license_file_refuses_to_publish_without_one(tmp_path, monkeypatc
     monkeypatch.setattr(convert, "hf_hub_download", fail)
 
     with pytest.raises(SystemExit):
-        convert.ensure_license_file(tmp_path, _ltx_split_info())
+        convert.ensure_license_file(tmp_path, _hub_split_info())
     assert not (tmp_path / "LICENSE").exists()
 
 
@@ -361,7 +374,7 @@ def test_ensure_license_file_does_not_destroy_a_conversion(tmp_path, monkeypatch
 
     monkeypatch.setattr(convert, "hf_hub_download", fail)
 
-    assert convert.ensure_license_file(tmp_path, _ltx_split_info(), strict=False) == []
+    assert convert.ensure_license_file(tmp_path, _hub_split_info(), strict=False) == []
     assert "WARNING" in capsys.readouterr().out
 
 
@@ -372,7 +385,7 @@ def test_zero_byte_copy_is_treated_as_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(convert, "hf_hub_download", lambda **kw: str(good))
 
     (tmp_path / "LICENSE").write_bytes(b"")
-    written = convert.ensure_license_file(tmp_path, _ltx_split_info())
+    written = convert.ensure_license_file(tmp_path, _hub_split_info())
 
     assert written == [tmp_path / "LICENSE"]
     assert (tmp_path / "LICENSE").read_text() == "real text\n"
@@ -396,7 +409,7 @@ def test_every_recipe_materialises_its_licence(tmp_path, monkeypatch):
 
     out = tmp_path / "out"
     out.mkdir()
-    convert.write_split_model(out, _ltx_split_info())
+    convert.write_split_model(out, _hub_split_info())
 
     assert (out / "LICENSE").read_text() == "agreement\n"
     manifest = json.loads((out / "split_model.json").read_text())
@@ -421,8 +434,9 @@ def test_an_upload_persists_the_provenance_it_established(tmp_path, monkeypatch)
 
     src = tmp_path / "src"
     src.write_text("agreement\n")
-    monkeypatch.setattr(convert, "hf_hub_download", lambda **kw: str(src))
-    monkeypatch.setattr(convert, "_upstream_revision", lambda repo: "deadbeef")
+    monkeypatch.setattr(
+        convert, "fetch_github_license", lambda repo, path: (src.read_bytes(), "deadbeef")
+    )
 
     class FakeApi:
         def model_info(self, *a, **kw):
@@ -445,7 +459,7 @@ def test_an_upload_persists_the_provenance_it_established(tmp_path, monkeypatch)
 
     stored = json.loads((model_dir / "split_model.json").read_text())
     assert stored["license_provenance"]["LICENSE"]["sha256"] == _DIGEST
-    assert stored["license_provenance"]["LICENSE"]["repo"] == "Lightricks/LTX-2.3"
+    assert stored["license_provenance"]["LICENSE"]["repo"] == "github:Lightricks/LTX-2"
 
 
 def test_card_only_refresh_pushes_the_licence(tmp_path, monkeypatch):
