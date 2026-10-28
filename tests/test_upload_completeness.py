@@ -434,6 +434,7 @@ class TestCardOnlyListingProvenance:
         assert listing["transformer.safetensors"] == 10, "the local files are what goes up"
 
 
+@pytest.mark.usefixtures("stub_github_licence")
 class TestDryRunShowsWhatIsPushed:
     """--dry-run is only useful if it renders the same bytes a real run pushes.
 
@@ -460,12 +461,20 @@ class TestDryRunShowsWhatIsPushed:
         return api
 
     def _run(self, model_dir, api, *extra):
+        from huggingface_hub.errors import RepositoryNotFoundError
+
         from mlx_forge.cli import main
+
+        def no_published_card(*args, **kwargs):
+            # test/repo is new: the dry run diffs against an empty card,
+            # without asking the real Hub.
+            raise RepositoryNotFoundError("no repo", response=MagicMock())
 
         argv = ["mlx-forge", "upload", str(model_dir), "--repo-id", "test/repo", "--card-only"]
         with (
             patch("sys.argv", argv + list(extra)),
             patch("huggingface_hub.HfApi", return_value=api),
+            patch("huggingface_hub.hf_hub_download", no_published_card),
         ):
             main()
 

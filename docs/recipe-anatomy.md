@@ -156,7 +156,8 @@ license_source="github:Lightricks/LTX-2/LICENSE-2_x",  # when upstream ships non
 ```
 
 An upstream that publishes its agreement outside the Hub — LTX-2.5 has no
-`LICENSE` file in its repo — declares `license_source`. The provenance record
+`LICENSE` file in its repo, and LTX-2.3 deleted its own on 2026-10-22 in favour
+of GitHub's `LICENSE-2` — declares `license_source`. The provenance record
 is unchanged in shape: a GitHub repo has an id and a commit as a Hub repo has
 an id and a revision. Where the weights themselves carry the text, as LTX's do
 in their safetensors `__metadata__`, the recipe checks the copy against it and

@@ -120,23 +120,24 @@ METADATA = RecipeMetadata(
     name="ltx-2.3",
     source="Lightricks/LTX-2.3",
     # Mirrors what Lightricks/LTX-2.3 declares. Converting to MLX and quantising
-    # makes our packs "Derivatives" under §1.5 of the LTX-2.x Community License,
+    # makes our packs "Derivatives" under §1.5 of the LTX-2 Community License,
     # and §3.2 obliges us to give any third-party recipient a copy of the
     # agreement — hence license_file, not just the link.
     license="other",
     # ltx23_should_quantize: transformer_blocks Linear .weight only.
     quantization_scope="transformer block Linear weights only",
     license_name="ltx-2-community-license-agreement",
-    # Deliberately NOT the link upstream's own card declares
-    # (github.com/Lightricks/LTX-2/blob/main/LICENSE): that file is LICENSE.md,
-    # so the URL has always been a 404. Nor the corrected .md URL — on
-    # 2026-08-11 GitHub gained an "LTX-2.x" agreement dated August 11 2026,
-    # 30938 bytes against the 21399 still published on the Hub, adding §6 AI
-    # Regulations obligations and an Acceptable Use Policy by reference.
-    # This points at the exact text we ship, byte for byte: the agreement these
-    # weights were obtained under, and the one §3.2 obliges us to pass on.
-    license_link="https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
+    # On 2026-10-22 (Hub commit c1521179, "Update license to LTX-2 Community
+    # License") upstream deleted the LICENSE it had published on the Hub and
+    # pointed its card at GitHub's LICENSE-2: the LTX-2 agreement, still dated
+    # January 5 2026 but revised in wording ("more than fifty percent" Control,
+    # renumbered sections). Not the LTX-2.x agreement of August 11 2026
+    # (LICENSE-2_x, LTX-2.5's), nor the two-entry LICENSE index. We follow the
+    # card: this is the text upstream now distributes 2.3 under, and the one
+    # §3.2 obliges us to pass on. Shipped under the name LICENSE, as before.
+    license_link="https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2",
     license_file="LICENSE",
+    license_source="github:Lightricks/LTX-2/LICENSE-2",
     usage_url="https://github.com/dgrauet/ltx-2-mlx",
     usage_note="a native MLX inference pipeline for LTX-2.3 on Apple Silicon",
     # Verbatim from the inference project's own README. Raw string: a
