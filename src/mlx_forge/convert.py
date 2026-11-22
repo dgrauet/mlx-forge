@@ -67,7 +67,7 @@ def add_common_convert_args(
         "--bits",
         type=int,
         default=bits_default,
-        choices=[4, 8],
+        choices=[4, 5, 6, 8],
         help=f"Quantization bits (default: {bits_default})",
     )
     parser.add_argument(

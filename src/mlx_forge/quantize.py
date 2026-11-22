@@ -123,7 +123,7 @@ def quantize_weights(
     for key in tqdm(keys, desc=desc, leave=False):
         weight = to_quantize.pop(key)
 
-        if weight.shape[-1] % group_size != 0:
+        if weight.shape[-1] % group_size != 0 or (weight.shape[-1] * bits) % 32 != 0:
             skipped.append((key, weight.shape))
             # Materialize before keeping it: this tensor was NOT in the to_keep
             # batch above, and the mx.quantize() calls in the remaining

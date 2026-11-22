@@ -108,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--bits",
         type=int,
         default=8,
-        choices=[4, 8],
+        choices=[4, 5, 6, 8],
         help="Bits (default: 8)",
     )
     quantize_parser.add_argument(
